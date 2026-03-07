@@ -1774,7 +1774,13 @@ const BillingTab = ({ userProfile }) => {
     supabase.from("invoices").select("id, invoice_number, payment_id, issued_at").eq("user_id", userProfile.id).order("issued_at", { ascending: false })
       .then(({ data }) => {
         const map = {};
-        (data || []).forEach(inv => { if (inv.payment_id) map[inv.payment_id] = inv; });
+        (data || []).forEach(inv => {
+          if (inv.payment_id) map[inv.payment_id] = inv;
+          // Also store by invoice id for fallback lookup
+          map[`inv_${inv.id}`] = inv;
+        });
+        // If there are invoices without payment_id, attach them to unmatched paid payments later via __all
+        map.__all = data || [];
         setInvoices(map);
       });
   }, [userProfile?.id]);
@@ -1829,25 +1835,29 @@ const BillingTab = ({ userProfile }) => {
                 <span style={{ fontSize: 12, color: "var(--mx)", flex: 1, marginLeft: 12 }}>{p.description}</span>
                 <span style={{ fontWeight: 600, fontSize: 13, marginRight: 12 }}>{p.amount}</span>
                 <Badge color={statusColor} size="sm">{statusLabel}</Badge>
-                {p.status === "paid" && invoices[p.id] && (
-                  <a
-                    href={`/api/get-invoice?payment_id=${p.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      const { data: { session } } = await supabase.auth.getSession();
-                      const win = window.open("about:blank", "_blank");
-                      const res = await fetch(`/api/get-invoice?payment_id=${p.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
-                      const html = await res.text();
-                      win.document.write(html);
-                      win.document.close();
-                    }}
-                    style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--pr-h)", textDecoration: "none", padding: "3px 8px", border: "1px solid var(--pr)", borderRadius: "var(--rd)", whiteSpace: "nowrap", cursor: "pointer" }}
-                  >
-                    ⬇ Factuur
-                  </a>
-                )}
+                {p.status === "paid" && (() => {
+                  // Find invoice: prefer payment_id match, fallback to most recent invoice for this payment index
+                  const matched = invoices[p.id];
+                  const paidIdx = payments.filter((x, xi) => x.status === "paid" && xi <= payments.indexOf(p)).length - 1;
+                  const fallback = !matched && invoices.__all?.length > 0 ? (invoices.__all[paidIdx] || invoices.__all[0]) : null;
+                  const inv = matched || fallback;
+                  if (!inv) return null;
+                  const invoiceParam = matched ? `payment_id=${p.id}` : `id=${inv.id}`;
+                  return (
+                    <button
+                      onClick={async () => {
+                        const { data: { session } } = await supabase.auth.getSession();
+                        const win = window.open("about:blank", "_blank");
+                        const res = await fetch(`/api/get-invoice?${invoiceParam}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+                        const html = await res.text();
+                        win.document.write(html); win.document.close();
+                      }}
+                      style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--pr-h)", background: "none", padding: "3px 8px", border: "1px solid var(--pr)", borderRadius: "var(--rd)", whiteSpace: "nowrap", cursor: "pointer" }}
+                    >
+                      ⬇ Factuur
+                    </button>
+                  );
+                })()}
               </div>
             );
           })}
