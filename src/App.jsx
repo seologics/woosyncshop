@@ -799,6 +799,300 @@ const ConnectedSitesView = ({ products, sites }) => {
   );
 };
 
+// ─── Marketing View ───────────────────────────────────────────────────────────
+const EXPIRY_OPTIONS = [
+  { label: "1 uur vanaf nu",    hours: 1 },
+  { label: "2 uur vanaf nu",    hours: 2 },
+  { label: "3 uur vanaf nu",    hours: 3 },
+  { label: "8 uur vanaf nu",    hours: 8 },
+  { label: "24 uur vanaf nu",   hours: 24 },
+  { label: "3 dagen vanaf nu",  hours: 72 },
+  { label: "1 week vanaf nu",   hours: 168 },
+];
+
+const DISCOUNT_TYPES = [
+  { value: "percent",        label: "Procentuele korting" },
+  { value: "fixed_cart",     label: "Vaste winkelwagenkorting" },
+  { value: "fixed_product",  label: "Vaste productkorting" },
+];
+
+const CouponManager = ({ activeSite, user }) => {
+  const [hasAdvCoupons, setHasAdvCoupons] = useState(null); // null=checking, true/false
+  const [checkingPlugin, setCheckingPlugin] = useState(false);
+  const [form, setForm] = useState({
+    code: "",
+    discount_type: "percent",
+    amount: "",
+    usage_limit: "",
+    usage_limit_per_user: "",
+    use_schedule: true,
+    expiry_hours: 24,
+  });
+  const [creating, setCreating] = useState(false);
+  const [result, setCouponResult] = useState(null); // { ok, coupon_url, coupon_code, error }
+  const [codeGenerated, setCodeGenerated] = useState(false);
+
+  // Check if Advanced Coupons is installed on the active shop
+  useEffect(() => {
+    if (!activeSite) return;
+    setHasAdvCoupons(null);
+    setCheckingPlugin(true);
+    const checkPlugin = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        const res = await fetch("/api/woo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ shopId: activeSite.id, endpoint: "system_status", method: "GET" }),
+        });
+        if (!res.ok) { setHasAdvCoupons(false); return; }
+        const d = await res.json();
+        const plugins = d.active_plugins || [];
+        const hasIt = plugins.some(p =>
+          (p.plugin || p.name || "").toLowerCase().includes("advanced-coupons") ||
+          (p.plugin || p.name || "").toLowerCase().includes("advanced_coupons")
+        );
+        setHasAdvCoupons(hasIt);
+      } catch { setHasAdvCoupons(false); }
+      finally { setCheckingPlugin(false); }
+    };
+    checkPlugin();
+  }, [activeSite?.id]);
+
+  const generateCode = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const code = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+    setForm(f => ({ ...f, code }));
+    setCodeGenerated(true);
+    setCouponResult(null);
+  };
+
+  const createCoupon = async () => {
+    if (!form.code || !form.amount) return;
+    setCreating(true);
+    setCouponResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/coupon-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          shopId: activeSite.id,
+          code: form.code.toUpperCase().trim(),
+          discount_type: form.discount_type,
+          amount: form.amount,
+          usage_limit: form.usage_limit ? parseInt(form.usage_limit) : null,
+          usage_limit_per_user: form.usage_limit_per_user ? parseInt(form.usage_limit_per_user) : null,
+          use_schedule: form.use_schedule,
+          expiry_hours: form.expiry_hours,
+          has_adv_coupons: hasAdvCoupons,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Aanmaken mislukt");
+      setCouponResult(d);
+      // reset form code for next coupon
+      setForm(f => ({ ...f, code: "", amount: "" }));
+      setCodeGenerated(false);
+    } catch (e) {
+      setCouponResult({ ok: false, error: e.message });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
+
+  if (!activeSite) return (
+    <div style={{ padding: "40px 0", textAlign: "center", color: "var(--mx)", fontSize: 13 }}>
+      Selecteer een shop om kortingscodes te beheren.
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 680 }}>
+
+      {/* Plugin status banner */}
+      {checkingPlugin ? (
+        <div style={{ padding: "10px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", fontSize: 12, color: "var(--mx)", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span> Plugin status controleren voor {activeSite.name}...
+        </div>
+      ) : hasAdvCoupons === true ? (
+        <div style={{ padding: "10px 14px", background: "rgba(34,197,94,0.08)", borderRadius: "var(--rd)", border: "1px solid rgba(34,197,94,0.25)", fontSize: 12, color: "var(--gr)", display: "flex", alignItems: "center", gap: 8 }}>
+          ✓ Advanced Coupons for WooCommerce gedetecteerd — alle functies beschikbaar inclusief URL-kortingscodes
+        </div>
+      ) : hasAdvCoupons === false ? (
+        <div style={{ padding: "10px 14px", background: "rgba(251,191,36,0.08)", borderRadius: "var(--rd)", border: "1px solid rgba(251,191,36,0.3)", fontSize: 12, color: "var(--am)", display: "flex", gap: 8 }}>
+          <span>⚠</span>
+          <span>Advanced Coupons plugin niet gevonden op {activeSite.name}. Datumplanning uitgeschakeld. <a href="https://wordpress.org/plugins/advanced-coupons-for-woocommerce-free/" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)", textDecoration: "none" }}>Plugin installeren →</a></span>
+        </div>
+      ) : null}
+
+      {/* Success result */}
+      {result?.ok && (
+        <div style={{ padding: 16, background: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "var(--rd-lg)" }}>
+          <div style={{ fontWeight: 700, color: "var(--gr)", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>✓</span> Kortingscode aangemaakt
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.04em" }}>Kortingscode</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <code style={{ background: "var(--s3)", padding: "4px 10px", borderRadius: 4, fontSize: 15, fontWeight: 700, letterSpacing: "0.1em", border: "1px solid var(--b1)", color: "var(--gr)" }}>{result.coupon_code}</code>
+                <Btn variant="secondary" size="sm" onClick={() => copyToClipboard(result.coupon_code)}>📋 Kopieer</Btn>
+              </div>
+            </div>
+            {result.coupon_url && (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.04em" }}>Kortingsbon URL</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <code style={{ background: "var(--s3)", padding: "4px 10px", borderRadius: 4, fontSize: 12, border: "1px solid var(--b1)", color: "var(--pr-h)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.coupon_url}</code>
+                  <Btn variant="secondary" size="sm" onClick={() => copyToClipboard(result.coupon_url)}>📋 Kopieer</Btn>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 4 }}>
+                  Bezoekers die op deze URL klikken krijgen automatisch de kortingscode toegepast.
+                </div>
+              </div>
+            )}
+            {result.expires_at && (
+              <div style={{ fontSize: 12, color: "var(--mx)" }}>⏰ Vervalt op: {new Date(result.expires_at).toLocaleString("nl-NL")}</div>
+            )}
+          </div>
+          <Btn variant="ghost" size="sm" onClick={() => setCouponResult(null)} style={{ marginTop: 10 }}>Nieuwe kortingscode aanmaken</Btn>
+        </div>
+      )}
+
+      {result?.ok === false && (
+        <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--re)" }}>
+          ✗ {result.error}
+        </div>
+      )}
+
+      {/* Coupon form */}
+      {!result?.ok && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Code */}
+          <Field label="Waardebon code" required>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Inp
+                value={form.code}
+                onChange={e => { setForm(f => ({ ...f, code: e.target.value.toUpperCase() })); setCouponResult(null); }}
+                placeholder="Bijv. ZOMER10"
+                style={{ flex: 1, fontFamily: "monospace", fontWeight: 600, letterSpacing: "0.05em" }}
+              />
+              <Btn variant="secondary" size="sm" onClick={generateCode}>Genereer</Btn>
+            </div>
+          </Field>
+
+          {/* Discount type + amount */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Kortingstype">
+              <Sel
+                value={form.discount_type}
+                onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}
+                options={DISCOUNT_TYPES}
+              />
+            </Field>
+            <Field label={form.discount_type === "percent" ? "Kortingspercentage (%)" : "Kortingsbedrag (€)"} required>
+              <Inp
+                value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                type="number"
+                placeholder={form.discount_type === "percent" ? "Bijv. 10" : "Bijv. 5.00"}
+              />
+            </Field>
+          </div>
+
+          {/* Usage limits */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Gebruikslimiet per waardebon" hint="Leeg = onbeperkt">
+              <Inp
+                value={form.usage_limit}
+                onChange={e => setForm(f => ({ ...f, usage_limit: e.target.value }))}
+                type="number"
+                placeholder="Onbeperkt gebruik"
+              />
+            </Field>
+            <Field label="Gebruikslimiet per klant" hint="Leeg = onbeperkt">
+              <Inp
+                value={form.usage_limit_per_user}
+                onChange={e => setForm(f => ({ ...f, usage_limit_per_user: e.target.value }))}
+                type="number"
+                placeholder="Onbeperkt gebruik"
+              />
+            </Field>
+          </div>
+
+          {/* Date Range Schedule */}
+          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: `1px solid ${form.use_schedule ? "rgba(91,91,214,0.4)" : "var(--b1)"}`, transition: "border-color 0.2s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: form.use_schedule ? 14 : 0 }}>
+              <input
+                type="checkbox"
+                id="use-schedule"
+                checked={form.use_schedule}
+                onChange={e => setForm(f => ({ ...f, use_schedule: e.target.checked }))}
+                style={{ width: 16, height: 16, cursor: "pointer" }}
+                disabled={hasAdvCoupons === false}
+              />
+              <label htmlFor="use-schedule" style={{ fontSize: 13, fontWeight: 600, cursor: hasAdvCoupons === false ? "not-allowed" : "pointer", color: hasAdvCoupons === false ? "var(--dm)" : "var(--tx)" }}>
+                Date Range Schedules {hasAdvCoupons === false && <span style={{ fontWeight: 400, fontSize: 11, color: "var(--dm)" }}>(vereist Advanced Coupons)</span>}
+              </label>
+            </div>
+            {form.use_schedule && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Startdatum coupon" hint="Wordt ingesteld op nu (WooCommerce direct geldig)">
+                  <Inp value="Nu (direct geldig)" onChange={() => {}} style={{ color: "var(--dm)" }} />
+                </Field>
+                <Field label="Vervaldatum coupon">
+                  <Sel
+                    value={form.expiry_hours}
+                    onChange={e => setForm(f => ({ ...f, expiry_hours: parseInt(e.target.value) }))}
+                    options={EXPIRY_OPTIONS.map(o => ({ value: o.hours, label: o.label }))}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
+
+          <Btn
+            variant="primary"
+            onClick={createCoupon}
+            disabled={creating || !form.code || !form.amount}
+            icon={creating ? <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span> : "🎟"}
+          >
+            {creating ? "Aanmaken..." : "Kortingscode aanmaken"}
+          </Btn>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MarketingView = ({ activeSite, shops, user }) => {
+  const [marketingTab, setMarketingTab] = useState("coupons");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Marketing</h2>
+        <p style={{ fontSize: 13, color: "var(--mx)" }}>Beheer kortingscodes en marketingacties voor {activeSite?.name || "je shops"}.</p>
+      </div>
+      <Tabs
+        tabs={[{ id: "coupons", label: "🎟 Kortingscodes", icon: "" }]}
+        active={marketingTab}
+        onChange={setMarketingTab}
+        size="sm"
+      />
+      {marketingTab === "coupons" && <CouponManager activeSite={activeSite} user={user} />}
+    </div>
+  );
+};
+
 // ─── Hreflang Manager ─────────────────────────────────────────────────────────
 const HreflangView = ({ sites }) => {
   const [mappings, setMappings] = useState([
@@ -1564,7 +1858,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
 
       {/* View Tabs */}
       <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
-        {[["products", "📦 Producten"], ["connected", "🔗 Verbonden"], ["hreflang", "🌐 Hreflang"], ["settings", "⚙ Instellingen"], ...(isAdmin ? [["admin", "🛡 Admin"]] : [])].map(([id, label]) => (
+        {[["products", "📦 Producten"], ["connected", "🔗 Verbonden"], ["hreflang", "🌐 Hreflang"], ["marketing", "📣 Marketing"], ["settings", "⚙ Instellingen"], ...(isAdmin ? [["admin", "🛡 Admin"]] : [])].map(([id, label]) => (
           <button key={id} onClick={() => setActiveView(id)} style={{ padding: "5px 12px", background: activeView === id ? (id === "admin" ? "rgba(239,68,68,0.15)" : "var(--s2)") : "transparent", border: activeView === id ? (id === "admin" ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--b2)") : "1px solid transparent", borderRadius: "var(--rd)", cursor: "pointer", color: activeView === id ? (id === "admin" ? "var(--re)" : "var(--tx)") : id === "admin" ? "rgba(239,68,68,0.7)" : "var(--mx)", fontSize: 12, fontWeight: activeView === id ? 600 : 400, transition: "all 0.15s" }}>
             {label}
           </button>
@@ -1610,7 +1904,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 };
 
 // ─── User Dashboard ────────────────────────────────────────────────────────────
-const VALID_VIEWS = ["products", "connected", "hreflang", "settings"];
+const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "settings"];
 
 const Dashboard = ({ user, onLogout }) => {
   const [shops, setShops] = useState([]);
@@ -1764,6 +2058,7 @@ const Dashboard = ({ user, onLogout }) => {
             )}
             {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} />}
             {activeView === "hreflang" && <HreflangView sites={shops} />}
+            {activeView === "marketing" && <MarketingView activeSite={activeSite} shops={shops} user={user} />}
           </>
         )}
         {activeView === "settings" && (
