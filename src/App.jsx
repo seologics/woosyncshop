@@ -1147,6 +1147,10 @@ const AdminPanel = () => {
   const [editUser, setEditUser] = useState(null);
   const [paymentsData, setPaymentsData] = useState(null);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [invoiceUser, setInvoiceUser] = useState(null);
+  const [userInvoices, setUserInvoices] = useState([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
 
   const loadPayments = async () => {
     setPaymentsLoading(true);
@@ -1261,11 +1265,6 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
 
         {/* Users */}
         {adminTab === "users" && (() => {
-          const [showArchived, setShowArchived] = React.useState(false);
-          const [invoiceUser, setInvoiceUser] = React.useState(null);
-          const [userInvoices, setUserInvoices] = React.useState([]);
-          const [invoicesLoading, setInvoicesLoading] = React.useState(false);
-
           const loadInvoices = async (u) => {
             setInvoiceUser(u); setInvoicesLoading(true);
             try {
