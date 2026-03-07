@@ -1166,14 +1166,21 @@ const AdminPanel = () => {
   const updUser = (id, field, val) => setUsers(us => us.map(u => u.id === id ? { ...u, [field]: val } : u));
   const saveUser = async (u) => {
     try {
-      await supabase.from("user_profiles").update({
-        plan: u.plan, max_shops: u.max_shops, is_admin: u.is_admin,
+      const { error } = await supabase.from("user_profiles").update({
+        plan: u.plan,
+        max_shops: u.max_shops ? parseInt(u.max_shops) : 10,
+        is_admin: u.is_admin,
         ai_taxonomy_enabled: u.ai_taxonomy_enabled,
         ai_taxonomy_model: u.ai_taxonomy_model,
         ai_taxonomy_threshold: u.ai_taxonomy_threshold,
-        gemini_model: u.gemini_model, img_max_kb: u.img_max_kb,
-        img_quality: u.img_quality, img_max_width: u.img_max_width,
+        gemini_model: u.gemini_model,
+        img_max_kb: u.img_max_kb ? parseInt(u.img_max_kb) : null,
+        img_quality: u.img_quality ? parseInt(u.img_quality) : null,
+        img_max_width: u.img_max_width ? parseInt(u.img_max_width) : null,
       }).eq("id", u.id);
+      if (error) throw error;
+      // Refresh user list to reflect saved values
+      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, ...u } : usr));
       setEditUser(null);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
   };
@@ -1255,7 +1262,7 @@ const AdminPanel = () => {
 
       {/* Per-user config overlay */}
       {editUser && (
-        <Overlay open onClose={() => setEditUser(null)} width={580} title={`Configuratie: ${editUser.name}`}>
+        <Overlay open onClose={() => setEditUser(null)} width={580} title={`Configuratie: ${editUser.name || editUser.email || "gebruiker"}`}>
           <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", gap: 16, alignItems: "center" }}>
               <div>
@@ -1320,7 +1327,7 @@ const AdminPanel = () => {
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 8 }}>
               <Btn variant="secondary" onClick={() => setEditUser(null)}>Annuleren</Btn>
-              <Btn variant="primary" onClick={() => { updUser(editUser.id, "plan", editUser.plan); setEditUser(null); }}>Opslaan</Btn>
+              <Btn variant="primary" onClick={() => saveUser(editUser)}>Opslaan</Btn>
             </div>
           </div>
         </Overlay>
