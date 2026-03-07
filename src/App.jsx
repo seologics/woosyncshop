@@ -1728,6 +1728,18 @@ const BillingTab = ({ userProfile }) => {
   const isPending = userProfile?.plan === "pro" && !userProfile?.mollie_customer_id;
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [invoices, setInvoices] = useState({}); // keyed by payment_id
+
+  useEffect(() => {
+    if (isFreeForever || !userProfile?.id) return;
+    // Load invoices from Supabase for download links
+    supabase.from("invoices").select("id, invoice_number, payment_id, issued_at").eq("user_id", userProfile.id).order("issued_at", { ascending: false })
+      .then(({ data }) => {
+        const map = {};
+        (data || []).forEach(inv => { if (inv.payment_id) map[inv.payment_id] = inv; });
+        setInvoices(map);
+      });
+  }, [userProfile?.id]);
 
   useEffect(() => {
     if (isFreeForever || !userProfile?.id) return;
@@ -1779,6 +1791,25 @@ const BillingTab = ({ userProfile }) => {
                 <span style={{ fontSize: 12, color: "var(--mx)", flex: 1, marginLeft: 12 }}>{p.description}</span>
                 <span style={{ fontWeight: 600, fontSize: 13, marginRight: 12 }}>{p.amount}</span>
                 <Badge color={statusColor} size="sm">{statusLabel}</Badge>
+                {p.status === "paid" && invoices[p.id] && (
+                  <a
+                    href={`/api/get-invoice?payment_id=${p.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      const { data: { session } } = await supabase.auth.getSession();
+                      const win = window.open("about:blank", "_blank");
+                      const res = await fetch(`/api/get-invoice?payment_id=${p.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+                      const html = await res.text();
+                      win.document.write(html);
+                      win.document.close();
+                    }}
+                    style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--pr-h)", textDecoration: "none", padding: "3px 8px", border: "1px solid var(--pr)", borderRadius: "var(--rd)", whiteSpace: "nowrap", cursor: "pointer" }}
+                  >
+                    ⬇ Factuur
+                  </a>
+                )}
               </div>
             );
           })}
