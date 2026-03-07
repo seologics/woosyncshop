@@ -1814,6 +1814,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
 
 // ─── Top Nav ──────────────────────────────────────────────────────────────────
 const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user }) => {
+  const [avatarOpen, setAvatarOpen] = React.useState(false);
   const [siteOpen, setSiteOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -1873,8 +1874,37 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
         <Btn variant="accent" size="sm" onClick={handlePush} disabled={pushing} icon={pushing ? <span className="spin">↻</span> : "↑"}>
           {pushing ? "Pushen..." : "Push naar shops"}
         </Btn>
-        <div onClick={() => { setActiveView("settings"); }} title="Profiel & instellingen" style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--pr)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
-          {(user?.name || user?.email || "?")[0].toUpperCase()}
+        <div style={{ position: "relative" }}>
+          <div
+            onClick={() => setAvatarOpen(o => !o)}
+            title="Account"
+            style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--pr)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0, userSelect: "none" }}
+          >
+            {(user?.name || user?.email || "?")[0].toUpperCase()}
+          </div>
+          {avatarOpen && (
+            <>
+              <div onClick={() => setAvatarOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 99 }} />
+              <div style={{ position: "absolute", top: 38, right: 0, zIndex: 100, background: "var(--s1)", border: "1px solid var(--b2)", borderRadius: "var(--rd-lg)", boxShadow: "0 8px 24px rgba(0,0,0,0.3)", minWidth: 180, overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--b1)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name || user?.email}</div>
+                  <div style={{ fontSize: 11, color: "var(--dm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email}</div>
+                </div>
+                <button onClick={() => { setActiveView("settings"); setAvatarOpen(false); }} style={{ width: "100%", padding: "10px 16px", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8 }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--s2)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  ⚙ Instellingen
+                </button>
+                <button onClick={() => { setAvatarOpen(false); onLogout(); }} style={{ width: "100%", padding: "10px 16px", textAlign: "left", background: "transparent", border: "none", borderTop: "1px solid var(--b1)", cursor: "pointer", fontSize: 13, color: "var(--re)", display: "flex", alignItems: "center", gap: 8 }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.07)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  ⎋ Afmelden
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

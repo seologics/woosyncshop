@@ -15,26 +15,39 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: 'Naam, e-mail en bericht zijn verplicht' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
   }
 
-  const supabase = createClient(
-    Netlify.env.get('SUPABASE_URL'),
-    Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  )
+  const supabaseUrl = Netlify.env.get('SUPABASE_URL')
+  const serviceKey = Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-  try {
-    const { error } = await supabase.from('contact_submissions').insert({
-      name,
-      email,
-      subject: subject || null,
-      message,
-      created_at: new Date().toISOString(),
-    })
-    if (error) throw error
-  } catch (err) {
-    console.error('Contact submission error:', err)
-    return new Response(JSON.stringify({ error: 'Opslaan mislukt', detail: err.message }), { status: 502, headers: { 'Content-Type': 'application/json' } })
+  if (!supabaseUrl || !serviceKey) {
+    console.error('Missing Supabase env vars')
+    return new Response(JSON.stringify({ error: 'Server configuratiefout' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
   }
 
-  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  // Use service role key — bypasses RLS entirely
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false }
+  })
+
+  const { error } = await supabase.from('contact_submissions').insert({
+    name,
+    email,
+    subject: subject || null,
+    message,
+    created_at: new Date().toISOString(),
+  })
+
+  if (error) {
+    console.error('Contact insert error:', JSON.stringify(error))
+    return new Response(JSON.stringify({ error: 'Opslaan mislukt', detail: error.message, code: error.code }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  })
 }
 
 export const config = { path: '/api/contact' }
