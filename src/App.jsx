@@ -1,6 +1,49 @@
 import { signIn, signUp, signOut, getSession, getUser, supabase } from "./lib/supabase.js";
 import { useState, useRef, useEffect, useCallback } from "react";
 
+// ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
+const EU_COUNTRIES = [
+  { code: "AT", name: "Oostenrijk", vat: 20 }, { code: "BE", name: "België", vat: 21 },
+  { code: "BG", name: "Bulgarije", vat: 20 }, { code: "CY", name: "Cyprus", vat: 19 },
+  { code: "CZ", name: "Tsjechië", vat: 21 }, { code: "DE", name: "Duitsland", vat: 19 },
+  { code: "DK", name: "Denemarken", vat: 25 }, { code: "EE", name: "Estland", vat: 22 },
+  { code: "ES", name: "Spanje", vat: 21 }, { code: "FI", name: "Finland", vat: 25.5 },
+  { code: "FR", name: "Frankrijk", vat: 20 }, { code: "GR", name: "Griekenland", vat: 24 },
+  { code: "HR", name: "Kroatië", vat: 25 }, { code: "HU", name: "Hongarije", vat: 27 },
+  { code: "IE", name: "Ierland", vat: 23 }, { code: "IT", name: "Italië", vat: 22 },
+  { code: "LT", name: "Litouwen", vat: 21 }, { code: "LU", name: "Luxemburg", vat: 17 },
+  { code: "LV", name: "Letland", vat: 21 }, { code: "MT", name: "Malta", vat: 18 },
+  { code: "NL", name: "Nederland", vat: 21 }, { code: "PL", name: "Polen", vat: 23 },
+  { code: "PT", name: "Portugal", vat: 23 }, { code: "RO", name: "Roemenië", vat: 19 },
+  { code: "SE", name: "Zweden", vat: 25 }, { code: "SI", name: "Slovenië", vat: 22 },
+  { code: "SK", name: "Slowakije", vat: 20 },
+];
+const NON_EU_COUNTRIES = [
+  { code: "GB", name: "Verenigd Koninkrijk", vat: 0 }, { code: "US", name: "Verenigde Staten", vat: 0 },
+  { code: "CA", name: "Canada", vat: 0 }, { code: "AU", name: "Australië", vat: 0 },
+  { code: "NO", name: "Noorwegen", vat: 0 }, { code: "CH", name: "Zwitserland", vat: 0 },
+  { code: "OTHER", name: "Overig", vat: 0 },
+];
+const ALL_COUNTRIES = [...EU_COUNTRIES, ...NON_EU_COUNTRIES];
+const BASE_PRICE = 19.99;
+const NL_VAT_RATE = 21;
+
+const getVatInfo = (countryCode, vatValidated) => {
+  const euC = EU_COUNTRIES.find(c => c.code === countryCode);
+  if (!countryCode || countryCode === "NL") {
+    return { rate: NL_VAT_RATE, excl: BASE_PRICE, total: (BASE_PRICE * 1.21).toFixed(2) };
+  }
+  if (euC && vatValidated) {
+    return { rate: 0, excl: BASE_PRICE, total: BASE_PRICE.toFixed(2), reverseCharge: true };
+  }
+  if (euC) {
+    return { rate: euC.vat, excl: BASE_PRICE, total: (BASE_PRICE * (1 + euC.vat / 100)).toFixed(2) };
+  }
+  return { rate: 0, excl: BASE_PRICE, total: BASE_PRICE.toFixed(2) };
+};
+
+
+
 // ─── Google Fonts ─────────────────────────────────────────────────────────────
 const fontLink = document.createElement("link");
 fontLink.href = "https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap";
@@ -774,7 +817,7 @@ const HreflangView = ({ sites }) => {
       </div>
       <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>URL Koppelingen</div>
-        <Btn variant="primary" size="sm">+ Koppeling toevoegen</Btn>
+        <Btn variant="primary" size="sm" onClick={() => alert("Koppel producten via de 'Verbonden' tab — selecteer een product en klik 🔗 om het te verbinden.")}>+ Koppeling toevoegen</Btn>
       </div>
       <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 90px", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
@@ -844,7 +887,7 @@ const AdminPanel = () => {
         <div style={{ padding: "4px 10px", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 20, fontSize: 11, color: "var(--re)", fontWeight: 700, letterSpacing: "0.05em" }}>ADMIN</div>
         <h2 style={{ fontSize: 18, fontWeight: 700 }}>Beheerpaneel</h2>
       </div>
-      <Tabs tabs={[{ id: "users", label: "👥 Gebruikers" }, { id: "payments", label: "💳 Betalingen" }, { id: "platform", label: "⚙ Platform" }]} active={adminTab} onChange={setAdminTab} />
+      <Tabs tabs={[{ id: "users", label: "👥 Gebruikers" }, { id: "payments", label: "💳 Betalingen" }, { id: "platform", label: "⚙ Platform" }, { id: "tracking", label: "📊 Tracking" }]} active={adminTab} onChange={setAdminTab} />
       <div style={{ marginTop: 20 }}>
 
         {/* Users */}
@@ -858,11 +901,21 @@ const AdminPanel = () => {
               </div>
               {users.map(u => (
                 <div key={u.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px 70px 80px 100px", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center" }}>
-                  <span style={{ fontWeight: 500, fontSize: 13 }}>{u.name}</span>
-                  <span style={{ fontSize: 12, color: "var(--mx)" }}>{u.email}</span>
-                  <Badge color={u.plan === "free_forever" ? "orange" : "blue"} size="sm">{u.plan === "free_forever" ? "Free ∞" : "Pro"}</Badge>
-                  <span style={{ fontSize: 13 }}>{u.sites} / 10</span>
-                  <Badge color={u.status === "active" ? "green" : "amber"} size="sm">{u.status === "active" ? "Actief" : "In afwachting"}</Badge>
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.name || "—"}</div>
+                    {u.business_name && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.business_name}</div>}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "var(--mx)" }}>{u.email}</div>
+                    {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}{u.vat_validated ? " · ✓ BTW" : ""}</div>}
+                  </div>
+                  <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
+                    {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : "Pro"}
+                  </Badge>
+                  <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
+                  <Badge color={u.plan === "free_forever" ? "green" : u.status === "active" ? "green" : "amber"} size="sm">
+                    {u.plan === "free_forever" ? "Free forever" : u.status === "active" ? "Actief" : "In afwachting"}
+                  </Badge>
                   <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>Configureren</Btn>
                 </div>
               ))}
@@ -894,6 +947,9 @@ const AdminPanel = () => {
           </div>
         )}
 
+        {/* Tracking */}
+        {adminTab === "tracking" && <TrackingSettings />}
+
         {/* Platform */}
         {adminTab === "platform" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -912,7 +968,7 @@ const AdminPanel = () => {
                 <Field label="Mollie Webhook URL" hint="Ingesteld op Mollie dashboard"><Inp value="https://woosyncshop.com/api/mollie/webhook" onChange={() => {}} /></Field>
               </div>
             </div>
-            <Btn variant="primary">Opslaan</Btn>
+            <Btn variant="primary" onClick={() => editUser && saveUser(editUser)}>Opslaan</Btn>
           </div>
         )}
       </div>
@@ -1221,7 +1277,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const [aiEnabled, setAiEnabled] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
   const aiTaxonomyUnlocked = userProfile?.ai_taxonomy_enabled ?? false;
-  const [profileForm, setProfileForm] = useState({ name: user?.name || "", password: "" });
+  const [profileForm, setProfileForm] = useState({ name: user?.name || "", password: "", business_name: "", country: "NL", vat_number: "", vat_validated: false, address_street: "", address_city: "" });
   const [profileSaving, setProfileSaving] = useState(false);
   const [addShopOpen, setAddShopOpen] = useState(false);
   const [newShop, setNewShop] = useState({ name: "", site_url: "", locale: "nl_NL", flag: "🌐", consumer_key: "", consumer_secret: "" });
@@ -1232,7 +1288,22 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("user_profiles").select("*").eq("id", user.id).single()
-      .then(({ data }) => { if (data) { setUserProfile(data); setAiEnabled(data.ai_taxonomy_enabled || false); } });
+      .then(({ data }) => {
+        if (data) {
+          setUserProfile(data);
+          setAiEnabled(data.ai_taxonomy_enabled || false);
+          setProfileForm(f => ({
+            ...f,
+            name: data.full_name || user?.name || "",
+            business_name: data.business_name || "",
+            country: data.country || "NL",
+            vat_number: data.vat_number || "",
+            vat_validated: data.vat_validated || false,
+            address_street: data.address_street || "",
+            address_city: data.address_city || "",
+          }));
+        }
+      });
   }, [user?.id]);
 
   const testConnection = async (shop) => {
@@ -1292,7 +1363,19 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       if (profileForm.password) {
         await supabase.auth.updateUser({ password: profileForm.password });
       }
-      await supabase.from("user_profiles").update({ full_name: profileForm.name }).eq("id", user.id);
+      const vatInfo = getVatInfo(profileForm.country, profileForm.vat_validated);
+      await supabase.from("user_profiles").update({
+        full_name: profileForm.name,
+        business_name: profileForm.business_name,
+        country: profileForm.country,
+        vat_number: profileForm.vat_number,
+        vat_validated: profileForm.vat_validated,
+        address_street: profileForm.address_street,
+        address_city: profileForm.address_city,
+        vat_rate: vatInfo.rate,
+        price_excl_vat: vatInfo.excl,
+        price_total: vatInfo.total,
+      }).eq("id", user.id);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
     finally { setProfileSaving(false); }
   };
@@ -1376,30 +1459,68 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         {settingsTab === "ai" && (
           <AiTranslationSettings enabled={aiEnabled} onToggleEnabled={setAiEnabled} locked={!aiTaxonomyUnlocked} />
         )}
-        {settingsTab === "billing" && (
+        {settingsTab === "billing" && (() => {
+          const isFreeForever = userProfile?.plan === "free_forever";
+          return (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 20, background: "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: "1px solid var(--b2)" }}>
+            <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--b2)" }}>
               <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 4 }}>Huidig abonnement</div>
-              <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€19,99 <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
-              <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot 10 WordPress installaties · Actief</div>
-              <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Betaald via Mollie</Badge>
+              {isFreeForever ? (
+                <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
+              ) : (
+                <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "24,19"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
+              )}
+              <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot {userProfile?.max_shops || 10} WordPress installaties · Actief</div>
+              {isFreeForever
+                ? <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Free forever account</Badge>
+                : <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ Pro · betaald via Mollie</Badge>
+              }
             </div>
-            <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Betalingsgeschiedenis</div>
-              {[["1 mrt 2026", "€19,99", "Geslaagd"], ["1 feb 2026", "€19,99", "Geslaagd"], ["1 jan 2026", "€19,99", "Geslaagd"]].map(([d, a, s]) => (
-                <div key={d} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--b1)", fontSize: 13 }}>
-                  <span style={{ color: "var(--mx)" }}>{d}</span><span>{a}</span><Badge color="green" size="sm">{s}</Badge>
-                </div>
-              ))}
-            </div>
-            <Btn variant="danger" size="sm" style={{ alignSelf: "flex-start" }}>Abonnement opzeggen</Btn>
+            {!isFreeForever && (
+              <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Betalingsgeschiedenis</div>
+                <div style={{ fontSize: 13, color: "var(--dm)", padding: "12px 0" }}>Betalingshistorie wordt geladen via Mollie.</div>
+              </div>
+            )}
+            {!isFreeForever && <Btn variant="danger" size="sm" style={{ alignSelf: "flex-start" }}>Abonnement opzeggen</Btn>}
           </div>
-        )}
+          );
+        })()}
         {settingsTab === "profile" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 480 }}>
-            <Field label="Naam"><Inp value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} /></Field>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 560 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Naam"><Inp value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} /></Field>
+              <Field label="Bedrijfsnaam (optioneel)"><Inp value={profileForm.business_name || ""} onChange={e => setProfileForm(f => ({ ...f, business_name: e.target.value }))} placeholder="Jouw bedrijf B.V." /></Field>
+            </div>
             <Field label="E-mailadres"><Inp value={user?.email || ""} onChange={() => {}} type="email" readOnly style={{ opacity: 0.6 }} /></Field>
-            <Field label="Nieuw wachtwoord" hint="Laat leeg om het huidig wachtwoord te bewaren"><Inp value={profileForm.password} onChange={e => setProfileForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" /></Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Straat + huisnummer"><Inp value={profileForm.address_street || ""} onChange={e => setProfileForm(f => ({ ...f, address_street: e.target.value }))} placeholder="Voorbeeldstraat 1" /></Field>
+              <Field label="Postcode + Stad"><Inp value={profileForm.address_city || ""} onChange={e => setProfileForm(f => ({ ...f, address_city: e.target.value }))} placeholder="1234 AB Amsterdam" /></Field>
+            </div>
+            <Field label="Land">
+              <select value={profileForm.country || "NL"} onChange={e => setProfileForm(f => ({ ...f, country: e.target.value, vat_number: "" }))}
+                style={{ width: "100%", padding: "9px 12px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 13 }}>
+                {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
+            </Field>
+            {EU_COUNTRIES.some(c => c.code === (profileForm.country || "NL")) && (profileForm.country || "NL") !== "NL" && (
+              <Field label="BTW-nummer (voor btw-vrijstelling)">
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Inp value={profileForm.vat_number || ""} onChange={e => setProfileForm(f => ({ ...f, vat_number: e.target.value, vat_validated: false }))} placeholder={`${profileForm.country}XXXXXXXXXX`} style={{ flex: 1 }} />
+                  <Btn variant="secondary" size="sm" onClick={async () => {
+                    if (!profileForm.vat_number) return;
+                    const res = await fetch("/api/vies-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vat_number: profileForm.vat_number }) });
+                    const d = await res.json();
+                    if (d.valid) setProfileForm(f => ({ ...f, vat_validated: true }));
+                    else alert(d.retry ? "VIES tijdelijk niet beschikbaar, probeer later opnieuw." : "BTW-nummer ongeldig of niet gevonden in VIES.");
+                  }}>Verifiëren</Btn>
+                </div>
+                {profileForm.vat_validated && <div style={{ fontSize: 12, color: "var(--gr)", marginTop: 4 }}>✓ BTW-nummer geverifieerd — btw-vrijstelling van toepassing</div>}
+              </Field>
+            )}
+            <div style={{ borderTop: "1px solid var(--b1)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+              <Field label="Nieuw wachtwoord" hint="Laat leeg om het huidig wachtwoord te bewaren"><Inp value={profileForm.password} onChange={e => setProfileForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" /></Field>
+            </div>
             <Btn variant="primary" style={{ alignSelf: "flex-start" }} onClick={handleSaveProfile} disabled={profileSaving}>{profileSaving ? "Opslaan..." : "Profiel opslaan"}</Btn>
           </div>
         )}
@@ -1420,7 +1541,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
   return (
     <div style={{ height: 56, background: "var(--s1)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", padding: "0 16px", gap: 10, position: "sticky", top: 0, zIndex: 100, flexShrink: 0 }}>
       {/* Logo */}
-      <div style={{ fontFamily: "var(--font-h)", fontWeight: 800, fontSize: 17, color: "var(--tx)", marginRight: 8, letterSpacing: "-0.02em" }}>
+      <div onClick={() => setActiveView("products")} style={{ fontFamily: "var(--font-h)", fontWeight: 800, fontSize: 17, color: "var(--tx)", marginRight: 8, letterSpacing: "-0.02em", cursor: "pointer" }}>
         <span style={{ color: "var(--pr-h)" }}>Woo</span> Sync<span style={{ color: "var(--pr-h)" }}>Shop</span>
       </div>
 
@@ -1469,7 +1590,9 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
         <Btn variant="accent" size="sm" onClick={handlePush} disabled={pushing} icon={pushing ? <span className="spin">↻</span> : "↑"}>
           {pushing ? "Pushen..." : "Push naar shops"}
         </Btn>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--pr)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>R</div>
+        <div onClick={() => { setActiveView("settings"); }} title="Profiel & instellingen" style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--pr)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+          {(user?.name || user?.email || "?")[0].toUpperCase()}
+        </div>
       </div>
     </div>
   );
@@ -1682,42 +1805,58 @@ const Dashboard = ({ user, onLogout }) => {
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
 const AuthModal = ({ mode, onClose, onSuccess }) => {
   const [step, setStep] = useState(mode === "signup" ? "form" : "login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", code: "" });
+  const [form, setForm] = useState({
+    name: "", email: "", password: "", code: "",
+    business_name: "", country: "NL",
+    vat_number: "", vat_validated: false, vat_checking: false, vat_error: null,
+    address_street: "", address_city: "",
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [isFree, setIsFree] = useState(false);
+  const isFree = form.code.toLowerCase() === "freeforever";
+  const vatInfo = getVatInfo(form.country, form.vat_validated);
+  const isEUNonNL = EU_COUNTRIES.some(c => c.code === form.country) && form.country !== "NL";
 
-  const handleCode = (code) => {
-    setForm(f => ({ ...f, code }));
-    setIsFree(code.toLowerCase() === "freeforever");
+  const handleCode = (code) => setForm(f => ({ ...f, code }));
+
+  const checkVAT = async () => {
+    if (!form.vat_number) return;
+    setForm(f => ({ ...f, vat_checking: true, vat_error: null }));
+    try {
+      const res = await fetch("/api/vies-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vat_number: form.vat_number }) });
+      const d = await res.json();
+      if (d.valid) setForm(f => ({ ...f, vat_validated: true, vat_checking: false }));
+      else setForm(f => ({ ...f, vat_validated: false, vat_checking: false, vat_error: d.retry ? "VIES tijdelijk niet beschikbaar" : "BTW-nummer niet gevonden in VIES" }));
+    } catch { setForm(f => ({ ...f, vat_checking: false, vat_error: "Verificatie mislukt" })); }
   };
 
   const handleLogin = async () => {
     setLoading(true); setError(null);
     try {
-      // static import
       const { user } = await signIn(form.email, form.password);
       onSuccess({ id: user.id, name: user.user_metadata?.full_name || form.email, email: user.email });
-    } catch (e) {
-      setError(e.message);
-    } finally { setLoading(false); }
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
   const handleSignup = async () => {
     setLoading(true); setError(null);
     try {
-      // static import
-      await signUp(form.email, form.password, { data: { full_name: form.name } });
+      const vi = getVatInfo(form.country, form.vat_validated);
+      await signUp(form.email, form.password, {
+        data: {
+          full_name: form.name, business_name: form.business_name,
+          country: form.country, vat_number: form.vat_number,
+          vat_validated: form.vat_validated, address_street: form.address_street,
+          address_city: form.address_city, plan: isFree ? "free_forever" : "pro",
+          price_total: vi.total, vat_rate: vi.rate,
+        }
+      });
       if (isFree) { setStep("success"); } else { setStep("payment"); }
-    } catch (e) {
-      setError(e.message);
-    } finally { setLoading(false); }
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
   const handlePayment = () => {
     setLoading(true);
-    // Mollie payment flow — redirects to Mollie hosted page in production
-    // For now simulate success
     setTimeout(() => { setLoading(false); setStep("success"); }, 1500);
   };
 
@@ -1745,25 +1884,62 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
 
         {step === "form" && <>
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Account aanmaken</h2>
-          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>Start met het beheren van al jouw webshops</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Field label="Naam"><Inp value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jouw naam" /></Field>
-            <Field label="E-mailadres"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" /></Field>
-            <Field label="Wachtwoord"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="Min. 8 tekens" /></Field>
-            <Field label="Kortingscode (optioneel)">
-              <Inp value={form.code} onChange={e => handleCode(e.target.value)} placeholder="Voer code in..." />
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Start met het beheren van al jouw webshops</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label="Naam *"><Inp value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jouw naam" /></Field>
+              <Field label="Bedrijfsnaam"><Inp value={form.business_name} onChange={e => setForm(f => ({ ...f, business_name: e.target.value }))} placeholder="Optioneel" /></Field>
+            </div>
+            <Field label="E-mailadres *"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" /></Field>
+            <Field label="Wachtwoord *"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="Min. 8 tekens" /></Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label="Straat + nr"><Inp value={form.address_street} onChange={e => setForm(f => ({ ...f, address_street: e.target.value }))} placeholder="Straatnaam 1" /></Field>
+              <Field label="Postcode + Stad"><Inp value={form.address_city} onChange={e => setForm(f => ({ ...f, address_city: e.target.value }))} placeholder="1234 AB Amsterdam" /></Field>
+            </div>
+            <Field label="Land *">
+              <select value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value, vat_number: "", vat_validated: false }))}
+                style={{ width: "100%", padding: "9px 12px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 13 }}>
+                {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
+            </Field>
+            {isEUNonNL && (
+              <Field label="BTW-nummer (voor btw-vrijstelling)">
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Inp value={form.vat_number} onChange={e => setForm(f => ({ ...f, vat_number: e.target.value, vat_validated: false, vat_error: null }))} placeholder={`${form.country}XXXXXXXXXX`} style={{ flex: 1 }} />
+                  <Btn variant="secondary" size="sm" onClick={checkVAT} disabled={form.vat_checking}>{form.vat_checking ? "..." : "Verifiëren"}</Btn>
+                </div>
+                {form.vat_validated && <div style={{ fontSize: 12, color: "var(--gr)", marginTop: 4 }}>✓ BTW-nummer geverifieerd — btw-vrijstelling van toepassing (0%)</div>}
+                {form.vat_error && <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>⚠ {form.vat_error}</div>}
+              </Field>
+            )}
+            <Field label="Kortingscode">
+              <Inp value={form.code} onChange={e => handleCode(e.target.value)} placeholder="Optioneel..." />
               {isFree && <div style={{ padding: "6px 10px", background: "var(--gr-l)", borderRadius: 6, border: "1px solid rgba(34,197,94,0.3)", marginTop: 6 }}>
                 <span style={{ fontSize: 12, color: "var(--gr)", fontWeight: 600 }}>🎉 Code geldig — gratis voor altijd!</span>
               </div>}
             </Field>
-            <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>Woo Sync Shop Pro</div>
-                <div style={{ fontSize: 12, color: "var(--mx)" }}>Tot 10 WordPress installaties</div>
+            <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: vatInfo.rate > 0 ? 6 : 0 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>Woo Sync Shop Pro</div>
+                  <div style={{ fontSize: 12, color: "var(--mx)" }}>Tot 10 WordPress installaties</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  {isFree ? <span style={{ fontWeight: 800, color: "var(--gr)", fontSize: 18 }}>Gratis</span> : (
+                    <><span style={{ fontWeight: 800, fontSize: 18 }}>€{vatInfo.total}</span><span style={{ fontSize: 11, color: "var(--dm)" }}>/maand</span></>
+                  )}
+                </div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                {isFree ? <span style={{ fontWeight: 800, color: "var(--gr)", fontSize: 18 }}>Gratis</span> : <><span style={{ fontWeight: 800, fontSize: 18 }}>€19,99</span><span style={{ fontSize: 11, color: "var(--dm)" }}>/maand</span></>}
-              </div>
+              {!isFree && vatInfo.rate > 0 && (
+                <div style={{ fontSize: 11, color: "var(--dm)", borderTop: "1px solid var(--b1)", paddingTop: 6 }}>
+                  Excl. BTW: €{vatInfo.excl} + {vatInfo.rate}% BTW
+                </div>
+              )}
+              {!isFree && vatInfo.reverseCharge && (
+                <div style={{ fontSize: 11, color: "var(--gr)", borderTop: "1px solid var(--b1)", paddingTop: 6 }}>
+                  ✓ Btw verlegd (reverse charge) — 0% BTW
+                </div>
+              )}
             </div>
             <Btn variant="primary" size="lg" onClick={handleSignup} disabled={loading} style={{ width: "100%", marginTop: 4 }}>{loading ? "Bezig..." : isFree ? "Account aanmaken →" : "Verder naar betaling →"}</Btn>
             <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
@@ -1806,7 +1982,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
 };
 
 // ─── Landing Page ─────────────────────────────────────────────────────────────
-const LandingPage = ({ onLogin, onSignup }) => {
+const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
   const FEATURES = [
     { icon: "🏪", title: "Multi-shop dashboard", desc: "Beheer al jouw WooCommerce shops vanuit één overzichtelijk dashboard. Schakel moeiteloos tussen shops." },
     { icon: "🔄", title: "Slim synchroniseren", desc: "Koppel producten via SKU of identifier-attribuut. Sync specifieke velden, bewaar taalverschillen." },
@@ -1913,8 +2089,349 @@ const LandingPage = ({ onLogin, onSignup }) => {
         <div style={{ fontFamily: "var(--font-h)", fontWeight: 700, color: "var(--tx)", fontSize: 15 }}><span style={{ color: "var(--pr-h)" }}>Woo</span> Sync<span style={{ color: "var(--pr-h)" }}>Shop</span></div>
         <div>© 2026 Woo Sync Shop · Alle rechten voorbehouden</div>
         <div style={{ display: "flex", gap: 16 }}>
-          {["Privacy", "Voorwaarden", "Contact"].map(l => <span key={l} style={{ cursor: "pointer", color: "var(--mx)" }}>{l}</span>)}
+          {[["Privacy", "privacy"], ["Voorwaarden", "voorwaarden"], ["Contact", "contact"]].map(([l, page]) => (
+            <span key={l} onClick={() => onPage(page)} style={{ cursor: "pointer", color: "var(--mx)", transition: "color 0.15s" }}
+              onMouseEnter={e => e.target.style.color = "var(--pr-h)"} onMouseLeave={e => e.target.style.color = "var(--mx)"}>{l}</span>
+          ))}
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Cookie Banner ────────────────────────────────────────────────────────────
+const CookieBanner = ({ onAccept, onReject }) => (
+  <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 9999, background: "var(--s1)", borderTop: "1px solid var(--b2)", padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", boxShadow: "0 -4px 24px rgba(0,0,0,0.4)" }}>
+    <div style={{ flex: 1, minWidth: 260 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>🍪 Wij gebruiken cookies</div>
+      <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.5 }}>
+        We gebruiken cookies voor analyses (Google Analytics) en advertenties (Google Ads). Functionele cookies zijn altijd actief.{" "}
+        <span onClick={() => window.location.hash = "privacy"} style={{ color: "var(--pr-h)", cursor: "pointer", textDecoration: "underline" }}>Lees ons cookiebeleid</span>.
+      </div>
+    </div>
+    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+      <Btn variant="ghost" size="sm" onClick={onReject}>Alleen functioneel</Btn>
+      <Btn variant="primary" size="sm" onClick={onAccept}>Alles accepteren</Btn>
+    </div>
+  </div>
+);
+
+// ─── GTM/GA4 Injector ─────────────────────────────────────────────────────────
+const TrackingInjector = ({ consent }) => {
+  useEffect(() => {
+    const inject = async () => {
+      if (consent !== "accepted") return;
+      try {
+        const res = await fetch("/api/platform-settings");
+        const settings = await res.json();
+        if (settings.gtm_id && !document.getElementById("wss-gtm")) {
+          const s = document.createElement("script");
+          s.id = "wss-gtm";
+          s.innerHTML = `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${settings.gtm_id}');`;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+        }
+        if (settings.ga4_id && !document.getElementById("wss-ga4")) {
+          const s = document.createElement("script");
+          s.id = "wss-ga4";
+          s.async = true;
+          s.src = `https://www.googletagmanager.com/gtag/js?id=${settings.ga4_id}`;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = function(){window.dataLayer.push(arguments);};
+          window.gtag("js", new Date());
+          window.gtag("config", settings.ga4_id);
+        }
+      } catch {}
+    };
+    inject();
+  }, []);
+  return null;
+};
+
+// ─── Page Layout Wrapper ───────────────────────────────────────────────────────
+const PageLayout = ({ title, children, onBack }) => (
+  <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font-b)" }}>
+    <nav style={{ position: "sticky", top: 0, zIndex: 100, padding: "0 32px", height: 64, display: "flex", alignItems: "center", background: "rgba(8,11,18,0.9)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--b1)" }}>
+      <div onClick={onBack} style={{ fontFamily: "var(--font-h)", fontWeight: 800, fontSize: 20, color: "var(--tx)", cursor: "pointer", letterSpacing: "-0.03em" }}>
+        <span style={{ color: "var(--pr-h)" }}>Woo</span> Sync<span style={{ color: "var(--pr-h)" }}>Shop</span>
+      </div>
+      <button onClick={onBack} style={{ marginLeft: "auto", background: "transparent", border: "1px solid var(--b2)", borderRadius: "var(--rd)", padding: "6px 14px", color: "var(--mx)", cursor: "pointer", fontSize: 13 }}>← Terug</button>
+    </nav>
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: "48px 32px 80px" }}>
+      <h1 style={{ fontSize: 32, fontWeight: 800, fontFamily: "var(--font-h)", letterSpacing: "-0.03em", marginBottom: 32, color: "var(--tx)" }}>{title}</h1>
+      <div style={{ color: "var(--mx)", lineHeight: 1.8, fontSize: 15 }}>{children}</div>
+    </div>
+  </div>
+);
+
+const Sec = ({ title, children }) => (
+  <div style={{ marginBottom: 32 }}>
+    <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--tx)", marginBottom: 12 }}>{title}</h2>
+    {children}
+  </div>
+);
+
+// ─── Privacy Page ──────────────────────────────────────────────────────────────
+const PrivacyPage = ({ onBack }) => (
+  <PageLayout title="Privacybeleid" onBack={onBack}>
+    <p style={{ color: "var(--dm)", fontSize: 13, marginBottom: 32 }}>Laatst bijgewerkt: 7 maart 2026</p>
+    <Sec title="1. Wie zijn wij?">
+      <p>WooSyncShop is een SaaS-platform voor het beheer van meerdere WooCommerce webshops. De dienst wordt aangeboden door <strong style={{color:"var(--tx)"}}>WooSyncShop</strong>, gevestigd in Nederland. Voor vragen over dit privacybeleid kunt u contact opnemen via <a href="mailto:privacy@woosyncshop.com" style={{color:"var(--pr-h)"}}>privacy@woosyncshop.com</a>.</p>
+    </Sec>
+    <Sec title="2. Welke gegevens verzamelen wij?">
+      <p>Wij verzamelen de volgende persoonsgegevens:</p>
+      <ul style={{ paddingLeft: 20, marginTop: 8 }}>
+        <li><strong style={{color:"var(--tx)"}}>Accountgegevens:</strong> e-mailadres en naam bij registratie</li>
+        <li><strong style={{color:"var(--tx)"}}>Betalingsgegevens:</strong> verwerkt via Mollie (wij slaan geen betaalkaartgegevens op)</li>
+        <li><strong style={{color:"var(--tx)"}}>Shopgegevens:</strong> WooCommerce API-sleutels die u invoert om uw shops te verbinden</li>
+        <li><strong style={{color:"var(--tx)"}}>Gebruiksgegevens:</strong> logs van API-aanroepen, foutmeldingen (geen persoonlijk surfgedrag)</li>
+        <li><strong style={{color:"var(--tx)"}}>Analysegegevens:</strong> geanonimiseerde statistieken via Google Analytics 4 (alleen met uw toestemming)</li>
+      </ul>
+    </Sec>
+    <Sec title="3. Waarvoor gebruiken wij uw gegevens?">
+      <ul style={{ paddingLeft: 20 }}>
+        <li>Het leveren en verbeteren van onze dienst</li>
+        <li>Verzenden van transactionele e-mails (bevestigingen, facturen)</li>
+        <li>Ondersteuning bij technische problemen</li>
+        <li>Facturering en abonnementsbeheer</li>
+      </ul>
+    </Sec>
+    <Sec title="4. Verwerkers en derden">
+      <p>Wij maken gebruik van de volgende verwerkers:</p>
+      <ul style={{ paddingLeft: 20, marginTop: 8 }}>
+        <li><strong style={{color:"var(--tx)"}}>Supabase</strong> — authenticatie en database (EU-regio)</li>
+        <li><strong style={{color:"var(--tx)"}}>Netlify</strong> — hosting en serverless functies</li>
+        <li><strong style={{color:"var(--tx)"}}>Mollie</strong> — betalingsverwerking</li>
+        <li><strong style={{color:"var(--tx)"}}>Resend</strong> — transactionele e-mail</li>
+        <li><strong style={{color:"var(--tx)"}}>Google Analytics 4</strong> — websiteanalyse (alleen met toestemming)</li>
+      </ul>
+    </Sec>
+    <Sec title="5. Bewaartermijnen">
+      <p>Accountgegevens worden bewaard zolang uw account actief is. Na opzegging worden uw gegevens binnen 30 dagen verwijderd, tenzij wettelijke bewaarplicht anders vereist (bijv. factuurgegevens: 7 jaar).</p>
+    </Sec>
+    <Sec title="6. Uw rechten (AVG)">
+      <p>U heeft recht op inzage, correctie, verwijdering, beperking van verwerking, dataportabiliteit en bezwaar. Verzoeken kunt u indienen via <a href="mailto:privacy@woosyncshop.com" style={{color:"var(--pr-h)"}}>privacy@woosyncshop.com</a>. Wij reageren binnen 30 dagen.</p>
+    </Sec>
+    <Sec title="7. Cookies">
+      <p>Wij gebruiken:</p>
+      <ul style={{ paddingLeft: 20, marginTop: 8 }}>
+        <li><strong style={{color:"var(--tx)"}}>Functionele cookies:</strong> voor inlogstatus (altijd actief)</li>
+        <li><strong style={{color:"var(--tx)"}}>Analytische cookies:</strong> Google Analytics 4 (alleen met toestemming)</li>
+        <li><strong style={{color:"var(--tx)"}}>Marketingcookies:</strong> Google Ads (alleen met toestemming)</li>
+      </ul>
+      <p style={{marginTop:12}}>U kunt uw voorkeur altijd wijzigen via de cookiebanner onderaan de pagina.</p>
+    </Sec>
+    <Sec title="8. Contact en klachten">
+      <p>Voor privacyvragen: <a href="mailto:privacy@woosyncshop.com" style={{color:"var(--pr-h)"}}>privacy@woosyncshop.com</a>. U heeft ook het recht een klacht in te dienen bij de Autoriteit Persoonsgegevens (autoriteitpersoonsgegevens.nl).</p>
+    </Sec>
+  </PageLayout>
+);
+
+// ─── Voorwaarden Page ──────────────────────────────────────────────────────────
+const VoorwaardenPage = ({ onBack }) => (
+  <PageLayout title="Algemene Voorwaarden" onBack={onBack}>
+    <p style={{ color: "var(--dm)", fontSize: 13, marginBottom: 32 }}>Versie 1.0 — 7 maart 2026</p>
+    <Sec title="1. Definities">
+      <ul style={{ paddingLeft: 20 }}>
+        <li><strong style={{color:"var(--tx)"}}>WooSyncShop:</strong> het platform en de aanbieder, geregistreerd in Nederland</li>
+        <li><strong style={{color:"var(--tx)"}}>Gebruiker:</strong> iedere natuurlijke of rechtspersoon met een account</li>
+        <li><strong style={{color:"var(--tx)"}}>Dienst:</strong> het SaaS-platform op woosyncshop.com</li>
+      </ul>
+    </Sec>
+    <Sec title="2. Toegang tot de dienst">
+      <p>WooSyncShop biedt één abonnementsmodel: <strong style={{color:"var(--tx)"}}>Pro</strong> voor €19,99/maand, waarmee tot 10 WordPress-installaties beheerd kunnen worden. Toegang wordt verleend na succesvolle betaling via Mollie.</p>
+    </Sec>
+    <Sec title="3. Betaling en opzegging">
+      <ul style={{ paddingLeft: 20 }}>
+        <li>Abonnementen worden maandelijks automatisch verlengd</li>
+        <li>Opzegging kan op elk moment via Instellingen → Abonnement</li>
+        <li>Na opzegging blijft toegang actief tot het einde van de betaalde periode</li>
+        <li>Geen restitutie voor lopende periodes</li>
+        <li>Bij betalingsachterstand wordt toegang tijdelijk opgeschort</li>
+      </ul>
+    </Sec>
+    <Sec title="4. Gebruik van de dienst">
+      <ul style={{ paddingLeft: 20 }}>
+        <li>U bent verantwoordelijk voor de beveiliging van uw inloggegevens</li>
+        <li>Het is verboden de dienst te gebruiken voor illegale activiteiten</li>
+        <li>WooCommerce API-sleutels worden versleuteld opgeslagen</li>
+        <li>U bent zelf verantwoordelijk voor correcte hreflang-implementatie op uw sites</li>
+      </ul>
+    </Sec>
+    <Sec title="5. Beschikbaarheid">
+      <p>WooSyncShop streeft naar 99,5% uptime maar geeft hierop geen garantie. Gepland onderhoud wordt minimaal 24 uur van tevoren aangekondigd. Bij storingen kunt u contact opnemen via support@woosyncshop.com.</p>
+    </Sec>
+    <Sec title="6. Aansprakelijkheid">
+      <p>WooSyncShop is niet aansprakelijk voor indirecte schade, gederfde winst of verlies van data als gevolg van het gebruik van de dienst. De totale aansprakelijkheid is beperkt tot het bedrag dat u in de afgelopen 3 maanden heeft betaald.</p>
+    </Sec>
+    <Sec title="7. Intellectueel eigendom">
+      <p>Alle rechten op het platform, de software en de documentatie berusten bij WooSyncShop. Het is niet toegestaan de software te kopiëren, aan te passen of door te verkopen zonder schriftelijke toestemming.</p>
+    </Sec>
+    <Sec title="8. Toepasselijk recht">
+      <p>Op deze voorwaarden is Nederlands recht van toepassing. Geschillen worden voorgelegd aan de bevoegde rechter in Nederland.</p>
+    </Sec>
+    <Sec title="9. Wijzigingen">
+      <p>WooSyncShop behoudt het recht deze voorwaarden te wijzigen. Wijzigingen worden minimaal 30 dagen van tevoren per e-mail aangekondigd.</p>
+    </Sec>
+    <Sec title="10. Contact">
+      <p>WooSyncShop · info@woosyncshop.com · woosyncshop.com</p>
+    </Sec>
+  </PageLayout>
+);
+
+// ─── Contact Page ──────────────────────────────────────────────────────────────
+const ContactPage = ({ onBack }) => {
+  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
+  const [status, setStatus] = useState(null); // null | "sending" | "ok" | "error"
+  const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const send = async () => {
+    if (!form.name || !form.email || !form.message) return alert("Vul naam, e-mail en bericht in.");
+    setStatus("sending");
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (data.ok) { setStatus("ok"); setForm({ name: "", email: "", subject: "", message: "" }); }
+      else { setStatus("error"); }
+    } catch { setStatus("error"); }
+  };
+
+  return (
+    <PageLayout title="Contact" onBack={onBack}>
+      <p style={{ marginBottom: 32 }}>Heb je een vraag, een technisch probleem of wil je samenwerken? Stuur ons een bericht en we reageren binnen 1 werkdag.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40 }}>
+        <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Naam"><Inp value={form.name} onChange={e => upd("name", e.target.value)} placeholder="Jouw naam" /></Field>
+            <Field label="E-mailadres"><Inp value={form.email} onChange={e => upd("email", e.target.value)} type="email" placeholder="jij@domein.nl" /></Field>
+            <Field label="Onderwerp"><Inp value={form.subject} onChange={e => upd("subject", e.target.value)} placeholder="Bijv. Technisch probleem" /></Field>
+            <Field label="Bericht"><Inp value={form.message} onChange={e => upd("message", e.target.value)} multiline rows={5} placeholder="Beschrijf je vraag of probleem..." /></Field>
+            {status === "ok" && <div style={{ padding: "12px 16px", background: "var(--gr-l)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--gr)" }}>✓ Bericht verzonden! We reageren binnen 1 werkdag.</div>}
+            {status === "error" && <div style={{ padding: "12px 16px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "#ef4444" }}>Versturen mislukt. Probeer het opnieuw of mail ons direct.</div>}
+            <Btn variant="primary" onClick={send} disabled={status === "sending"}>{status === "sending" ? "Verzenden..." : "Bericht sturen →"}</Btn>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {[
+            { icon: "📧", title: "E-mail", val: "info@woosyncshop.com", href: "mailto:info@woosyncshop.com" },
+            { icon: "🌐", title: "Website", val: "woosyncshop.com", href: "https://woosyncshop.com" },
+            { icon: "🕐", title: "Reactietijd", val: "Binnen 1 werkdag" },
+            { icon: "📍", title: "Locatie", val: "Nederland" },
+          ].map(({ icon, title, val, href }) => (
+            <div key={title} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+              <div style={{ width: 40, height: 40, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{icon}</div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "var(--tx)", marginBottom: 2 }}>{title}</div>
+                {href ? <a href={href} style={{ color: "var(--pr-h)", fontSize: 14, textDecoration: "none" }}>{val}</a> : <div style={{ color: "var(--mx)", fontSize: 14 }}>{val}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </PageLayout>
+  );
+};
+
+// ─── Tracking Admin Tab ────────────────────────────────────────────────────────
+const TrackingSettings = () => {
+  const [settings, setSettings] = useState({ gtm_id: "", ga4_id: "", gads_conversion_id: "", gads_conversion_label: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/platform-settings").then(r => r.json()).then(d => { setSettings(s => ({ ...s, ...d })); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch("/api/platform-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify(settings),
+      });
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { alert("Opslaan mislukt: " + e.message); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div style={{ padding: 20, color: "var(--mx)", fontSize: 13 }}>Laden...</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 640 }}>
+      {/* GTM */}
+      <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>📊</span> Google Tag Manager
+        </div>
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <Field label="GTM Container ID" hint="Bijv. GTM-XXXXXXX">
+            <Inp value={settings.gtm_id || ""} onChange={e => setSettings(s => ({ ...s, gtm_id: e.target.value }))} placeholder="GTM-XXXXXXX" />
+          </Field>
+          <div style={{ padding: "10px 14px", background: "var(--s3)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>
+            <strong style={{ color: "var(--tx)" }}>GTM configuratie:</strong> Na opslaan wordt GTM automatisch geladen voor bezoekers die cookies accepteren. Maak in GTM een tag aan voor GA4 + een trigger op <code>signup_complete</code> voor Google Ads conversies.
+          </div>
+        </div>
+      </div>
+
+      {/* GA4 */}
+      <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>📈</span> Google Analytics 4
+        </div>
+        <div style={{ padding: 16 }}>
+          <Field label="GA4 Measurement ID" hint="Bijv. G-XXXXXXXXXX">
+            <Inp value={settings.ga4_id || ""} onChange={e => setSettings(s => ({ ...s, ga4_id: e.target.value }))} placeholder="G-XXXXXXXXXX" />
+          </Field>
+        </div>
+      </div>
+
+      {/* Google Ads */}
+      <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>🎯</span> Google Ads Conversies
+        </div>
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <Field label="Conversion ID" hint="Bijv. AW-XXXXXXXXX">
+            <Inp value={settings.gads_conversion_id || ""} onChange={e => setSettings(s => ({ ...s, gads_conversion_id: e.target.value }))} placeholder="AW-XXXXXXXXX" />
+          </Field>
+          <Field label="Conversion Label" hint="Bijv. AbCdEfGhIjKlMnOp">
+            <Inp value={settings.gads_conversion_label || ""} onChange={e => setSettings(s => ({ ...s, gads_conversion_label: e.target.value }))} placeholder="AbCdEfGhIjKlMnOp" />
+          </Field>
+          <div style={{ padding: "10px 14px", background: "var(--s3)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>
+            Conversies worden gefired bij <strong style={{ color: "var(--tx)" }}>nieuwe registraties</strong> (event: <code>signup_complete</code>). Zorg dat GTM-ID ook ingevuld is.
+          </div>
+        </div>
+      </div>
+
+      {/* Search Console / Sitemap */}
+      <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>🔍</span> Google Search Console
+        </div>
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 13, color: "var(--mx)", lineHeight: 1.6 }}>
+            Verifieer eigenaarschap via DNS-record of HTML-tag in Search Console. Voeg de sitemap toe na verificatie:
+          </div>
+          <div style={{ padding: "10px 14px", background: "var(--s3)", borderRadius: "var(--rd)", fontFamily: "monospace", fontSize: 13, color: "var(--gr)" }}>
+            https://woosyncshop.com/sitemap.xml
+          </div>
+          <a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: "var(--pr-h)", textDecoration: "none" }}>
+            → Openen in Search Console ↗
+          </a>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Btn variant="primary" onClick={save} disabled={saving}>{saving ? "Opslaan..." : "Instellingen opslaan"}</Btn>
+        {saved && <span style={{ fontSize: 13, color: "var(--gr)" }}>✓ Opgeslagen</span>}
       </div>
     </div>
   );
@@ -1922,9 +2439,10 @@ const LandingPage = ({ onLogin, onSignup }) => {
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [view, setView] = useState("loading"); // loading | landing | app
+  const [view, setView] = useState("loading"); // loading | landing | app | privacy | voorwaarden | contact
   const [authModal, setAuthModal] = useState(null);
   const [user, setUser] = useState(null);
+  const [cookieConsent, setCookieConsent] = useState(() => localStorage.getItem("wss_cookie_consent")); // null | accepted | rejected
 
   // Check for existing Supabase session on mount
   useState(() => {
@@ -1962,13 +2480,16 @@ export default function App() {
     setUser(userData);
     setAuthModal(null);
     setView("app");
+    // Fire Google Ads conversion on signup
+    try {
+      if (window.gtag) window.gtag("event", "signup_complete", { event_category: "conversion" });
+      if (window.dataLayer) window.dataLayer.push({ event: "signup_complete" });
+    } catch {}
   };
 
   const handleLogout = async () => {
-    try {
-      
-      await signOut();
-    } catch {}
+    try { await signOut(); } catch {}
+    window.location.hash = "";
     setUser(null);
     setView("landing");
   };
@@ -1987,13 +2508,38 @@ export default function App() {
     );
   }
 
+  const acceptCookies = () => { localStorage.setItem("wss_cookie_consent", "accepted"); setCookieConsent("accepted"); };
+  const rejectCookies = () => { localStorage.setItem("wss_cookie_consent", "rejected"); setCookieConsent("rejected"); };
+
+  // Hash-based routing for static pages
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace("#", "");
+      if (["privacy", "voorwaarden", "contact"].includes(h)) setView(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const goPage = (page) => { window.location.hash = page; setView(page); };
+  const goBack = () => {
+    window.location.hash = "";
+    setView(user ? "app" : "landing");
+  };
+
+  if (view === "privacy") return <><G /><PrivacyPage onBack={goBack} /></>;
+  if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={goBack} /></>;
+  if (view === "contact") return <><G /><ContactPage onBack={goBack} /></>;
+
   return (
     <>
       <G />
+      <TrackingInjector consent={cookieConsent} />
       {view === "landing" && (
         <LandingPage
           onLogin={() => setAuthModal("login")}
           onSignup={() => setAuthModal("signup")}
+          onPage={goPage}
         />
       )}
       {view === "app" && user && (
@@ -2007,6 +2553,9 @@ export default function App() {
           onClose={() => setAuthModal(null)}
           onSuccess={handleSuccess}
         />
+      )}
+      {cookieConsent === null && (
+        <CookieBanner onAccept={acceptCookies} onReject={rejectCookies} />
       )}
     </>
   );

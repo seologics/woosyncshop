@@ -129,3 +129,28 @@ create policy "own data" on public.ai_taxonomy_pending for all using (auth.uid()
 
 -- Admins can read everything (via service role in serverless functions)
 -- No extra policy needed — service role bypasses RLS
+
+-- Platform settings (tracking IDs etc.)
+CREATE TABLE IF NOT EXISTS public.platform_settings (
+  id integer PRIMARY KEY DEFAULT 1,
+  gtm_id text,
+  ga4_id text,
+  gads_conversion_id text,
+  gads_conversion_label text,
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO public.platform_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- Add extended profile fields
+ALTER TABLE public.user_profiles 
+  ADD COLUMN IF NOT EXISTS business_name text,
+  ADD COLUMN IF NOT EXISTS country text DEFAULT 'NL',
+  ADD COLUMN IF NOT EXISTS vat_number text,
+  ADD COLUMN IF NOT EXISTS vat_validated boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS vat_rate numeric DEFAULT 21,
+  ADD COLUMN IF NOT EXISTS address_street text,
+  ADD COLUMN IF NOT EXISTS address_city text,
+  ADD COLUMN IF NOT EXISTS address_postal text,
+  ADD COLUMN IF NOT EXISTS price_excl_vat numeric DEFAULT 19.99,
+  ADD COLUMN IF NOT EXISTS price_total numeric DEFAULT 19.99;
