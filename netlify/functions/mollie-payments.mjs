@@ -46,7 +46,7 @@ export default async (req) => {
   if (req.method === 'GET' && url.searchParams.get('type') === 'methods') {
     if (!isAdmin) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
     try {
-      const data = await mollieRequest(mollieKey, '/methods?resource=payments&includeWallets=applepay')
+      const data = await mollieRequest(mollieKey, '/methods?resource=payments&sequenceType=first&includeWallets=applepay')
       const methods = (data._embedded?.methods || []).map(m => ({ id: m.id, description: m.description, image: m.image?.size1x }))
       return new Response(JSON.stringify({ methods }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     } catch (err) {
@@ -136,18 +136,19 @@ export default async (req) => {
         }
       }
 
-      // 2. Create first payment (sets mandate for recurring)
+      // 2. Create first payment with sequenceType=first to set up mandate for recurring
+      // Never pre-select a method — Mollie hosted checkout handles method selection
+      // and automatically creates a SEPA Direct Debit mandate from iDEAL/Bancontact etc.
       const amount = price_total ? price_total.toString() : '19.99'
       const paymentBody = {
         amount: { currency: 'EUR', value: parseFloat(amount).toFixed(2) },
         description: 'WooSyncShop Pro – maandabonnement',
         redirectUrl: return_url || 'https://woosyncshop.com/#payment-return',
         webhookUrl: 'https://woosyncshop.com/api/mollie-webhook',
-        customerId: customerId || undefined,
-        sequenceType: customerId ? 'first' : 'oneoff',
+        customerId: customerId,
+        sequenceType: 'first',
         metadata: { supabase_user_id: user.id, plan: 'pro' },
       }
-      if (method) paymentBody.method = method
       const payment = await mollieRequest(mollieKey, '/payments', 'POST', paymentBody)
 
       if (!payment.id || !payment._links?.checkout?.href) {

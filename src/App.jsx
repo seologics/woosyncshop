@@ -2363,8 +2363,6 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
-  const [selectedMethod, setSelectedMethod] = useState(null);
-
   const handleSignup = async () => {
     setLoading(true); setError(null);
     try {
@@ -2387,13 +2385,11 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   };
 
   const handlePayment = async () => {
-    if (!selectedMethod) { setError("Kies een betaalmethode om verder te gaan."); return; }
     setLoading(true); setError(null);
     try {
       // Ensure we have a fresh session
       let { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        // Fallback: sign in again
         const { data } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
         session = data?.session;
       }
@@ -2406,7 +2402,6 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
           email: form.email,
           name: form.name,
           price_total: vi.total,
-          method: selectedMethod,
           return_url: window.location.origin + "/#payment-return",
         }),
       });
@@ -2554,24 +2549,17 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
         {step === "payment" && <>
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Betaling</h2>
           <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>Start je Pro abonnement</p>
-          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
+          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 13, color: "var(--mx)" }}>Woo Sync Shop Pro · 1 maand</span>
             <span style={{ fontWeight: 700 }}>€{getVatInfo(form.country, form.vat_validated).total}</span>
           </div>
-          <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 8, fontWeight: 600 }}>Kies betaalmethode</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-            {[["ideal", "iDEAL", "🏦"], ["creditcard", "Creditcard", "💳"], ["directdebit", "SEPA Overboeking", "🔄"], ["bancontact", "Bancontact", "🇧🇪"]].map(([id, label, icon]) => (
-              <div key={id} onClick={() => setSelectedMethod(id)}
-                style={{ padding: "10px 14px", background: selectedMethod === id ? "var(--pr-l)" : "var(--s2)",
-                  border: `1px solid ${selectedMethod === id ? "var(--pr)" : "var(--b1)"}`,
-                  borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", transition: "all 0.15s" }}>
-                <span style={{ fontSize: 18 }}>{icon}</span>
-                <span style={{ fontSize: 13, fontWeight: selectedMethod === id ? 600 : 400 }}>{label}</span>
-                {selectedMethod === id && <span style={{ marginLeft: "auto", color: "var(--pr-h)", fontSize: 16 }}>✓</span>}
-              </div>
-            ))}
+          <div style={{ padding: "12px 14px", background: "rgba(91,91,214,0.08)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)", marginBottom: 16, fontSize: 12, color: "var(--mx)", lineHeight: 1.5 }}>
+            💳 Je kiest je betaalmethode op de volgende pagina.<br />
+            <span style={{ color: "var(--dm)" }}>iDEAL, creditcard, SEPA, Bancontact en meer zijn beschikbaar. Bij iDEAL wordt automatisch een SEPA-machtiging aangemaakt voor toekomstige betalingen.</span>
           </div>
-          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading || !selectedMethod} style={{ width: "100%", opacity: selectedMethod ? 1 : 0.6 }}>{loading ? "Verwerken..." : "Betalen →"}</Btn>
+          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading} style={{ width: "100%" }}>
+            {loading ? "Doorsturen naar Mollie..." : "Naar betaalpagina →"}
+          </Btn>
           <div style={{ textAlign: "center", fontSize: 11, color: "var(--dm)", marginTop: 8 }}>🔒 Veilige betaling via Mollie</div>
         </>}
 
