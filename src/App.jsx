@@ -852,10 +852,13 @@ const AdminPanel = () => {
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        // Load all users via Supabase (admin has service role access via serverless)
-        const { data, error } = await supabase.from("user_profiles").select("*");
-        if (error) throw error;
-        // Also get email from auth — we join on id
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        const res = await fetch("/api/admin-users", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error("Laden mislukt");
+        const data = await res.json();
         setUsers(data || []);
       } catch (e) {
         console.error("Failed to load users:", e);
@@ -951,26 +954,7 @@ const AdminPanel = () => {
         {adminTab === "tracking" && <TrackingSettings />}
 
         {/* Platform */}
-        {adminTab === "platform" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>🌐 Platform-brede API keys</div>
-              <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 12 }}>Deze keys gelden als fallback wanneer een gebruiker geen eigen keys heeft ingesteld.</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Platform Gemini API Key"><Inp value="AIza••••••••••••••••••" onChange={() => {}} type="password" /></Field>
-                <Field label="Platform TinyPNG API Key"><Inp value="••••••••••••••••••••" onChange={() => {}} type="password" /></Field>
-              </div>
-            </div>
-            <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>🔌 Mollie configuratie</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Mollie API Key (Live)"><Inp value="live_••••••••••••••••••••" onChange={() => {}} type="password" /></Field>
-                <Field label="Mollie Webhook URL" hint="Ingesteld op Mollie dashboard"><Inp value="https://woosyncshop.com/api/mollie/webhook" onChange={() => {}} /></Field>
-              </div>
-            </div>
-            <Btn variant="primary" onClick={() => editUser && saveUser(editUser)}>Opslaan</Btn>
-          </div>
-        )}
+        {adminTab === "platform" && <PlatformSettings />}
       </div>
 
       {/* Per-user config overlay */}
@@ -2111,7 +2095,7 @@ const CookieBanner = ({ onAccept, onReject }) => (
       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>🍪 Wij gebruiken cookies</div>
       <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.5 }}>
         We gebruiken cookies voor analyses (Google Analytics) en advertenties (Google Ads). Functionele cookies zijn altijd actief.{" "}
-        <span onClick={() => window.location.hash = "privacy"} style={{ color: "var(--pr-h)", cursor: "pointer", textDecoration: "underline" }}>Lees ons cookiebeleid</span>.
+        <span onClick={() => { history.pushState({}, "", "/privacy"); window.dispatchEvent(new PopStateEvent("popstate")); }} style={{ color: "var(--pr-h)", cursor: "pointer", textDecoration: "underline" }}>Lees ons cookiebeleid</span>.
       </div>
     </div>
     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -2343,6 +2327,76 @@ const ContactPage = ({ onBack }) => {
 };
 
 // ─── Tracking Admin Tab ────────────────────────────────────────────────────────
+// ─── Platform Settings Component ──────────────────────────────────────────────
+const PlatformSettings = () => {
+  const [ps, setPs] = useState({ gemini_api_key: "", tinypng_api_key: "", mollie_api_key: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/platform-settings", {
+          headers: { "Authorization": `Bearer ${session?.access_token}` }
+        });
+        const d = await res.json();
+        setPs(p => ({ ...p, gemini_api_key: d.gemini_api_key || "", tinypng_api_key: d.tinypng_api_key || "", mollie_api_key: d.mollie_api_key || "" }));
+      } catch {}
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch("/api/platform-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify(ps),
+      });
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { alert("Opslaan mislukt: " + e.message); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div style={{ padding: 20, color: "var(--mx)", fontSize: 13 }}>Laden...</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>🌐 Platform-brede API keys</div>
+        <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 12 }}>Deze keys gelden als fallback wanneer een gebruiker geen eigen keys heeft ingesteld.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Platform Gemini API Key">
+            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder="AIzaSy..." />
+          </Field>
+          <Field label="Platform TinyPNG API Key">
+            <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="password" placeholder="abcdef..." />
+          </Field>
+        </div>
+      </div>
+      <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>🔌 Mollie configuratie</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Mollie API Key (Live)">
+            <Inp value={ps.mollie_api_key} onChange={e => setPs(p => ({ ...p, mollie_api_key: e.target.value }))} type="password" placeholder="live_..." />
+          </Field>
+          <Field label="Mollie Webhook URL" hint="Ingesteld op Mollie dashboard">
+            <Inp value="https://woosyncshop.com/api/mollie/webhook" onChange={() => {}} />
+          </Field>
+        </div>
+      </div>
+      <Btn variant="primary" onClick={save} disabled={saving} style={{ alignSelf: "flex-start", minWidth: 160 }}>
+        {saved ? "✓ Opgeslagen" : saving ? "Opslaan..." : "Opslaan"}
+      </Btn>
+    </div>
+  );
+};
+
 const TrackingSettings = () => {
   const [settings, setSettings] = useState({ gtm_id: "", ga4_id: "", gads_conversion_id: "", gads_conversion_label: "" });
   const [loading, setLoading] = useState(true);
@@ -2443,14 +2497,44 @@ const TrackingSettings = () => {
 };
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
+const STATIC_PAGES = ["privacy", "voorwaarden", "contact"];
+const getPageFromPath = () => {
+  const p = window.location.pathname.replace(/^\//, "");
+  return STATIC_PAGES.includes(p) ? p : null;
+};
+
 export default function App() {
-  const [view, setView] = useState("loading"); // loading | landing | app | privacy | voorwaarden | contact
+  const initPage = getPageFromPath();
+  const [view, setView] = useState(initPage || "loading"); // loading | landing | app | privacy | voorwaarden | contact
   const [authModal, setAuthModal] = useState(null);
   const [user, setUser] = useState(null);
   const [cookieConsent, setCookieConsent] = useState(() => localStorage.getItem("wss_cookie_consent")); // null | accepted | rejected
 
+  // pushState navigation for static pages
+  const goPage = (page) => {
+    history.pushState({ page }, "", "/" + page);
+    setView(page);
+  };
+  const goBack = (resolvedUser) => {
+    history.pushState({}, "", "/");
+    setView(resolvedUser ?? user ? "app" : "landing");
+  };
+
+  // Handle browser back/forward button (BEFORE any early returns)
+  useEffect(() => {
+    const onPop = () => {
+      const p = getPageFromPath();
+      if (p) { setView(p); }
+      else { setView(user ? "app" : "landing"); }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [user]);
+
   // Check for existing Supabase session on mount
   useEffect(() => {
+    // If we landed on a static page directly, skip loading state
+    if (initPage) return;
     const init = async () => {
       try {
         const session = await getSession();
@@ -2461,7 +2545,6 @@ export default function App() {
         } else {
           setView("landing");
         }
-        // Listen for auth changes
         supabase.auth.onAuthStateChange((_event, session) => {
           if (session?.user) {
             const u = session.user;
@@ -2473,7 +2556,6 @@ export default function App() {
           }
         });
       } catch {
-        // Supabase not configured yet — show landing
         setView("landing");
       }
     };
@@ -2484,7 +2566,6 @@ export default function App() {
     setUser(userData);
     setAuthModal(null);
     setView("app");
-    // Fire Google Ads conversion on signup
     try {
       if (window.gtag) window.gtag("event", "signup_complete", { event_category: "conversion" });
       if (window.dataLayer) window.dataLayer.push({ event: "signup_complete" });
@@ -2493,20 +2574,10 @@ export default function App() {
 
   const handleLogout = async () => {
     try { await signOut(); } catch {}
-    window.location.hash = "";
+    history.pushState({}, "", "/");
     setUser(null);
     setView("landing");
   };
-
-  // Hash-based routing for static pages (MUST be before any early returns)
-  useEffect(() => {
-    const onHash = () => {
-      const h = window.location.hash.replace("#", "");
-      if (["privacy", "voorwaarden", "contact"].includes(h)) setView(h);
-    };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
 
   const acceptCookies = () => { localStorage.setItem("wss_cookie_consent", "accepted"); setCookieConsent("accepted"); };
   const rejectCookies = () => { localStorage.setItem("wss_cookie_consent", "rejected"); setCookieConsent("rejected"); };
@@ -2525,15 +2596,9 @@ export default function App() {
     );
   }
 
-  const goPage = (page) => { window.location.hash = page; setView(page); };
-  const goBack = () => {
-    window.location.hash = "";
-    setView(user ? "app" : "landing");
-  };
-
-  if (view === "privacy") return <><G /><PrivacyPage onBack={goBack} /></>;
-  if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={goBack} /></>;
-  if (view === "contact") return <><G /><ContactPage onBack={goBack} /></>;
+  if (view === "privacy") return <><G /><PrivacyPage onBack={() => goBack()} /></>;
+  if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={() => goBack()} /></>;
+  if (view === "contact") return <><G /><ContactPage onBack={() => goBack()} /></>;
 
   return (
     <>
