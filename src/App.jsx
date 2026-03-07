@@ -2337,6 +2337,33 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedMethod, setSelectedMethod] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [methodsLoading, setMethodsLoading] = useState(false);
+
+  // Load Mollie payment methods (sequenceType=first) when entering payment step
+  useEffect(() => {
+    if (step !== "payment") return;
+    setMethodsLoading(true);
+    fetch("/api/mollie-payments?type=methods")
+      .then(r => r.json())
+      .then(data => {
+        const methods = Array.isArray(data) ? data : (data.methods || []);
+        setPaymentMethods(methods);
+        if (methods.length > 0 && !selectedMethod) setSelectedMethod(methods[0].id);
+      })
+      .catch(() => {
+        // Fallback static list if API fails
+        setPaymentMethods([
+          { id: "ideal", description: "iDEAL", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/ideal.png" } },
+          { id: "creditcard", description: "Creditcard", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/creditcard.png" } },
+          { id: "directdebit", description: "SEPA Overboeking", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/directdebit.png" } },
+          { id: "bancontact", description: "Bancontact", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/bancontact.png" } },
+        ]);
+        setSelectedMethod("ideal");
+      })
+      .finally(() => setMethodsLoading(false));
+  }, [step]);
   const isFree = form.code.toLowerCase() === "freeforever";
   const vatInfo = getVatInfo(form.country, form.vat_validated);
   const isEUNonNL = EU_COUNTRIES.some(c => c.code === form.country) && form.country !== "NL";
@@ -2418,6 +2445,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
           email: form.email,
           name: form.name,
           price_total: vi.total,
+          method: selectedMethod,
           return_url: window.location.origin + "/#payment-return",
         }),
       });
@@ -2569,12 +2597,26 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
             <span style={{ fontSize: 13, color: "var(--mx)" }}>Woo Sync Shop Pro · 1 maand</span>
             <span style={{ fontWeight: 700 }}>€{getVatInfo(form.country, form.vat_validated).total}</span>
           </div>
-          <div style={{ padding: "12px 14px", background: "rgba(91,91,214,0.08)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)", marginBottom: 16, fontSize: 12, color: "var(--mx)", lineHeight: 1.5 }}>
-            💳 Je kiest je betaalmethode op de volgende pagina.<br />
-            <span style={{ color: "var(--dm)" }}>iDEAL, creditcard, SEPA, Bancontact en meer zijn beschikbaar. Bij iDEAL wordt automatisch een SEPA-machtiging aangemaakt voor toekomstige betalingen.</span>
-          </div>
-          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading} style={{ width: "100%" }}>
-            {loading ? "Doorsturen naar Mollie..." : "Naar betaalpagina →"}
+          <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 8, fontWeight: 600 }}>Kies betaalmethode</div>
+          {methodsLoading ? (
+            <div style={{ padding: "16px 0", color: "var(--dm)", fontSize: 13 }}>Betaalmethoden laden...</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {paymentMethods.map(m => (
+                <div key={m.id} onClick={() => setSelectedMethod(m.id)}
+                  style={{ padding: "10px 14px", background: selectedMethod === m.id ? "var(--pr-l)" : "var(--s2)",
+                    border: `1px solid ${selectedMethod === m.id ? "var(--pr)" : "var(--b1)"}`,
+                    borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", transition: "all 0.15s" }}>
+                  {m.image?.size1x && <img src={m.image.size1x} alt={m.description} style={{ width: 28, height: 20, objectFit: "contain" }} />}
+                  <span style={{ fontSize: 13, fontWeight: selectedMethod === m.id ? 600 : 400 }}>{m.description}</span>
+                  {m.id === "ideal" && <span style={{ marginLeft: 4, fontSize: 11, color: "var(--dm)" }}>(incl. SEPA-machtiging)</span>}
+                  {selectedMethod === m.id && <span style={{ marginLeft: "auto", color: "var(--pr-h)", fontSize: 16 }}>✓</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading || !selectedMethod || methodsLoading} style={{ width: "100%", opacity: selectedMethod ? 1 : 0.6 }}>
+            {loading ? "Doorsturen naar Mollie..." : "Betalen →"}
           </Btn>
           <div style={{ textAlign: "center", fontSize: 11, color: "var(--dm)", marginTop: 8 }}>🔒 Veilige betaling via Mollie</div>
         </>}

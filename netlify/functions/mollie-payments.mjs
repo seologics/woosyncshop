@@ -149,6 +149,9 @@ export default async (req) => {
         sequenceType: 'first',
         metadata: { supabase_user_id: user.id, plan: 'pro' },
       }
+      // Pass selected method so user lands directly on their chosen payment form
+      // sequenceType=first is compatible with: ideal, creditcard, directdebit, bancontact etc.
+      if (method) paymentBody.method = method
       const payment = await mollieRequest(mollieKey, '/payments', 'POST', paymentBody)
 
       if (!payment.id || !payment._links?.checkout?.href) {
