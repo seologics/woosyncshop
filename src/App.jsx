@@ -1168,12 +1168,9 @@ const AdminPanel = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      // Derive status: free_forever and pro get "active", suspended stays suspended
-      const derivedStatus = u.plan === "suspended" ? "suspended" : "active";
       const payload = {
         id: u.id,
         plan: u.plan,
-        status: derivedStatus,
         max_shops: u.max_shops ? parseInt(u.max_shops) : 10,
         is_admin: u.is_admin ?? false,
         ai_taxonomy_enabled: u.ai_taxonomy_enabled ?? false,

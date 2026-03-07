@@ -33,7 +33,6 @@ export default async (req) => {
       // Whitelist allowed fields (never allow id to be overwritten)
       const allowed = {
         plan: updates.plan,
-        status: updates.status,
         max_shops: updates.max_shops != null ? parseInt(updates.max_shops) : undefined,
         is_admin: updates.is_admin ?? undefined,
         ai_taxonomy_enabled: updates.ai_taxonomy_enabled ?? undefined,
