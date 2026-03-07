@@ -51,129 +51,17 @@ const G = () => {
   return null;
 };
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-const SITES = [
-  { id: 1, name: "HaagDirect NL", domain: "haagdirect.nl", locale: "nl_NL", flag: "🇳🇱", color: "#F59E0B", connected: true },
-  { id: 2, name: "BamboeHaag BE (FR)", domain: "bamboehaag.be", locale: "fr_BE", flag: "🇧🇪", color: "#5B5BD6", connected: true },
-  { id: 3, name: "BamboeHaag BE (NL)", domain: "bamboehaag.be/nl", locale: "nl_BE", flag: "🇧🇪", color: "#22C55E", connected: true },
-];
+// ─── Constants ────────────────────────────────────────────────────────────────
+const SUPERADMIN_EMAIL = "leadingvation@gmail.com";
 
-const GLOBAL_ATTRIBUTES = [
-  { id: 1, slug: "pa_hoogte", name: "Hoogte", terms: ["60-80cm","80-100cm","100-125cm","125-150cm","150-175cm","175-200cm","200+ cm"] },
-  { id: 2, slug: "pa_pot", name: "Pot", terms: ["2L","5L","5.5L","10L","15L","20L"] },
-  { id: 3, slug: "pa_kleur", name: "Kleur", terms: ["Groen","Geel","Rood","Zwart","Paars"] },
-  { id: 4, slug: "pa_soort", name: "Soort", terms: ["Fargesia","Phyllostachys","Bambusa","Pleioblastus"] },
-  { id: 5, slug: "pa_identifier", name: "Identifier", terms: ["FM-JUMBO","FM-RUFA","PN-BISSET","PN-AUREOSULCATA"] },
-];
-
-const CATEGORIES = [
-  { id: 10, name: "Bamboe planten", slug: "bamboe-planten", parent: 0 },
-  { id: 11, name: "Fargesia", slug: "fargesia", parent: 10 },
-  { id: 12, name: "Phyllostachys", slug: "phyllostachys", parent: 10 },
-  { id: 13, name: "Bamboehaag", slug: "bamboehaag", parent: 10 },
-  { id: 14, name: "Triple Packs", slug: "triple-packs", parent: 10 },
-  { id: 15, name: "Aanbiedingen", slug: "aanbiedingen", parent: 0 },
-];
-
-const mkVariation = (id, attrs, sku, price, stock) => ({
-  id, sku, enabled: true, virtual: false, downloadable: false,
-  manage_stock: true, stock_quantity: stock, stock_status: stock > 0 ? "instock" : "outofstock",
-  regular_price: price, sale_price: "", gtin: "",
-  attributes: attrs,
-  wqm_tiers: [
-    { qty: 3, price: (parseFloat(price) * 0.95).toFixed(2) },
-    { qty: 6, price: (parseFloat(price) * 0.90).toFixed(2) },
-    { qty: 9, price: (parseFloat(price) * 0.85).toFixed(2) },
-  ],
-  wqm_settings: { min_qty: "1", max_qty: "", default_qty: "1", step: "1", tiered_pricing_type: "fixed", qty_design: "full_width_swatches", title: "Selecteer aantal", variant_selector: false,
-    dyo_rows: [
-      { qty: 3, label: "3 stuks", byline: `€${(parseFloat(price)*3*0.95).toFixed(2)}`, label_right: "1 doos", highlight: `€${(parseFloat(price)*0.95).toFixed(2)} per stuk` },
-      { qty: 6, label: "6 stuks", byline: `€${(parseFloat(price)*6*0.90).toFixed(2)}`, label_right: "2 dozen", highlight: `€${(parseFloat(price)*0.90).toFixed(2)} per stuk` },
-    ]
-  },
-  images: [],
-  connected_fields: { regular_price: true, stock_quantity: true, wqm_tiers: true, wqm_settings: false },
-});
-
-const PRODUCTS = [
-  {
-    id: 1001, name: "Fargesia murielae 'Jumbo'", slug: "fargesia-murielae-jumbo",
-    sku: "FM-JUMBO", type: "variable", status: "publish",
-    manage_stock: false, stock_quantity: null, stock_status: "instock",
-    regular_price: "", sale_price: "",
-    short_description: "Fargesia murielae 'Jumbo' is een niet-woekerende bamboe met een prachtige, weelderige groei. Perfect als privacy haag.",
-    description: "<p>Fargesia murielae 'Jumbo' is de meest populaire niet-woekerende bamboe voor tuinen. Met haar elegante, hangende takken en dichte groeiwijze vormt zij een perfecte levende afscheiding.</p><p><strong>Kenmerken:</strong></p><ul><li>Volwassen hoogte: 3-4 meter</li><li>Niet-woekerende soort</li><li>Winterhard tot -25°C</li></ul>",
-    categories: [10, 11, 13],
-    featured_image: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&h=200&fit=crop",
-    gallery_images: [],
-    attributes: [
-      { id: 1, slug: "pa_hoogte", values: ["100-125cm","125-150cm","150-175cm"], visible: true, variation: true },
-      { id: 2, slug: "pa_pot", values: ["5L","5.5L","10L"], visible: true, variation: false },
-      { id: 4, slug: "pa_soort", values: ["Fargesia"], visible: true, variation: false },
-      { id: 5, slug: "pa_identifier", values: ["FM-JUMBO"], visible: false, variation: false },
-    ],
-    wqm_tiers: [], wqm_settings: { tiered_pricing_type: "fixed" },
-    tax_status: "taxable", tax_class: "reduced-rate",
-    afhaalkkorting_active: false, product_korting_active: true, product_korting_pct: "5",
-    variations: [
-      mkVariation(10011, { pa_hoogte: "100-125cm" }, "FM-JUMBO-100", "24.95", 42),
-      mkVariation(10012, { pa_hoogte: "125-150cm" }, "FM-JUMBO-125", "29.95", 28),
-      mkVariation(10013, { pa_hoogte: "150-175cm" }, "FM-JUMBO-150", "34.95", 15),
-    ],
-    connected_sites: [1, 2, 3],
-    connected_fields: { name: false, description: true, short_description: false, categories: true, featured_image: true },
-    pending_changes: { stock_quantity: true },
-  },
-  {
-    id: 1002, name: "Nitida Bamboe Planten Mix 100cm Triple Pack", slug: "nitida-bamboe-planten-mix-100cm-triple-pack",
-    sku: "NM-100CM-TRIPLE-PACK", type: "variable", status: "publish",
-    manage_stock: false, stock_quantity: null, stock_status: "instock",
-    regular_price: "", sale_price: "",
-    short_description: "De Nitida Bamboe Planten Mix 100 cm is een veelzijdige triple pack met drie verschillende niet-woekerende Fargesia nitida soorten: Obelisk, Winter Joy en Volcano.",
-    description: "<p>Een unieke combinatie van drie prachtige Fargesia nitida soorten in één voordelige triple pack.</p>",
-    categories: [10, 11, 14],
-    featured_image: "https://images.unsplash.com/photo-1527435443382-f2e40c29ded3?w=200&h=200&fit=crop",
-    gallery_images: [],
-    attributes: [
-      { id: 1, slug: "pa_hoogte", values: ["100+ cm"], visible: true, variation: true },
-      { id: 2, slug: "pa_pot", values: ["5.5L"], visible: true, variation: false },
-      { id: 5, slug: "pa_identifier", values: ["NM-TRIPLE-100"], visible: false, variation: false },
-    ],
-    wqm_tiers: [], wqm_settings: { tiered_pricing_type: "fixed" },
-    tax_status: "taxable", tax_class: "reduced-rate",
-    afhaalkkorting_active: false, product_korting_active: false, product_korting_pct: "",
-    variations: [
-      mkVariation(10021, { pa_hoogte: "100+ cm" }, "NM-100CM-TRIPLE-PACK", "24.50", 67),
-    ],
-    connected_sites: [1, 2],
-    connected_fields: { name: false, description: false, short_description: false, categories: true, featured_image: true },
-    pending_changes: {},
-  },
-  {
-    id: 1003, name: "Phyllostachys bissetii", slug: "phyllostachys-bissetii",
-    sku: "PN-BISSET", type: "simple", status: "publish",
-    manage_stock: true, stock_quantity: 12, stock_status: "instock",
-    regular_price: "19.95", sale_price: "15.95",
-    short_description: "Phyllostachys bissetii is een snelgroeiende bamboe die geschikt is als windkering en privacy scherm.",
-    description: "<p>Een robuuste bamboesoort die uitstekend bestand is tegen wind en kou.</p>",
-    categories: [10, 12, 13],
-    featured_image: "https://images.unsplash.com/photo-1567336273898-ebbf9eb3c3bf?w=200&h=200&fit=crop",
-    gallery_images: [],
-    attributes: [
-      { id: 4, slug: "pa_soort", values: ["Phyllostachys"], visible: true, variation: false },
-      { id: 1, slug: "pa_hoogte", values: ["150-175cm"], visible: true, variation: false },
-    ],
-    wqm_tiers: [
-      { qty: 3, price: "18.50" }, { qty: 5, price: "17.95" }, { qty: 10, price: "16.95" },
-    ],
-    wqm_settings: { tiered_pricing_type: "fixed", min_qty: "1", max_qty: "", default_qty: "1", step: "1", dyo_rows: [] },
-    tax_status: "taxable", tax_class: "reduced-rate",
-    afhaalkkorting_active: true, product_korting_active: false, product_korting_pct: "",
-    variations: [],
-    connected_sites: [1],
-    connected_fields: {},
-    pending_changes: { regular_price: true },
-  },
+const LOCALE_OPTIONS = [
+  { value: "nl_NL", label: "nl_NL – Nederlands (NL)" },
+  { value: "fr_BE", label: "fr_BE – Français (BE)" },
+  { value: "nl_BE", label: "nl_BE – Nederlands (BE)" },
+  { value: "de_DE", label: "de_DE – Deutsch (DE)" },
+  { value: "en_US", label: "en_US – English (US)" },
+  { value: "en_GB", label: "en_GB – English (GB)" },
+  { value: "fr_FR", label: "fr_FR – Français (FR)" },
 ];
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
@@ -335,18 +223,22 @@ const QtyDesignBuilder = ({ rows, onChange }) => {
 };
 
 // ─── Product Edit Modal ───────────────────────────────────────────────────────
-const EDIT_TABS = [
+const BASE_EDIT_TABS = [
   { id: "general", label: "Algemeen", icon: "⚙" },
   { id: "stock", label: "Voorraad", icon: "📦" },
   { id: "variations", label: "Variaties", icon: "🔀" },
-  { id: "quantity", label: "Hoeveelheid", icon: "🔢" },
   { id: "attributes", label: "Attributen", icon: "🏷" },
   { id: "description", label: "Beschrijving", icon: "📝" },
   { id: "images", label: "Afbeeldingen", icon: "🖼" },
   { id: "connected", label: "Verbonden", icon: "🔗" },
 ];
+// "Hoeveelheid" tab is only shown when the active shop has WQM installed
 
 const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite }) => {
+  const hasWqm = activeSite?.installed_plugins?.includes("woocommerce-quantity-manager") || activeSite?.has_wqm;
+  const editTabs = hasWqm
+    ? [...BASE_EDIT_TABS.slice(0, 3), { id: "quantity", label: "Hoeveelheid", icon: "🔢" }, ...BASE_EDIT_TABS.slice(3)]
+    : BASE_EDIT_TABS;
   const [tab, setTab] = useState("general");
   const [p, setP] = useState(null);
   const [confirmAttr, setConfirmAttr] = useState(null);
@@ -907,20 +799,44 @@ const HreflangView = ({ sites }) => {
   );
 };
 
-// ─── Admin Panel (root only) ──────────────────────────────────────────────────
-const MOCK_USERS = [
-  { id: 1, name: "Roeland V.", email: "roeland@haagdirect.nl", plan: "free_forever", sites: 3, status: "active", gemini_model: "gemini-2.0-flash", img_max_kb: 400, img_quality: 85, img_max_width: 1200, ai_taxonomy_enabled: true, ai_taxonomy_model: "gemini-2.0-flash", ai_taxonomy_threshold: "80" },
-  { id: 2, name: "Jan de Vries", email: "jan@example.nl", plan: "pro", sites: 2, status: "active", gemini_model: "gemini-2.0-flash-lite", img_max_kb: 400, img_quality: 80, img_max_width: 1200, ai_taxonomy_enabled: true, ai_taxonomy_model: "gemini-2.0-flash-lite", ai_taxonomy_threshold: "85" },
-  { id: 3, name: "Sophie Martin", email: "sophie@example.be", plan: "pro", sites: 5, status: "active", gemini_model: "gemini-2.0-flash-lite", img_max_kb: 400, img_quality: 85, img_max_width: 1200, ai_taxonomy_enabled: false, ai_taxonomy_model: "gemini-2.0-flash-lite", ai_taxonomy_threshold: "80" },
-  { id: 4, name: "Lars Nielsen", email: "lars@example.com", plan: "pro", sites: 1, status: "pending", gemini_model: "gemini-2.0-flash-lite", img_max_kb: 400, img_quality: 85, img_max_width: 1200, ai_taxonomy_enabled: false, ai_taxonomy_model: "gemini-2.0-flash-lite", ai_taxonomy_threshold: "80" },
-];
-
+// ─── Admin Panel (superadmin only) ────────────────────────────────────────────
 const AdminPanel = () => {
   const [adminTab, setAdminTab] = useState("users");
-  const [users, setUsers] = useState(MOCK_USERS);
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [editUser, setEditUser] = useState(null);
 
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        // Load all users via Supabase (admin has service role access via serverless)
+        const { data, error } = await supabase.from("user_profiles").select("*");
+        if (error) throw error;
+        // Also get email from auth — we join on id
+        setUsers(data || []);
+      } catch (e) {
+        console.error("Failed to load users:", e);
+      } finally {
+        setUsersLoading(false);
+      }
+    };
+    loadUsers();
+  }, []);
+
   const updUser = (id, field, val) => setUsers(us => us.map(u => u.id === id ? { ...u, [field]: val } : u));
+  const saveUser = async (u) => {
+    try {
+      await supabase.from("user_profiles").update({
+        plan: u.plan, max_shops: u.max_shops, is_admin: u.is_admin,
+        ai_taxonomy_enabled: u.ai_taxonomy_enabled,
+        ai_taxonomy_model: u.ai_taxonomy_model,
+        ai_taxonomy_threshold: u.ai_taxonomy_threshold,
+        gemini_model: u.gemini_model, img_max_kb: u.img_max_kb,
+        img_quality: u.img_quality, img_max_width: u.img_max_width,
+      }).eq("id", u.id);
+      setEditUser(null);
+    } catch (e) { alert("Opslaan mislukt: " + e.message); }
+  };
 
   return (
     <div className="fade-in">
@@ -1300,14 +1216,86 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
     </div>
   );
 };
-const SettingsView = ({ sites, isAdmin }) => {
+const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDeleted }) => {
   const [settingsTab, setSettingsTab] = useState("sites");
   const [aiEnabled, setAiEnabled] = useState(false);
-  // In production this comes from the authenticated user's DB record.
-  // For the demo: Roeland's account has ai_taxonomy_enabled: true
-  const aiTaxonomyUnlocked = true;
+  const [userProfile, setUserProfile] = useState(null);
+  const aiTaxonomyUnlocked = userProfile?.ai_taxonomy_enabled ?? false;
+  const [profileForm, setProfileForm] = useState({ name: user?.name || "", password: "" });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [addShopOpen, setAddShopOpen] = useState(false);
+  const [newShop, setNewShop] = useState({ name: "", site_url: "", locale: "nl_NL", flag: "🌐", consumer_key: "", consumer_secret: "" });
+  const [testingShop, setTestingShop] = useState(null); // shopId being tested
+  const [testResults, setTestResults] = useState({}); // {shopId: {ok, wc_version, ...}}
+  const [savingShop, setSavingShop] = useState(false);
 
-  if (isAdmin) return <AdminPanel />;
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("user_profiles").select("*").eq("id", user.id).single()
+      .then(({ data }) => { if (data) { setUserProfile(data); setAiEnabled(data.ai_taxonomy_enabled || false); } });
+  }, [user?.id]);
+
+  const testConnection = async (shop) => {
+    setTestingShop(shop.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/woo-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ site_url: shop.site_url, consumer_key: shop.consumer_key, consumer_secret: shop.consumer_secret })
+      });
+      const result = await res.json();
+      setTestResults(r => ({ ...r, [shop.id]: result }));
+      if (result.ok) {
+        // Detect WQM plugin from system status
+        const statusRes = await fetch("/api/woo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ shop_id: shop.id, endpoint: "system_status", method: "GET" })
+        });
+        const status = await statusRes.json();
+        const activePlugins = status?.active_plugins || [];
+        const hasWqm = activePlugins.some(p => p.plugin?.includes("quantity-manager") || p.name?.toLowerCase().includes("quantity manager"));
+        const updatedShop = { ...shop, wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, last_connected: new Date().toISOString() };
+        await supabase.from("shops").update({ wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, last_connected: new Date().toISOString() }).eq("id", shop.id);
+        onShopUpdated?.(updatedShop);
+      }
+    } catch (e) {
+      setTestResults(r => ({ ...r, [shop.id]: { ok: false, error: e.message } }));
+    } finally {
+      setTestingShop(null); }
+  };
+
+  const handleAddShop = async () => {
+    if (!newShop.name || !newShop.site_url || !newShop.consumer_key || !newShop.consumer_secret) return alert("Vul alle verplichte velden in");
+    setSavingShop(true);
+    try {
+      const { data, error } = await supabase.from("shops").insert([{ ...newShop, user_id: user.id }]).select().single();
+      if (error) throw error;
+      onShopAdded?.(data);
+      setAddShopOpen(false);
+      setNewShop({ name: "", site_url: "", locale: "nl_NL", flag: "🌐", consumer_key: "", consumer_secret: "" });
+    } catch (e) { alert("Shop toevoegen mislukt: " + e.message); }
+    finally { setSavingShop(false); }
+  };
+
+  const handleDeleteShop = async (shopId) => {
+    if (!confirm("Weet je zeker dat je deze shop wil verwijderen?")) return;
+    await supabase.from("shops").delete().eq("id", shopId);
+    onShopDeleted?.(shopId);
+  };
+
+  const handleSaveProfile = async () => {
+    setProfileSaving(true);
+    try {
+      if (profileForm.password) {
+        await supabase.auth.updateUser({ password: profileForm.password });
+      }
+      await supabase.from("user_profiles").update({ full_name: profileForm.name }).eq("id", user.id);
+    } catch (e) { alert("Opslaan mislukt: " + e.message); }
+    finally { setProfileSaving(false); }
+  };
 
   return (
     <div>
@@ -1319,33 +1307,64 @@ const SettingsView = ({ sites, isAdmin }) => {
             <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", fontSize: 13, color: "var(--mx)" }}>
               Voeg je WooCommerce shops toe via REST API. Genereer een Consumer Key &amp; Secret in <strong style={{ color: "var(--tx)" }}>WooCommerce → Instellingen → Geavanceerd → REST API</strong> met <em>lees/schrijf</em>-rechten.
             </div>
-            {sites.map(site => (
-              <div key={site.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-                <div style={{ padding: "12px 16px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 18 }}>{site.flag}</span>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{site.name}</div>
-                    <div style={{ fontSize: 11, color: "var(--dm)" }}>{site.locale} · {site.domain}</div>
+            {shops.map(shop => {
+              const tr = testResults[shop.id];
+              const isTesting = testingShop === shop.id;
+              return (
+                <div key={shop.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+                  <div style={{ padding: "12px 16px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 18 }}>{shop.flag || "🌐"}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{shop.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--dm)" }}>{shop.locale} · {shop.site_url?.replace("https://","").replace("http://","")}</div>
+                    </div>
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                      {shop.last_connected && <Badge color="green">✓ Verbonden</Badge>}
+                      {shop.has_wqm && <Badge color="blue">WQM</Badge>}
+                      <Btn variant="ghost" size="sm" onClick={() => handleDeleteShop(shop.id)}>🗑</Btn>
+                    </div>
                   </div>
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-                    <Badge color="green">✓ Verbonden</Badge>
-                    <Btn variant="ghost" size="sm">🗑</Btn>
+                  <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <Field label="Site URL"><Inp value={shop.site_url || ""} onChange={() => {}} readOnly /></Field>
+                    <Field label="Taal / Locale"><Inp value={shop.locale || ""} onChange={() => {}} readOnly /></Field>
+                    <Field label="Consumer Key"><Inp value="ck_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
+                    <Field label="Consumer Secret"><Inp value="cs_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
+                    <div style={{ gridColumn: "1/-1", display: "flex", gap: 8, alignItems: "center" }}>
+                      {tr && (
+                        tr.ok
+                          ? <><div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--gr)" }} />
+                            <span style={{ fontSize: 12, color: "var(--mx)" }}>OK · WooCommerce {tr.wc_version} · WordPress {tr.wp_version}{shop.has_wqm ? " · WQM actief" : ""}</span></>
+                          : <><div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--re)" }} />
+                            <span style={{ fontSize: 12, color: "var(--re)" }}>Verbinding mislukt: {tr.error}</span></>
+                      )}
+                      <Btn variant="secondary" size="sm" style={{ marginLeft: "auto" }} onClick={() => testConnection(shop)} disabled={isTesting}>
+                        {isTesting ? "Testen..." : "Verbinding testen"}
+                      </Btn>
+                    </div>
                   </div>
                 </div>
-                <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Field label="Site URL" required><Inp value={`https://${site.domain}`} onChange={() => {}} /></Field>
-                  <Field label="Taal / Locale"><Sel value={site.locale} onChange={() => {}} options={[{ value: "nl_NL", label: "nl_NL – Nederlands (NL)" }, { value: "fr_BE", label: "fr_BE – Français (BE)" }, { value: "nl_BE", label: "nl_BE – Nederlands (BE)" }]} /></Field>
-                  <Field label="Consumer Key" required><Inp value="ck_••••••••••••••••••••" onChange={() => {}} type="password" /></Field>
-                  <Field label="Consumer Secret" required><Inp value="cs_••••••••••••••••••••" onChange={() => {}} type="password" /></Field>
-                  <div style={{ gridColumn: "1/-1", display: "flex", gap: 8, alignItems: "center" }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--gr)" }} />
-                    <span style={{ fontSize: 12, color: "var(--mx)" }}>Verbinding OK · WooCommerce 9.4 · WordPress 6.7</span>
-                    <Btn variant="secondary" size="sm" style={{ marginLeft: "auto" }}>Verbinding testen</Btn>
-                  </div>
+              );
+            })}
+            {/* Add shop form */}
+            {addShopOpen ? (
+              <div style={{ border: "1px solid var(--pr-l)", borderRadius: "var(--rd-lg)", padding: 20, background: "var(--s2)" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Nieuwe shop toevoegen</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <Field label="Naam" required><Inp value={newShop.name} onChange={e => setNewShop(s => ({ ...s, name: e.target.value }))} placeholder="bijv. HaagDirect NL" /></Field>
+                  <Field label="Site URL" required><Inp value={newShop.site_url} onChange={e => setNewShop(s => ({ ...s, site_url: e.target.value.replace(/\/$/, "") }))} placeholder="https://mijnshop.nl" /></Field>
+                  <Field label="Taal / Locale" required><Sel value={newShop.locale} onChange={v => setNewShop(s => ({ ...s, locale: v }))} options={LOCALE_OPTIONS} /></Field>
+                  <Field label="Vlag emoji"><Inp value={newShop.flag} onChange={e => setNewShop(s => ({ ...s, flag: e.target.value }))} placeholder="🇳🇱" /></Field>
+                  <Field label="Consumer Key" required><Inp value={newShop.consumer_key} onChange={e => setNewShop(s => ({ ...s, consumer_key: e.target.value }))} placeholder="ck_..." type="password" /></Field>
+                  <Field label="Consumer Secret" required><Inp value={newShop.consumer_secret} onChange={e => setNewShop(s => ({ ...s, consumer_secret: e.target.value }))} placeholder="cs_..." type="password" /></Field>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <Btn variant="primary" onClick={handleAddShop} disabled={savingShop}>{savingShop ? "Opslaan..." : "Shop opslaan"}</Btn>
+                  <Btn variant="ghost" onClick={() => setAddShopOpen(false)}>Annuleren</Btn>
                 </div>
               </div>
-            ))}
-            <Btn variant="primary" icon="+">Shop toevoegen</Btn>
+            ) : (
+              <Btn variant="primary" icon="+" onClick={() => setAddShopOpen(true)}>Shop toevoegen</Btn>
+            )}
           </div>
         )}
         {settingsTab === "ai" && (
@@ -1372,10 +1391,10 @@ const SettingsView = ({ sites, isAdmin }) => {
         )}
         {settingsTab === "profile" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 480 }}>
-            <Field label="Naam"><Inp value="Roeland V." onChange={() => {}} /></Field>
-            <Field label="E-mailadres"><Inp value="roeland@haagdirect.nl" onChange={() => {}} type="email" /></Field>
-            <Field label="Nieuw wachtwoord" hint="Laat leeg om het huidig wachtwoord te bewaren"><Inp value="" onChange={() => {}} type="password" placeholder="••••••••" /></Field>
-            <Btn variant="primary" style={{ alignSelf: "flex-start" }}>Profiel opslaan</Btn>
+            <Field label="Naam"><Inp value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} /></Field>
+            <Field label="E-mailadres"><Inp value={user?.email || ""} onChange={() => {}} type="email" readOnly style={{ opacity: 0.6 }} /></Field>
+            <Field label="Nieuw wachtwoord" hint="Laat leeg om het huidig wachtwoord te bewaren"><Inp value={profileForm.password} onChange={e => setProfileForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" /></Field>
+            <Btn variant="primary" style={{ alignSelf: "flex-start" }} onClick={handleSaveProfile} disabled={profileSaving}>{profileSaving ? "Opslaan..." : "Profiel opslaan"}</Btn>
           </div>
         )}
       </div>
@@ -1384,7 +1403,7 @@ const SettingsView = ({ sites, isAdmin }) => {
 };
 
 // ─── Top Nav ──────────────────────────────────────────────────────────────────
-const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin }) => {
+const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user }) => {
   const [siteOpen, setSiteOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -1450,12 +1469,36 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
   );
 };
 
-// ─── Dashboard App ────────────────────────────────────────────────────────────
+// ─── SuperAdmin Dashboard ──────────────────────────────────────────────────────
+const SuperAdminDashboard = ({ user, onLogout }) => {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
+      {/* Superadmin nav */}
+      <nav style={{ height: 56, padding: "0 24px", display: "flex", alignItems: "center", gap: 16, background: "var(--s1)", borderBottom: "1px solid var(--b1)", flexShrink: 0 }}>
+        <div style={{ fontFamily: "var(--font-h)", fontWeight: 800, fontSize: 18, letterSpacing: "-0.03em" }}>
+          <span style={{ color: "var(--pr-h)" }}>Woo</span> Sync<span style={{ color: "var(--pr-h)" }}>Shop</span>
+          <span style={{ marginLeft: 8, fontSize: 11, padding: "2px 6px", background: "var(--pr-l)", color: "var(--pr-h)", borderRadius: 4, fontFamily: "var(--font-b)", fontWeight: 600 }}>SUPERADMIN</span>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--mx)" }}>{user.email}</span>
+          <Btn variant="ghost" size="sm" onClick={onLogout}>Uitloggen</Btn>
+        </div>
+      </nav>
+      <div style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
+        <AdminPanel />
+      </div>
+    </div>
+  );
+};
+
+// ─── User Dashboard ────────────────────────────────────────────────────────────
 const Dashboard = ({ user, onLogout }) => {
-  const isAdmin = user?.email === "roeland@haagdirect.nl" || user?.isAdmin;
-  const [activeSite, setActiveSite] = useState(SITES[0]);
+  const [shops, setShops] = useState([]);
+  const [shopsLoading, setShopsLoading] = useState(true);
+  const [activeSite, setActiveSite] = useState(null);
   const [activeView, setActiveView] = useState("products");
-  const [products, setProducts] = useState(PRODUCTS);
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [notification, setNotification] = useState(null);
@@ -1465,24 +1508,141 @@ const Dashboard = ({ user, onLogout }) => {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  // Load shops from Supabase on mount
+  useEffect(() => {
+    const loadShops = async () => {
+      try {
+        const { data, error } = await supabase.from("shops").select("*").eq("user_id", user.id).order("created_at", { ascending: true });
+        if (error) throw error;
+        const shopList = data || [];
+        setShops(shopList);
+        if (shopList.length > 0) setActiveSite(shopList[0]);
+      } catch (e) {
+        console.error("Failed to load shops:", e);
+        notify("Kon shops niet laden: " + e.message, "error");
+      } finally {
+        setShopsLoading(false);
+      }
+    };
+    loadShops();
+  }, [user.id]);
+
+  // Load products from WooCommerce when active shop changes
+  useEffect(() => {
+    if (!activeSite) return;
+    const loadProducts = async () => {
+      setProductsLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) throw new Error("Niet ingelogd");
+        const res = await fetch("/api/woo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ shop_id: activeSite.id, endpoint: "products?per_page=50&orderby=date&order=desc", method: "GET" })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setProducts(data.map(p => ({ ...p, pending_changes: {} })));
+        } else {
+          console.error("WooCommerce error:", data);
+          setProducts([]);
+        }
+      } catch (e) {
+        console.error("Failed to load products:", e);
+        notify("Producten laden mislukt: " + e.message, "error");
+        setProducts([]);
+      } finally {
+        setProductsLoading(false);
+      }
+    };
+    loadProducts();
+  }, [activeSite?.id]);
+
+  const handleShopAdded = (newShop) => {
+    setShops(s => [...s, newShop]);
+    setActiveSite(newShop);
+    notify("Shop toegevoegd ✓");
+  };
+
+  const handleShopUpdated = (updatedShop) => {
+    setShops(s => s.map(x => x.id === updatedShop.id ? updatedShop : x));
+    if (activeSite?.id === updatedShop.id) setActiveSite(updatedShop);
+    notify("Shop bijgewerkt ✓");
+  };
+
+  const handleShopDeleted = (shopId) => {
+    const remaining = shops.filter(s => s.id !== shopId);
+    setShops(remaining);
+    if (activeSite?.id === shopId) {
+      setActiveSite(remaining[0] || null);
+      setProducts([]);
+    }
+    notify("Shop verwijderd");
+  };
+
   const pendingCount = products.reduce((sum, p) => sum + Object.keys(p.pending_changes || {}).length, 0);
+
+  if (shopsLoading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16 }}>
+        <div style={{ width: 32, height: 32, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <span style={{ color: "var(--mx)", fontSize: 13 }}>Shops laden...</span>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
-      <TopNav activeSite={activeSite} setActiveSite={setActiveSite} sites={SITES} activeView={activeView} setActiveView={setActiveView} pendingCount={pendingCount} isAdmin={isAdmin}
-        onSync={() => notify("Alle wijzigingen gesynchroniseerd ✓")}
-        onPush={() => { setProducts(products.map(p => ({ ...p, pending_changes: {} }))); notify("Wijzigingen gepushed naar alle shops ✓"); }} />
+      <TopNav
+        activeSite={activeSite} setActiveSite={setActiveSite}
+        sites={shops} activeView={activeView} setActiveView={setActiveView}
+        pendingCount={pendingCount} isAdmin={false}
+        onLogout={onLogout} user={user}
+        onSync={() => notify("Synchronisatie gestart ✓")}
+        onPush={() => notify("Wijzigingen gepushed ✓")} />
       <div style={{ flex: 1, overflow: "auto", padding: "24px 28px" }}>
-        {activeView === "products" && <ProductsTable products={products} onEdit={p => { setEditProduct(p); setEditOpen(true); }} onConnect={() => setActiveView("connected")} activeSite={activeSite} />}
-        {activeView === "connected" && <ConnectedSitesView products={products} sites={SITES} />}
-        {activeView === "hreflang" && <HreflangView sites={SITES} />}
-        {activeView === "settings" && <SettingsView sites={SITES} isAdmin={false} />}
-        {activeView === "admin" && isAdmin && <SettingsView sites={SITES} isAdmin={true} />}
+        {shops.length === 0 && activeView !== "settings" ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 48 }}>🏪</div>
+            <h2 style={{ fontSize: 20, fontWeight: 700 }}>Nog geen shops toegevoegd</h2>
+            <p style={{ color: "var(--mx)", fontSize: 14, maxWidth: 380 }}>
+              Voeg je eerste WooCommerce shop toe om te beginnen. Je hebt een Consumer Key en Consumer Secret nodig.
+            </p>
+            <Btn variant="primary" onClick={() => setActiveView("settings")}>Shop toevoegen →</Btn>
+          </div>
+        ) : (
+          <>
+            {activeView === "products" && (
+              productsLoading ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "40px 0" }}>
+                  <div style={{ width: 20, height: 20, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  <span style={{ color: "var(--mx)", fontSize: 13 }}>Producten laden van {activeSite?.name}...</span>
+                </div>
+              ) : (
+                <ProductsTable products={products} onEdit={p => { setEditProduct(p); setEditOpen(true); }} onConnect={() => setActiveView("connected")} activeSite={activeSite} />
+              )
+            )}
+            {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} />}
+            {activeView === "hreflang" && <HreflangView sites={shops} />}
+          </>
+        )}
+        {activeView === "settings" && (
+          <SettingsView
+            user={user} shops={shops}
+            onShopAdded={handleShopAdded}
+            onShopUpdated={handleShopUpdated}
+            onShopDeleted={handleShopDeleted} />
+        )}
       </div>
 
       <ProductEditModal product={editProduct} open={editOpen} onClose={() => setEditOpen(false)}
-        onSave={updated => { setProducts(products.map(p => p.id === updated.id ? { ...updated, pending_changes: { ...p.pending_changes, _edited: true } } : p)); notify("Product opgeslagen — gebruik Sync/Push om te publiceren"); }}
-        sites={SITES} activeSite={activeSite} />
+        onSave={updated => {
+          setProducts(products.map(p => p.id === updated.id ? { ...updated, pending_changes: { ...p.pending_changes, _edited: true } } : p));
+          notify("Product opgeslagen — gebruik Sync/Push om te publiceren");
+        }}
+        sites={shops} activeSite={activeSite} />
 
       {notification && (
         <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", background: notification.type === "success" ? "var(--gr)" : "var(--re)", color: "#fff", borderRadius: "var(--rd-lg)", fontSize: 13, fontWeight: 500, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", zIndex: 2000 }} className="slide-up">
@@ -1665,16 +1825,16 @@ const LandingPage = ({ onLogin, onSignup }) => {
             </div>
             <div style={{ padding: 20 }}>
               <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                {SITES.map(s => <div key={s.id} style={{ padding: "6px 12px", background: s.id === 1 ? "var(--s2)" : "transparent", border: s.id === 1 ? "1px solid var(--b2)" : "1px solid transparent", borderRadius: "var(--rd)", fontSize: 12, color: s.id === 1 ? "var(--tx)" : "var(--mx)" }}>{s.flag} {s.name}</div>)}
+                {[{flag:"🇳🇱",name:"Webshop NL"},{flag:"🇧🇪",name:"Webshop BE (FR)"},{flag:"🇧🇪",name:"Webshop BE (NL)"}].map((s, i) => (
+                  <div key={i} style={{ padding: "6px 12px", background: i === 0 ? "var(--s2)" : "transparent", border: i === 0 ? "1px solid var(--b2)" : "1px solid transparent", borderRadius: "var(--rd)", fontSize: 12, color: i === 0 ? "var(--tx)" : "var(--mx)" }}>{s.flag} {s.name}</div>
+                ))}
               </div>
-              {PRODUCTS.slice(0, 3).map((p, i) => (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < 2 ? "1px solid var(--b1)" : "none" }}>
-                  <div style={{ width: 28, height: 28, borderRadius: 5, overflow: "hidden", background: "var(--s3)", flexShrink: 0 }}>
-                    <img src={p.featured_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  </div>
+              {[{name:"Fargesia murielae Jumbo 100-125cm",type:"Variabel",stock:"Op voorraad"},{name:"Nitida Bamboe Planten Mix 100cm Triple Pack",type:"Variabel",stock:"Op voorraad"},{name:"Phyllostachys bissetii 150-175cm",type:"Enkelvoudig",stock:"Op voorraad"}].map((p, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < 2 ? "1px solid var(--b1)" : "none" }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 5, background: "var(--s3)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🪴</div>
                   <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                  <Badge color={p.type === "variable" ? "blue" : "default"} size="sm">{p.type === "variable" ? "Variabel" : "Enkelvoudig"}</Badge>
-                  <Badge color={p.stock_status === "instock" ? "green" : "red"} size="sm">{p.stock_status === "instock" ? "Op voorraad" : "Uit voorraad"}</Badge>
+                  <Badge color={p.type === "Variabel" ? "blue" : "default"} size="sm">{p.type}</Badge>
+                  <Badge color="green" size="sm">{p.stock}</Badge>
                 </div>
               ))}
             </div>
@@ -1811,7 +1971,9 @@ export default function App() {
         />
       )}
       {view === "app" && user && (
-        <Dashboard user={user} onLogout={handleLogout} />
+        user.email === SUPERADMIN_EMAIL
+          ? <SuperAdminDashboard user={user} onLogout={handleLogout} />
+          : <Dashboard user={user} onLogout={handleLogout} />
       )}
       {authModal && (
         <AuthModal
