@@ -1309,7 +1309,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                 <div style={{ fontWeight: 600, color: "var(--tx)", marginBottom: 4 }}>Verbinden via WooCommerce REST API</div>
                 <div>Genereer een Consumer Key &amp; Secret in <strong style={{ color: "var(--tx)" }}>WooCommerce → Instellingen → Geavanceerd → REST API</strong> met <em>lees/schrijf</em>-rechten. Of installeer onze companion plugin voor automatische verbinding.</div>
               </div>
-              <a href="https://woosyncshop.com/woosyncshop-companion.zip" download style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 12, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
+              <a href="/woosyncshop-companion.zip" download style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 12, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
                 🔌 Download plugin
               </a>
             </div>
@@ -1498,11 +1498,31 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 };
 
 // ─── User Dashboard ────────────────────────────────────────────────────────────
+const VALID_VIEWS = ["products", "connected", "hreflang", "settings"];
+
 const Dashboard = ({ user, onLogout }) => {
   const [shops, setShops] = useState([]);
   const [shopsLoading, setShopsLoading] = useState(true);
   const [activeSite, setActiveSite] = useState(null);
-  const [activeView, setActiveView] = useState("products");
+
+  // Hash-based routing so browser back/forward works
+  const getViewFromHash = () => {
+    const h = window.location.hash.replace("#", "");
+    return VALID_VIEWS.includes(h) ? h : "products";
+  };
+  const [activeView, setActiveViewState] = useState(getViewFromHash);
+
+  const setActiveView = (view) => {
+    window.location.hash = view;
+    setActiveViewState(view);
+  };
+
+  useEffect(() => {
+    const onHashChange = () => setActiveViewState(getViewFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
