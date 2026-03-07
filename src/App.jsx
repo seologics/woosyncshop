@@ -1484,9 +1484,7 @@ const HreflangView = ({ sites }) => {
   };
 
   const copyAll = () => {
-    const all = connections.map(c => generateTag(c)).join("
-
-");
+    const all = connections.map(c => generateTag(c)).join("\n\n");
     navigator.clipboard.writeText(all).then(() => { setCopied("all"); setTimeout(() => setCopied(null), 2000); });
   };
 
