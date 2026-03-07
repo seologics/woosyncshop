@@ -2088,7 +2088,7 @@ const Dashboard = ({ user, onLogout }) => {
 
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
 const AuthModal = ({ mode, onClose, onSuccess }) => {
-  const [step, setStep] = useState(mode === "signup" ? "form" : "login");
+  const [step, setStep] = useState(mode === "signup" ? "form" : mode === "reset" ? "reset" : "login");
   const [form, setForm] = useState({
     name: "", email: "", password: "", code: "",
     business_name: "", country: "NL",
@@ -2144,6 +2144,18 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
     setTimeout(() => { setLoading(false); setStep("success"); }, 1500);
   };
 
+  const handleResetPassword = async () => {
+    if (!form.email) { setError("Vul je e-mailadres in"); return; }
+    setLoading(true); setError(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(form.email, {
+        redirectTo: "https://www.woosyncshop.com",
+      });
+      if (error) throw error;
+      setStep("reset_sent");
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
+  };
+
   return (
     <Overlay open onClose={onClose} width={440} title={null}>
       <div style={{ padding: 32 }}>
@@ -2161,7 +2173,37 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
             <Field label="Wachtwoord"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" onKeyDown={e => e.key === "Enter" && handleLogin()} /></Field>
             <Btn variant="primary" size="lg" onClick={handleLogin} disabled={loading} style={{ width: "100%", marginTop: 8 }}>{loading ? "Bezig..." : "Inloggen"}</Btn>
             <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
+              <span onClick={() => { setStep("reset"); setError(null); }} style={{ color: "var(--mx)", cursor: "pointer", textDecoration: "underline" }}>Wachtwoord vergeten?</span>
+            </div>
+            <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
               Nog geen account? <span onClick={() => { setStep("form"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>Registreren</span>
+            </div>
+          </div>
+        </>}
+
+        {step === "reset" && <>
+          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Wachtwoord resetten</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>Vul je e-mailadres in en we sturen je een resetlink.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field label="E-mailadres"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" onKeyDown={e => e.key === "Enter" && handleResetPassword()} /></Field>
+            <Btn variant="primary" size="lg" onClick={handleResetPassword} disabled={loading} style={{ width: "100%", marginTop: 8 }}>{loading ? "Versturen..." : "Resetlink versturen"}</Btn>
+            <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
+              <span onClick={() => { setStep("login"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>← Terug naar inloggen</span>
+            </div>
+          </div>
+        </>}
+
+        {step === "reset_sent" && <>
+          <div style={{ textAlign: "center", padding: "16px 0" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📧</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Controleer je inbox</h2>
+            <p style={{ fontSize: 13, color: "var(--mx)", lineHeight: 1.6 }}>
+              We hebben een resetlink gestuurd naar <strong style={{ color: "var(--tx)" }}>{form.email}</strong>. 
+              Klik op de link in de e-mail om je wachtwoord te wijzigen.
+            </p>
+            <div style={{ marginTop: 20, fontSize: 12, color: "var(--dm)" }}>
+              Geen e-mail ontvangen?{" "}
+              <span onClick={() => { setStep("reset"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>Probeer opnieuw</span>
             </div>
           </div>
         </>}
