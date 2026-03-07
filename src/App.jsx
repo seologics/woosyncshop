@@ -1272,6 +1272,35 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
     </div>
   );
 };
+// ─── Billing Tab Component ─────────────────────────────────────────────────────
+const BillingTab = ({ userProfile }) => {
+  const isFreeForever = userProfile?.plan === "free_forever";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--b2)" }}>
+        <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 4 }}>Huidig abonnement</div>
+        {isFreeForever ? (
+          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
+        ) : (
+          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "24,19"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
+        )}
+        <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot {userProfile?.max_shops || 10} WordPress installaties · Actief</div>
+        {isFreeForever
+          ? <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Free forever account</Badge>
+          : <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ Pro · betaald via Mollie</Badge>
+        }
+      </div>
+      {!isFreeForever && (
+        <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Betalingsgeschiedenis</div>
+          <div style={{ fontSize: 13, color: "var(--dm)", padding: "12px 0" }}>Betalingshistorie wordt geladen via Mollie.</div>
+        </div>
+      )}
+      {!isFreeForever && <Btn variant="danger" size="sm" style={{ alignSelf: "flex-start" }}>Abonnement opzeggen</Btn>}
+    </div>
+  );
+};
+
 const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDeleted }) => {
   const [settingsTab, setSettingsTab] = useState("sites");
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -1459,33 +1488,9 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         {settingsTab === "ai" && (
           <AiTranslationSettings enabled={aiEnabled} onToggleEnabled={setAiEnabled} locked={!aiTaxonomyUnlocked} />
         )}
-        {settingsTab === "billing" && (() => {
-          const isFreeForever = userProfile?.plan === "free_forever";
-          return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--b2)" }}>
-              <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 4 }}>Huidig abonnement</div>
-              {isFreeForever ? (
-                <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
-              ) : (
-                <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "24,19"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
-              )}
-              <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot {userProfile?.max_shops || 10} WordPress installaties · Actief</div>
-              {isFreeForever
-                ? <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Free forever account</Badge>
-                : <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ Pro · betaald via Mollie</Badge>
-              }
-            </div>
-            {!isFreeForever && (
-              <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-                <div style={{ fontWeight: 600, marginBottom: 8 }}>Betalingsgeschiedenis</div>
-                <div style={{ fontSize: 13, color: "var(--dm)", padding: "12px 0" }}>Betalingshistorie wordt geladen via Mollie.</div>
-              </div>
-            )}
-            {!isFreeForever && <Btn variant="danger" size="sm" style={{ alignSelf: "flex-start" }}>Abonnement opzeggen</Btn>}
-          </div>
-          );
-        })()}
+        {settingsTab === "billing" && (
+          <BillingTab userProfile={userProfile} />
+        )}
         {settingsTab === "profile" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 560 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
