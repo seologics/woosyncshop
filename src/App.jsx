@@ -25,21 +25,24 @@ const NON_EU_COUNTRIES = [
   { code: "OTHER", name: "Overig", vat: 0 },
 ];
 const ALL_COUNTRIES = [...EU_COUNTRIES, ...NON_EU_COUNTRIES];
-const BASE_PRICE = 19.99;
+const PRICE_INCL_VAT_NL = 19.99;  // €19,99 incl. 21% BTW for NL
 const NL_VAT_RATE = 21;
+const BASE_PRICE_EXCL = parseFloat((PRICE_INCL_VAT_NL / 1.21).toFixed(4)); // ~16.52 excl.
 
 const getVatInfo = (countryCode, vatValidated) => {
   const euC = EU_COUNTRIES.find(c => c.code === countryCode);
   if (!countryCode || countryCode === "NL") {
-    return { rate: NL_VAT_RATE, excl: BASE_PRICE, total: (BASE_PRICE * 1.21).toFixed(2) };
+    // 19.99 is the incl. price; show excl. as breakdown only
+    return { rate: NL_VAT_RATE, excl: BASE_PRICE_EXCL.toFixed(2), total: PRICE_INCL_VAT_NL.toFixed(2) };
   }
   if (euC && vatValidated) {
-    return { rate: 0, excl: BASE_PRICE, total: BASE_PRICE.toFixed(2), reverseCharge: true };
+    return { rate: 0, excl: BASE_PRICE_EXCL.toFixed(2), total: BASE_PRICE_EXCL.toFixed(2), reverseCharge: true };
   }
   if (euC) {
-    return { rate: euC.vat, excl: BASE_PRICE, total: (BASE_PRICE * (1 + euC.vat / 100)).toFixed(2) };
+    const total = parseFloat((BASE_PRICE_EXCL * (1 + euC.vat / 100)).toFixed(2));
+    return { rate: euC.vat, excl: BASE_PRICE_EXCL.toFixed(2), total: total.toFixed(2) };
   }
-  return { rate: 0, excl: BASE_PRICE, total: BASE_PRICE.toFixed(2) };
+  return { rate: 0, excl: BASE_PRICE_EXCL.toFixed(2), total: BASE_PRICE_EXCL.toFixed(2) };
 };
 
 
@@ -1225,20 +1228,26 @@ const AdminPanel = () => {
         {adminTab === "users" && (
           <div>
             <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px 70px 80px 100px", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
-                {["Gebruiker", "E-mail", "Plan", "Shops", "Status", "Acties"].map((h, i) => (
+              <div style={{ display: "grid", gridTemplateColumns: "160px 180px 120px 80px 90px 70px 80px 100px", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
+                {["Naam", "E-mail", "Bedrijf / Land", "BTW", "Plan", "Shops", "Status", "Acties"].map((h, i) => (
                   <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
                 ))}
               </div>
               {users.map(u => (
-                <div key={u.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px 70px 80px 100px", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center" }}>
+                <div key={u.id} style={{ display: "grid", gridTemplateColumns: "160px 180px 120px 80px 90px 70px 80px 100px", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center" }}>
                   <div>
                     <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.name || "—"}</div>
-                    {u.business_name && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.business_name}</div>}
+                    {u.address_city && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.address_city}</div>}
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "var(--mx)" }}>{u.email}</div>
-                    {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}{u.vat_validated ? " · ✓ BTW" : ""}</div>}
+                    <div style={{ fontSize: 12, color: "var(--mx)", wordBreak: "break-all" }}>{u.email}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "var(--mx)" }}>{u.business_name || "—"}</div>
+                    {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}</div>}
+                  </div>
+                  <div style={{ fontSize: 11 }}>
+                    {u.vat_number ? <div style={{ color: u.vat_validated ? "var(--gr)" : "var(--mx)" }}>{u.vat_validated ? "✓ " : ""}{u.vat_number}</div> : <span style={{ color: "var(--dm)" }}>—</span>}
                   </div>
                   <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
                     {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : "Pro"}
@@ -2227,7 +2236,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
     name: "", email: "", password: "", code: "",
     business_name: "", country: "NL",
     vat_number: "", vat_validated: false, vat_checking: false, vat_error: null,
-    address_street: "", address_city: "",
+    address_street: "", address_zip: "", address_city: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -2256,6 +2265,8 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
+  const [selectedMethod, setSelectedMethod] = useState(null);
+
   const handleSignup = async () => {
     setLoading(true); setError(null);
     try {
@@ -2265,26 +2276,39 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
           full_name: form.name, business_name: form.business_name,
           country: form.country, vat_number: form.vat_number,
           vat_validated: form.vat_validated, address_street: form.address_street,
-          address_city: form.address_city, plan: isFree ? "free_forever" : "pro",
+          address_zip: form.address_zip, address_city: form.address_city, plan: isFree ? "free_forever" : "pro",
           price_total: vi.total, vat_rate: vi.rate,
         }
       });
+      if (!isFree) {
+        // Sign in immediately so we have a session for the Mollie call
+        await signIn(form.email, form.password);
+      }
       if (isFree) { setStep("success"); } else { setStep("payment"); }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
   const handlePayment = async () => {
+    if (!selectedMethod) { setError("Kies een betaalmethode om verder te gaan."); return; }
     setLoading(true); setError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      // Ensure we have a fresh session
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        // Fallback: sign in again
+        const { data } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
+        session = data?.session;
+      }
+      if (!session?.access_token) { setError("Sessie verlopen. Probeer opnieuw in te loggen."); setLoading(false); return; }
       const vi = getVatInfo(form.country, form.vat_validated);
       const res = await fetch("/api/mollie-payments", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
         body: JSON.stringify({
           email: form.email,
           name: form.name,
           price_total: vi.total,
+          method: selectedMethod,
           return_url: window.location.origin + "/#payment-return",
         }),
       });
@@ -2372,9 +2396,10 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
             </div>
             <Field label="E-mailadres *"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" /></Field>
             <Field label="Wachtwoord *"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="Min. 8 tekens" /></Field>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <Field label="Straat + nr"><Inp value={form.address_street} onChange={e => setForm(f => ({ ...f, address_street: e.target.value }))} placeholder="Straatnaam 1" /></Field>
-              <Field label="Postcode + Stad"><Inp value={form.address_city} onChange={e => setForm(f => ({ ...f, address_city: e.target.value }))} placeholder="1234 AB Amsterdam" /></Field>
+            <Field label="Straat + huisnummer"><Inp value={form.address_street} onChange={e => setForm(f => ({ ...f, address_street: e.target.value }))} placeholder="Straatnaam 1" /></Field>
+            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
+              <Field label="Postcode"><Inp value={form.address_zip} onChange={e => setForm(f => ({ ...f, address_zip: e.target.value }))} placeholder="1234 AB" /></Field>
+              <Field label="Stad *"><Inp value={form.address_city} onChange={e => setForm(f => ({ ...f, address_city: e.target.value }))} placeholder="Amsterdam" /></Field>
             </div>
             <Field label="Land *">
               <select value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value, vat_number: "", vat_validated: false }))}
@@ -2430,19 +2455,26 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
 
         {step === "payment" && <>
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Betaling</h2>
-          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>Start je Pro abonnement</p>
-          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 20, display: "flex", justifyContent: "space-between" }}>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>Start je Pro abonnement</p>
+          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, color: "var(--mx)" }}>Woo Sync Shop Pro · 1 maand</span>
-            <span style={{ fontWeight: 700 }}>€19,99</span>
+            <span style={{ fontWeight: 700 }}>€{getVatInfo(form.country, form.vat_validated).total}</span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-            {[["iDEAL", "🏦"], ["Creditcard", "💳"], ["SEPA Overboeking", "🔄"], ["Bancontact", "🇧🇪"]].map(([m, icon]) => (
-              <div key={m} style={{ padding: "10px 14px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                <span>{icon}</span><span style={{ fontSize: 13 }}>{m}</span>
+          <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 8, fontWeight: 600 }}>Kies betaalmethode</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            {[["ideal", "iDEAL", "🏦"], ["creditcard", "Creditcard", "💳"], ["directdebit", "SEPA Overboeking", "🔄"], ["bancontact", "Bancontact", "🇧🇪"]].map(([id, label, icon]) => (
+              <div key={id} onClick={() => setSelectedMethod(id)}
+                style={{ padding: "10px 14px", background: selectedMethod === id ? "var(--pr-l)" : "var(--s2)",
+                  border: `1px solid ${selectedMethod === id ? "var(--pr)" : "var(--b1)"}`,
+                  borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", transition: "all 0.15s" }}>
+                <span style={{ fontSize: 18 }}>{icon}</span>
+                <span style={{ fontSize: 13, fontWeight: selectedMethod === id ? 600 : 400 }}>{label}</span>
+                {selectedMethod === id && <span style={{ marginLeft: "auto", color: "var(--pr-h)", fontSize: 16 }}>✓</span>}
               </div>
             ))}
           </div>
-          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading} style={{ width: "100%" }}>{loading ? "Verwerken..." : "Betalen →"}</Btn>
+          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading || !selectedMethod} style={{ width: "100%", opacity: selectedMethod ? 1 : 0.6 }}>{loading ? "Verwerken..." : "Betalen →"}</Btn>
+          <div style={{ textAlign: "center", fontSize: 11, color: "var(--dm)", marginTop: 8 }}>🔒 Veilige betaling via Mollie</div>
         </>}
 
         {step === "success" && <>
@@ -2947,6 +2979,18 @@ const PlatformSettings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [methods, setMethods] = useState([]);
+  const [methodsLoading, setMethodsLoading] = useState(false);
+
+  const loadMethods = async () => {
+    setMethodsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/mollie-payments?type=methods", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+      const data = await res.json();
+      setMethods(data.methods || []);
+    } catch {} finally { setMethodsLoading(false); }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -2999,9 +3043,26 @@ const PlatformSettings = () => {
           <Field label="Mollie API Key (Live)">
             <Inp value={ps.mollie_api_key} onChange={e => setPs(p => ({ ...p, mollie_api_key: e.target.value }))} type="password" placeholder="live_..." />
           </Field>
-          <Field label="Mollie Webhook URL" hint="Ingesteld op Mollie dashboard">
-            <Inp value="https://woosyncshop.com/api/mollie/webhook" onChange={() => {}} />
+          <Field label="Webhook URL" hint="Automatisch ingesteld per betaling — geen dashboard-actie nodig">
+            <Inp value="https://woosyncshop.com/api/mollie-webhook" onChange={() => {}} style={{ opacity: 0.6 }} />
           </Field>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Actieve betaalmethoden</div>
+            <Btn variant="ghost" size="sm" onClick={loadMethods} disabled={methodsLoading}>{methodsLoading ? "Laden..." : "↻ Vernieuwen"}</Btn>
+          </div>
+          {methods.length === 0 && !methodsLoading && (
+            <div style={{ fontSize: 12, color: "var(--dm)" }}>Sla eerst een Mollie API key op, klik daarna op Vernieuwen.</div>
+          )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {methods.map(m => (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--s3)", borderRadius: 20, border: "1px solid var(--b1)", fontSize: 12 }}>
+                {m.image && <img src={m.image} alt={m.description} style={{ height: 16 }} />}
+                {m.description}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
       <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>

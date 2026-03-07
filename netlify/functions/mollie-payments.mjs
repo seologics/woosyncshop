@@ -41,6 +41,19 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: 'Mollie API key not configured' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
   }
 
+  // ── GET ?type=methods: return available Mollie payment methods (admin only) ──
+  const url = new URL(req.url, 'https://woosyncshop.com')
+  if (req.method === 'GET' && url.searchParams.get('type') === 'methods') {
+    if (!isAdmin) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+    try {
+      const data = await mollieRequest(mollieKey, '/methods?resource=payments&includeWallets=applepay')
+      const methods = (data._embedded?.methods || []).map(m => ({ id: m.id, description: m.description, image: m.image?.size1x }))
+      return new Response(JSON.stringify({ methods }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
+  }
+
   // ── GET: admin gets all payments + stats, user gets own payments ────────────
   if (req.method === 'GET') {
     try {
@@ -103,7 +116,7 @@ export default async (req) => {
   if (req.method === 'POST') {
     try {
       const body = await req.json()
-      const { email, name, price_total, return_url } = body
+      const { email, name, price_total, return_url, method } = body
 
       // 1. Create or reuse Mollie customer
       let customerId = null
@@ -125,15 +138,17 @@ export default async (req) => {
 
       // 2. Create first payment (sets mandate for recurring)
       const amount = price_total ? price_total.toString() : '19.99'
-      const payment = await mollieRequest(mollieKey, '/payments', 'POST', {
+      const paymentBody = {
         amount: { currency: 'EUR', value: parseFloat(amount).toFixed(2) },
         description: 'WooSyncShop Pro – maandabonnement',
-        redirectUrl: return_url || 'https://woosyncshop.com/#payment-success',
+        redirectUrl: return_url || 'https://woosyncshop.com/#payment-return',
         webhookUrl: 'https://woosyncshop.com/api/mollie-webhook',
         customerId: customerId || undefined,
         sequenceType: customerId ? 'first' : 'oneoff',
         metadata: { supabase_user_id: user.id, plan: 'pro' },
-      })
+      }
+      if (method) paymentBody.method = method
+      const payment = await mollieRequest(mollieKey, '/payments', 'POST', paymentBody)
 
       if (!payment.id || !payment._links?.checkout?.href) {
         return new Response(JSON.stringify({ error: payment.detail || 'Mollie payment creation failed' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
