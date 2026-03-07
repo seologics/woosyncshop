@@ -89,21 +89,28 @@ export default async (req) => {
   const invoiceId = url.searchParams.get('id')
   const paymentId = url.searchParams.get('payment_id')
 
-  // Fetch invoice — must belong to this user
+  const isSuperAdmin = user.email === 'leadingvation@gmail.com'
+
+  // Fetch invoice — must belong to this user (or superadmin can access any)
   let invoice
   if (invoiceId) {
-    const { data } = await supabase.from('invoices').select('*').eq('id', invoiceId).eq('user_id', user.id).single()
+    const q = supabase.from('invoices').select('*').eq('id', invoiceId)
+    if (!isSuperAdmin) q.eq('user_id', user.id)
+    const { data } = await q.single()
     invoice = data
   } else if (paymentId) {
-    const { data } = await supabase.from('invoices').select('*').eq('payment_id', paymentId).eq('user_id', user.id).single()
+    const q = supabase.from('invoices').select('*').eq('payment_id', paymentId)
+    if (!isSuperAdmin) q.eq('user_id', user.id)
+    const { data } = await q.single()
     invoice = data
   }
 
   if (!invoice) return new Response('Invoice not found', { status: 404 })
 
   // Fetch user profile for address details
-  const { data: profile } = await supabase.from('user_profiles').select('*').eq('id', user.id).single()
-  const { data: authUser } = await supabase.auth.admin.getUserById(user.id)
+  const invoiceOwner = invoice.user_id
+  const { data: profile } = await supabase.from('user_profiles').select('*').eq('id', invoiceOwner).single()
+  const { data: authUser } = await supabase.auth.admin.getUserById(invoiceOwner)
   const email = authUser?.user?.email || user.email || ''
 
   const date = new Date(invoice.issued_at).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' })

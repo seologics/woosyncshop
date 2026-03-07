@@ -1329,26 +1329,64 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
 
               {/* Invoices panel */}
               {invoiceUser && (
-                <Overlay open onClose={() => setInvoiceUser(null)} width={620} title={`Facturen: ${invoiceUser.full_name || invoiceUser.email}`}>
+                <Overlay open onClose={() => { setInvoiceUser(null); setUserInvoices([]); }} width={660} title={`Facturen: ${invoiceUser.full_name || invoiceUser.name || invoiceUser.email}`}>
                   <div style={{ padding: 20 }}>
                     {invoicesLoading ? (
                       <div style={{ color: "var(--mx)", fontSize: 13 }}>Laden...</div>
                     ) : userInvoices.length === 0 ? (
-                      <div style={{ color: "var(--dm)", fontSize: 13, padding: "20px 0" }}>Geen facturen gevonden voor deze gebruiker.</div>
+                      <div>
+                        <div style={{ color: "var(--dm)", fontSize: 13, padding: "12px 0 20px" }}>Geen facturen gevonden voor deze gebruiker.</div>
+                        {invoiceUser.plan === "pro" && invoiceUser.mollie_payment_id && (
+                          <div style={{ background: "rgba(91,91,214,0.08)", border: "1px solid rgba(91,91,214,0.2)", borderRadius: "var(--rd)", padding: "12px 14px", fontSize: 13 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 6 }}>Factuur handmatig aanmaken</div>
+                            <div style={{ color: "var(--dm)", fontSize: 12, marginBottom: 10 }}>
+                              Er is een betaling gevonden maar nog geen factuur. Klik om alsnog een factuur aan te maken en te mailen.
+                            </div>
+                            <Btn variant="primary" size="sm" onClick={async () => {
+                              setInvoicesLoading(true);
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                const res = await fetch("/api/send-invoice", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+                                  body: JSON.stringify({
+                                    user_id: invoiceUser.id,
+                                    payment_id: invoiceUser.mollie_payment_id,
+                                    amount: invoiceUser.price_total || "19.99",
+                                  }),
+                                });
+                                const result = await res.json();
+                                if (result.ok) {
+                                  // Reload invoices
+                                  const { data } = await supabase.from("invoices").select("*").eq("user_id", invoiceUser.id).order("issued_at", { ascending: false });
+                                  setUserInvoices(data || []);
+                                } else { alert("Fout: " + (result.error || "onbekend")); }
+                              } catch (e) { alert("Fout: " + e.message); } finally { setInvoicesLoading(false); }
+                            }}>📄 Factuur aanmaken + mailen</Btn>
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 80px 80px 80px", gap: 0, background: "var(--s2)", padding: "7px 12px", borderRadius: "var(--rd)", marginBottom: 4 }}>
-                          {["Nummer", "Datum", "Excl.", "BTW", "Totaal"].map(h => (
+                        <div style={{ display: "grid", gridTemplateColumns: "140px 100px 80px 80px 90px 80px", gap: 0, background: "var(--s2)", padding: "7px 12px", borderRadius: "var(--rd)", marginBottom: 4 }}>
+                          {["Nummer", "Datum", "Excl.", "BTW", "Totaal", ""].map(h => (
                             <span key={h} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
                           ))}
                         </div>
                         {userInvoices.map(inv => (
-                          <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "130px 1fr 80px 80px 80px", gap: 0, padding: "9px 12px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", alignItems: "center" }}>
+                          <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "140px 100px 80px 80px 90px 80px", gap: 0, padding: "9px 12px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", alignItems: "center" }}>
                             <span style={{ fontWeight: 600, fontSize: 13, color: "var(--pr-h)" }}>{inv.invoice_number}</span>
                             <span style={{ fontSize: 12, color: "var(--mx)" }}>{new Date(inv.issued_at).toLocaleDateString("nl-NL")}</span>
                             <span style={{ fontSize: 13 }}>€{parseFloat(inv.amount_excl_vat || 0).toFixed(2).replace(".", ",")}</span>
                             <span style={{ fontSize: 13 }}>€{parseFloat(inv.vat_amount || 0).toFixed(2).replace(".", ",")}</span>
                             <span style={{ fontWeight: 600, fontSize: 13 }}>€{parseFloat(inv.amount || 0).toFixed(2).replace(".", ",")}</span>
+                            <Btn variant="ghost" size="sm" onClick={async () => {
+                              const { data: { session } } = await supabase.auth.getSession();
+                              const win = window.open("about:blank", "_blank");
+                              const res = await fetch(`/api/get-invoice?id=${inv.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+                              const html = await res.text();
+                              win.document.write(html); win.document.close();
+                            }}>⬇ PDF</Btn>
                           </div>
                         ))}
                       </div>
