@@ -1286,6 +1286,7 @@ const AdminPanel = () => {
               <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
                 <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>{editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : "Pro €19,99/mnd"}</Badge>
                 <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>{editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}</Badge>
+              </div>
             </div>
             <Field label="Plan">
               <Sel value={editUser.plan} onChange={e => setEditUser(u => ({ ...u, plan: e.target.value }))} options={[{ value: "pro", label: "Pro – €19,99 / maand" }, { value: "free_forever", label: "Free forever (code: freeforever)" }, { value: "suspended", label: "Gesuspendeerd" }]} />
