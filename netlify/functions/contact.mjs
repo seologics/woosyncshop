@@ -72,11 +72,22 @@ export default async (req) => {
 
   // 3. Send email via SES
   try {
+    const accessKeyId = Netlify.env.get('AWS_SES_ACCESS_KEY_ID') || process.env.AWS_SES_ACCESS_KEY_ID
+    const secretAccessKey = Netlify.env.get('AWS_SES_SECRET_ACCESS_KEY') || process.env.AWS_SES_SECRET_ACCESS_KEY
+    const region = Netlify.env.get('AWS_SES_REGION') || process.env.AWS_SES_REGION || 'eu-west-1'
+
+    await writeLog(supabase, 'contact', 'info', 'SES attempting send', {
+      keyId_last4: accessKeyId ? accessKeyId.slice(-4) : 'MISSING',
+      region,
+      to: notifyEmail
+    })
+
     const ses = new SESClient({
-      region: Netlify.env.get('AWS_SES_REGION') || 'eu-west-1',
+      region,
       credentials: {
-        accessKeyId: Netlify.env.get('AWS_SES_ACCESS_KEY_ID'),
-        secretAccessKey: Netlify.env.get('AWS_SES_SECRET_ACCESS_KEY'),
+        accessKeyId,
+        secretAccessKey,
+        sessionToken: undefined,
       }
     })
 
