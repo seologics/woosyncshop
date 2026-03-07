@@ -2498,6 +2498,19 @@ export default function App() {
     setView("landing");
   };
 
+  // Hash-based routing for static pages (MUST be before any early returns)
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace("#", "");
+      if (["privacy", "voorwaarden", "contact"].includes(h)) setView(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const acceptCookies = () => { localStorage.setItem("wss_cookie_consent", "accepted"); setCookieConsent("accepted"); };
+  const rejectCookies = () => { localStorage.setItem("wss_cookie_consent", "rejected"); setCookieConsent("rejected"); };
+
   if (view === "loading") {
     return (
       <>
@@ -2511,19 +2524,6 @@ export default function App() {
       </>
     );
   }
-
-  const acceptCookies = () => { localStorage.setItem("wss_cookie_consent", "accepted"); setCookieConsent("accepted"); };
-  const rejectCookies = () => { localStorage.setItem("wss_cookie_consent", "rejected"); setCookieConsent("rejected"); };
-
-  // Hash-based routing for static pages
-  useEffect(() => {
-    const onHash = () => {
-      const h = window.location.hash.replace("#", "");
-      if (["privacy", "voorwaarden", "contact"].includes(h)) setView(h);
-    };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
 
   const goPage = (page) => { window.location.hash = page; setView(page); };
   const goBack = () => {
