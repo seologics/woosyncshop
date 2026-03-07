@@ -1166,21 +1166,24 @@ const AdminPanel = () => {
   const updUser = (id, field, val) => setUsers(us => us.map(u => u.id === id ? { ...u, [field]: val } : u));
   const saveUser = async (u) => {
     try {
-      const { error } = await supabase.from("user_profiles").update({
+      const updates = {
         plan: u.plan,
         max_shops: u.max_shops ? parseInt(u.max_shops) : 10,
-        is_admin: u.is_admin,
-        ai_taxonomy_enabled: u.ai_taxonomy_enabled,
-        ai_taxonomy_model: u.ai_taxonomy_model,
-        ai_taxonomy_threshold: u.ai_taxonomy_threshold,
-        gemini_model: u.gemini_model,
-        img_max_kb: u.img_max_kb ? parseInt(u.img_max_kb) : null,
-        img_quality: u.img_quality ? parseInt(u.img_quality) : null,
-        img_max_width: u.img_max_width ? parseInt(u.img_max_width) : null,
-      }).eq("id", u.id);
-      if (error) throw error;
-      // Refresh user list to reflect saved values
-      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, ...u } : usr));
+        is_admin: u.is_admin ?? false,
+        ai_taxonomy_enabled: u.ai_taxonomy_enabled ?? false,
+        ai_taxonomy_model: u.ai_taxonomy_model || "gemini-2.0-flash-lite",
+        ai_taxonomy_threshold: u.ai_taxonomy_threshold ? parseFloat(u.ai_taxonomy_threshold) : 0.85,
+        gemini_model: u.gemini_model || "gemini-2.0-flash-lite",
+        img_max_kb: u.img_max_kb ? parseInt(u.img_max_kb) : 400,
+        img_quality: u.img_quality ? parseInt(u.img_quality) : 85,
+        img_max_width: u.img_max_width ? parseInt(u.img_max_width) : 1200,
+      };
+      const { error } = await supabase.from("user_profiles").update(updates).eq("id", u.id);
+      if (error) {
+        alert("Opslaan mislukt: " + error.message + " (code: " + error.code + ")");
+        return;
+      }
+      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, ...updates } : usr));
       setEditUser(null);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
   };
@@ -1823,7 +1826,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
 
 // ─── Top Nav ──────────────────────────────────────────────────────────────────
 const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user }) => {
-  const [avatarOpen, setAvatarOpen] = React.useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const [siteOpen, setSiteOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pushing, setPushing] = useState(false);
