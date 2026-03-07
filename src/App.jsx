@@ -2365,20 +2365,37 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   const handleSignup = async () => {
     setLoading(true); setError(null);
     try {
+      if (!form.name?.trim()) { setError("Vul je naam in."); return; }
+      if (!form.email?.trim()) { setError("Vul je e-mailadres in."); return; }
+      if (!form.password || form.password.length < 8) { setError("Wachtwoord moet minimaal 8 tekens zijn."); return; }
+      if (!form.address_city?.trim()) { setError("Vul je stad in."); return; }
+      if (!form.country) { setError("Selecteer je land."); return; }
+
       const vi = getVatInfo(form.country, form.vat_validated);
-      await signUp(form.email, form.password, {
-        data: {
-          full_name: form.name, business_name: form.business_name,
-          country: form.country, vat_number: form.vat_number,
-          vat_validated: form.vat_validated, address_street: form.address_street,
-          address_zip: form.address_zip, address_city: form.address_city, plan: isFree ? "free_forever" : "pro",
-          price_total: vi.total, vat_rate: vi.rate,
-        }
+
+      // Register via server-side API — creates user pre-confirmed, no confirmation email sent
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          metadata: {
+            full_name: form.name, business_name: form.business_name,
+            country: form.country, vat_number: form.vat_number,
+            vat_validated: form.vat_validated, address_street: form.address_street,
+            address_zip: form.address_zip, address_city: form.address_city,
+            plan: isFree ? "free_forever" : "pro",
+            price_total: vi.total, vat_rate: vi.rate,
+          },
+        }),
       });
-      if (!isFree) {
-        // Sign in immediately so we have a session for the Mollie call
-        await signIn(form.email, form.password);
-      }
+      const result = await res.json();
+      if (!res.ok) { setError(result.error || "Registratie mislukt."); return; }
+
+      // Sign in to get session (always works — user is pre-confirmed)
+      await signIn(form.email, form.password);
+
       if (isFree) { setStep("success"); } else { setStep("payment"); }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
