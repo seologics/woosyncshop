@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
+import nodemailer from 'nodemailer'
 
 // Inline log helper
 async function writeLog(supabase, functionName, level, message, meta = {}) {
@@ -50,7 +50,7 @@ export default async (req) => {
     await writeLog(supabase, 'contact', 'error', 'contact_submissions insert failed', {
       code: insertError.code, detail: insertError.message, email
     })
-    return new Response(JSON.stringify({ error: 'Opslaan mislukt', detail: insertError.message }), {
+    return new Response(JSON.stringify({ error: 'Opslaan mislukt' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     })
   }
@@ -66,50 +66,42 @@ export default async (req) => {
     if (settings?.contact_notification_email) {
       notifyEmail = settings.contact_notification_email
     }
-  } catch (e) {
-    await writeLog(supabase, 'contact', 'warn', 'Could not load notification email, using fallback', { fallback: FALLBACK_EMAIL })
-  }
+  } catch {}
 
-  // 3. Send email via SES
+  // 3. Send via SES SMTP (same as Supabase uses)
   try {
-    const accessKeyId = Netlify.env.get('AWS_SES_ACCESS_KEY_ID') || process.env.AWS_SES_ACCESS_KEY_ID
-    const secretAccessKey = Netlify.env.get('AWS_SES_SECRET_ACCESS_KEY') || process.env.AWS_SES_SECRET_ACCESS_KEY
-    const region = Netlify.env.get('AWS_SES_REGION') || process.env.AWS_SES_REGION || 'eu-west-1'
+    const smtpUser = Netlify.env.get('AWS_SES_ACCESS_KEY_ID')
+    const smtpPass = Netlify.env.get('AWS_SES_SMTP_PASSWORD') // SMTP-derived password
+    const smtpHost = `email-smtp.${Netlify.env.get('AWS_SES_REGION') || 'eu-west-1'}.amazonaws.com`
 
-    await writeLog(supabase, 'contact', 'info', 'SES attempting send', {
-      keyId_last4: accessKeyId ? accessKeyId.slice(-4) : 'MISSING',
-      region,
+    await writeLog(supabase, 'contact', 'info', 'SES SMTP attempting send', {
+      host: smtpHost,
+      user_last4: smtpUser ? smtpUser.slice(-4) : 'MISSING',
+      pass_set: !!smtpPass,
       to: notifyEmail
     })
 
-    const ses = new SESClient({
-      region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-        sessionToken: undefined,
-      }
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: 465,
+      secure: true,
+      auth: { user: smtpUser, pass: smtpPass },
     })
 
-    const emailBody = `Nieuw contactformulier bericht via WooSyncShop.com\n\nNaam: ${name}\nE-mail: ${email}\nOnderwerp: ${subject || '—'}\n\nBericht:\n${message}\n\n---\nVerzonden via woosyncshop.com/contact`
-
-    await ses.send(new SendEmailCommand({
-      Source: FROM_EMAIL,
-      Destination: { ToAddresses: [notifyEmail] },
-      ReplyToAddresses: [email],
-      Message: {
-        Subject: { Data: `[WooSyncShop] Contact: ${subject || name}` },
-        Body: { Text: { Data: emailBody } }
-      }
-    }))
+    await transporter.sendMail({
+      from: `"WooSyncShop" <${FROM_EMAIL}>`,
+      to: notifyEmail,
+      replyTo: email,
+      subject: `[WooSyncShop] Contact: ${subject || name}`,
+      text: `Nieuw contactformulier bericht via WooSyncShop.com\n\nNaam: ${name}\nE-mail: ${email}\nOnderwerp: ${subject || '—'}\n\nBericht:\n${message}\n\n---\nVerzonden via woosyncshop.com/contact`,
+    })
 
     await writeLog(supabase, 'contact', 'info', 'Contact form submitted + email sent', {
       email, subject, notify_to: notifyEmail
     })
-  } catch (sesErr) {
-    // Email failed but submission was saved — log warning, still return ok
-    await writeLog(supabase, 'contact', 'warn', 'SES email failed (submission saved)', {
-      error: sesErr.message, notify_to: notifyEmail, email
+  } catch (smtpErr) {
+    await writeLog(supabase, 'contact', 'warn', 'SMTP email failed (submission saved)', {
+      error: smtpErr.message, notify_to: notifyEmail, email
     })
   }
 
