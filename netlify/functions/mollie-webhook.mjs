@@ -57,6 +57,23 @@ export default async (req) => {
         message: `Payment ${paymentId} paid — user ${userId} activated`,
         metadata: { payment_id: paymentId, amount: payment.amount?.value, method: payment.method },
       })
+
+      // Send invoice email (fire and forget — don't fail the webhook if it errors)
+      try {
+        const host = 'https://woosyncshop.com'
+        await fetch(`${host}/api/send-invoice`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            payment_id: paymentId,
+            amount: payment.amount?.value || '19.99',
+            mollie_method: payment.method || null,
+          }),
+        })
+      } catch (invoiceErr) {
+        console.error('mollie-webhook: invoice trigger failed', invoiceErr.message)
+      }
     } else if (payment.status === 'failed' || payment.status === 'canceled' || payment.status === 'expired') {
       // Log failed payment
       await supabase.from('system_logs').insert({

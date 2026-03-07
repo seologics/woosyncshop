@@ -1215,6 +1215,41 @@ const AdminPanel = () => {
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
   };
 
+  const archiveUser = async (u) => {
+    const isArchived = u.archived;
+    const label = isArchived ? "Dearchiveren" : "Archiveren";
+    if (!window.confirm(`${label}: ${u.email}? ${isArchived ? "Account wordt hersteld." : "Account wordt gesuspendeerd en verborgen."}`)) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/admin-users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ id: u.id, archived: !isArchived }),
+      });
+      const result = await res.json();
+      if (!res.ok) { alert("Fout: " + result.error); return; }
+      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, archived: !isArchived, plan: !isArchived ? "suspended" : usr.plan } : usr));
+    } catch (e) { alert("Fout: " + e.message); }
+  };
+
+  const deleteUser = async (u) => {
+    if (!window.confirm(`PERMANENT VERWIJDEREN: ${u.email}?
+
+Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
+    if (!window.confirm("Weet je het zeker? Dit verwijdert het account permanent uit de database en authenticatie.")) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/admin-users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ id: u.id }),
+      });
+      const result = await res.json();
+      if (!res.ok) { alert("Fout: " + result.error); return; }
+      setUsers(us => us.filter(usr => usr.id !== u.id));
+    } catch (e) { alert("Fout: " + e.message); }
+  };
+
   return (
     <div className="fade-in">
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
@@ -1225,43 +1260,106 @@ const AdminPanel = () => {
       <div style={{ marginTop: 20 }}>
 
         {/* Users */}
-        {adminTab === "users" && (
-          <div>
-            <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "160px 180px 120px 80px 90px 70px 80px 100px", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
-                {["Naam", "E-mail", "Bedrijf / Land", "BTW", "Plan", "Shops", "Status", "Acties"].map((h, i) => (
-                  <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
+        {adminTab === "users" && (() => {
+          const [showArchived, setShowArchived] = React.useState(false);
+          const [invoiceUser, setInvoiceUser] = React.useState(null);
+          const [userInvoices, setUserInvoices] = React.useState([]);
+          const [invoicesLoading, setInvoicesLoading] = React.useState(false);
+
+          const loadInvoices = async (u) => {
+            setInvoiceUser(u); setInvoicesLoading(true);
+            try {
+              const { data } = await supabase.from("invoices").select("*").eq("user_id", u.id).order("issued_at", { ascending: false });
+              setUserInvoices(data || []);
+            } catch {} finally { setInvoicesLoading(false); }
+          };
+
+          const visibleUsers = users.filter(u => showArchived ? u.archived : !u.archived);
+          const archivedCount = users.filter(u => u.archived).length;
+
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <span style={{ fontSize: 13, color: "var(--mx)" }}>{visibleUsers.length} gebruiker{visibleUsers.length !== 1 ? "s" : ""}</span>
+                <Btn variant="ghost" size="sm" onClick={() => setShowArchived(a => !a)}>
+                  {showArchived ? "← Actieve gebruikers" : `📦 Gearchiveerd (${archivedCount})`}
+                </Btn>
+              </div>
+              <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "150px 170px 120px 70px 90px 60px 80px 1fr", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
+                  {["Naam", "E-mail", "Bedrijf / Land", "BTW", "Plan", "Shops", "Status", "Acties"].map((h, i) => (
+                    <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
+                  ))}
+                </div>
+                {visibleUsers.length === 0 && (
+                  <div style={{ padding: "20px 14px", fontSize: 13, color: "var(--dm)" }}>Geen gebruikers gevonden.</div>
+                )}
+                {visibleUsers.map(u => (
+                  <div key={u.id} style={{ display: "grid", gridTemplateColumns: "150px 170px 120px 70px 90px 60px 80px 1fr", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center", opacity: u.archived ? 0.6 : 1, background: u.archived ? "rgba(239,68,68,0.03)" : "transparent" }}>
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.name || "—"}</div>
+                      {u.address_city && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.address_city}</div>}
+                      {u.archived && <Badge color="red" size="sm">Gearchiveerd</Badge>}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "var(--mx)", wordBreak: "break-all" }}>{u.email}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "var(--mx)" }}>{u.business_name || "—"}</div>
+                      {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}</div>}
+                    </div>
+                    <div style={{ fontSize: 11 }}>
+                      {u.vat_number ? <div style={{ color: u.vat_validated ? "var(--gr)" : "var(--mx)" }}>{u.vat_validated ? "✓ " : ""}{u.vat_number}</div> : <span style={{ color: "var(--dm)" }}>—</span>}
+                    </div>
+                    <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
+                      {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : "Pro"}
+                    </Badge>
+                    <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
+                    <Badge color={u.plan === "free_forever" ? "green" : u.status === "active" ? "green" : "amber"} size="sm">
+                      {u.plan === "free_forever" ? "Free forever" : u.status === "active" ? "Actief" : "In afwachting"}
+                    </Badge>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>✏</Btn>
+                      <Btn variant="ghost" size="sm" onClick={() => loadInvoices(u)} title="Facturen">🧾</Btn>
+                      <Btn variant="ghost" size="sm" onClick={() => archiveUser(u)} title={u.archived ? "Dearchiveren" : "Archiveren"} style={{ color: u.archived ? "var(--gr)" : "var(--ac)" }}>{u.archived ? "↩" : "📦"}</Btn>
+                      <Btn variant="ghost" size="sm" onClick={() => deleteUser(u)} title="Permanent verwijderen" style={{ color: "var(--re)" }}>🗑</Btn>
+                    </div>
+                  </div>
                 ))}
               </div>
-              {users.map(u => (
-                <div key={u.id} style={{ display: "grid", gridTemplateColumns: "160px 180px 120px 80px 90px 70px 80px 100px", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.name || "—"}</div>
-                    {u.address_city && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.address_city}</div>}
+
+              {/* Invoices panel */}
+              {invoiceUser && (
+                <Overlay open onClose={() => setInvoiceUser(null)} width={620} title={`Facturen: ${invoiceUser.full_name || invoiceUser.email}`}>
+                  <div style={{ padding: 20 }}>
+                    {invoicesLoading ? (
+                      <div style={{ color: "var(--mx)", fontSize: 13 }}>Laden...</div>
+                    ) : userInvoices.length === 0 ? (
+                      <div style={{ color: "var(--dm)", fontSize: 13, padding: "20px 0" }}>Geen facturen gevonden voor deze gebruiker.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 80px 80px 80px", gap: 0, background: "var(--s2)", padding: "7px 12px", borderRadius: "var(--rd)", marginBottom: 4 }}>
+                          {["Nummer", "Datum", "Excl.", "BTW", "Totaal"].map(h => (
+                            <span key={h} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
+                          ))}
+                        </div>
+                        {userInvoices.map(inv => (
+                          <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "130px 1fr 80px 80px 80px", gap: 0, padding: "9px 12px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", alignItems: "center" }}>
+                            <span style={{ fontWeight: 600, fontSize: 13, color: "var(--pr-h)" }}>{inv.invoice_number}</span>
+                            <span style={{ fontSize: 12, color: "var(--mx)" }}>{new Date(inv.issued_at).toLocaleDateString("nl-NL")}</span>
+                            <span style={{ fontSize: 13 }}>€{parseFloat(inv.amount_excl_vat || 0).toFixed(2).replace(".", ",")}</span>
+                            <span style={{ fontSize: 13 }}>€{parseFloat(inv.vat_amount || 0).toFixed(2).replace(".", ",")}</span>
+                            <span style={{ fontWeight: 600, fontSize: 13 }}>€{parseFloat(inv.amount || 0).toFixed(2).replace(".", ",")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "var(--mx)", wordBreak: "break-all" }}>{u.email}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "var(--mx)" }}>{u.business_name || "—"}</div>
-                    {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}</div>}
-                  </div>
-                  <div style={{ fontSize: 11 }}>
-                    {u.vat_number ? <div style={{ color: u.vat_validated ? "var(--gr)" : "var(--mx)" }}>{u.vat_validated ? "✓ " : ""}{u.vat_number}</div> : <span style={{ color: "var(--dm)" }}>—</span>}
-                  </div>
-                  <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
-                    {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : "Pro"}
-                  </Badge>
-                  <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
-                  <Badge color={u.plan === "free_forever" ? "green" : u.status === "active" ? "green" : "amber"} size="sm">
-                    {u.plan === "free_forever" ? "Free forever" : u.status === "active" ? "Actief" : "In afwachting"}
-                  </Badge>
-                  <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>Configureren</Btn>
-                </div>
-              ))}
+                </Overlay>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Payments */}
         {adminTab === "payments" && (

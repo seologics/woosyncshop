@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 const SUPERADMIN_EMAIL = 'leadingvation@gmail.com'
 
 export default async (req) => {
-  if (req.method !== 'GET' && req.method !== 'PUT') {
+  if (!['GET', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     return new Response('Method not allowed', { status: 405 })
   }
 
@@ -12,7 +12,6 @@ export default async (req) => {
     Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY')
   )
 
-  // Verify superadmin token
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
@@ -23,14 +22,39 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
   }
 
-  // ── PUT: update a user profile ──────────────────────────────────────────────
+  // PATCH: archive / unarchive
+  if (req.method === 'PATCH') {
+    try {
+      const { id, archived } = await req.json()
+      if (!id) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      const updates = { archived: archived !== false, archived_at: archived !== false ? new Date().toISOString() : null }
+      if (archived !== false) updates.plan = 'suspended'
+      const { error } = await supabase.from('user_profiles').update(updates).eq('id', id)
+      if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      await supabase.from('system_logs').insert({ level: 'warn', function_name: 'admin-users', message: `User ${id} ${archived !== false ? 'archived' : 'unarchived'}`, metadata: { user_id: id } })
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }) }
+  }
+
+  // DELETE: permanent delete
+  if (req.method === 'DELETE') {
+    try {
+      const { id } = await req.json()
+      if (!id) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      await supabase.from('user_profiles').delete().eq('id', id)
+      const { error: authDelErr } = await supabase.auth.admin.deleteUser(id)
+      if (authDelErr) return new Response(JSON.stringify({ error: authDelErr.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      await supabase.from('system_logs').insert({ level: 'warn', function_name: 'admin-users', message: `User ${id} permanently deleted`, metadata: { user_id: id } })
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }) }
+  }
+
+  // PUT: update profile
   if (req.method === 'PUT') {
     try {
       const body = await req.json()
       const { id, ...updates } = body
-      if (!id) return new Response(JSON.stringify({ error: 'Missing user id' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
-
-      // Whitelist allowed fields (never allow id to be overwritten)
+      if (!id) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
       const allowed = {
         plan: updates.plan,
         max_shops: updates.max_shops != null ? parseInt(updates.max_shops) : undefined,
@@ -43,58 +67,29 @@ export default async (req) => {
         img_quality: updates.img_quality != null ? parseInt(updates.img_quality) : undefined,
         img_max_width: updates.img_max_width != null ? parseInt(updates.img_max_width) : undefined,
       }
-      // Remove undefined keys
       Object.keys(allowed).forEach(k => allowed[k] === undefined && delete allowed[k])
-
       const { error } = await supabase.from('user_profiles').update(allowed).eq('id', id)
-      if (error) {
-        console.error('admin-users PUT error:', error)
-        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
-      }
+      if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    } catch (err) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
-    }
+    } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }) }
   }
 
+  // GET: list all users
   try {
-    // Get all user profiles
-    const { data: profiles, error: profileErr } = await supabase
-      .from('user_profiles')
-      .select('*')
+    const { data: profiles, error: profileErr } = await supabase.from('user_profiles').select('*')
     if (profileErr) throw profileErr
-
-    // Get all auth users (service role can do this)
     const { data: { users: authUsers }, error: authUsersErr } = await supabase.auth.admin.listUsers()
     if (authUsersErr) throw authUsersErr
-
-    // Get shop counts per user
     const { data: shops } = await supabase.from('shops').select('user_id')
     const shopCounts = {}
     shops?.forEach(s => { shopCounts[s.user_id] = (shopCounts[s.user_id] || 0) + 1 })
-
-    // Build email map from auth users
     const emailMap = {}
     authUsers?.forEach(u => { emailMap[u.id] = u.email })
-
-    // Add any auth users not yet in profiles
     const profileIds = new Set((profiles || []).map(p => p.id))
-    const extraUsers = (authUsers || [])
-      .filter(u => !profileIds.has(u.id))
-      .map(u => ({ id: u.id, full_name: u.user_metadata?.full_name || '', plan: 'pro', max_shops: 10, status: 'pending' }))
-
-    const merged = [...(profiles || []), ...extraUsers].map(p => ({
-      ...p,
-      email: emailMap[p.id] || '',
-      sites: shopCounts[p.id] || 0,
-    }))
-
-    return new Response(JSON.stringify(merged), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    })
+    const extraUsers = (authUsers || []).filter(u => !profileIds.has(u.id)).map(u => ({ id: u.id, full_name: u.user_metadata?.full_name || '', plan: 'pro', max_shops: 10, status: 'pending' }))
+    const merged = [...(profiles || []), ...extraUsers].map(p => ({ ...p, email: emailMap[p.id] || '', sites: shopCounts[p.id] || 0 }))
+    return new Response(JSON.stringify(merged), { status: 200, headers: { 'Content-Type': 'application/json' } })
   } catch (err) {
-    console.error('admin-users error:', err)
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
   }
 }
