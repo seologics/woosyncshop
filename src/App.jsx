@@ -2821,7 +2821,7 @@ const SystemLogsPanel = () => {
 
 // ─── Platform Settings Component ──────────────────────────────────────────────
 const PlatformSettings = () => {
-  const [ps, setPs] = useState({ gemini_api_key: "", tinypng_api_key: "", mollie_api_key: "" });
+  const [ps, setPs] = useState({ gemini_api_key: "", tinypng_api_key: "", mollie_api_key: "", contact_notification_email: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -2834,7 +2834,7 @@ const PlatformSettings = () => {
           headers: { "Authorization": `Bearer ${session?.access_token}` }
         });
         const d = await res.json();
-        setPs(p => ({ ...p, gemini_api_key: d.gemini_api_key || "", tinypng_api_key: d.tinypng_api_key || "", mollie_api_key: d.mollie_api_key || "" }));
+        setPs(p => ({ ...p, gemini_api_key: d.gemini_api_key || "", tinypng_api_key: d.tinypng_api_key || "", mollie_api_key: d.mollie_api_key || "", contact_notification_email: d.contact_notification_email || "" }));
       } catch {}
       setLoading(false);
     };
@@ -2879,6 +2879,18 @@ const PlatformSettings = () => {
           </Field>
           <Field label="Mollie Webhook URL" hint="Ingesteld op Mollie dashboard">
             <Inp value="https://woosyncshop.com/api/mollie/webhook" onChange={() => {}} />
+          </Field>
+        </div>
+      </div>
+      <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>📧 Contactformulier notificaties</div>
+        <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 12 }}>
+          E-mailadres dat een melding ontvangt bij elke nieuwe contactformulier inzending.
+          Leeg = fallback naar <code style={{ color: "var(--pr-h)" }}>leadingvation@gmail.com</code>
+        </div>
+        <div style={{ maxWidth: 360 }}>
+          <Field label="Notificatie e-mailadres">
+            <Inp value={ps.contact_notification_email} onChange={e => setPs(p => ({ ...p, contact_notification_email: e.target.value }))} type="email" placeholder="info@woosyncshop.com" />
           </Field>
         </div>
       </div>

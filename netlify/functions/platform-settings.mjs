@@ -19,7 +19,7 @@ export default async (req) => {
       }
 
       const selectFields = isAdmin
-        ? 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key, tinypng_api_key, mollie_api_key'
+        ? 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email'
         : 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label'
 
       const { data, error } = await supabase
@@ -51,7 +51,7 @@ export default async (req) => {
       }
 
       const body = await req.json()
-      const { gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key, tinypng_api_key, mollie_api_key } = body
+      const { gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email } = body
 
       const { error: upsertErr } = await supabase.from('platform_settings').upsert({
         id: 1,
@@ -62,6 +62,7 @@ export default async (req) => {
         gemini_api_key: gemini_api_key || null,
         tinypng_api_key: tinypng_api_key || null,
         mollie_api_key: mollie_api_key || null,
+        contact_notification_email: contact_notification_email || null,
         updated_at: new Date().toISOString()
       })
 

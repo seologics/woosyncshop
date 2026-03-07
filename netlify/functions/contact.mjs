@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
 
 // Inline log helper
 async function writeLog(supabase, functionName, level, message, meta = {}) {
@@ -15,6 +16,8 @@ async function writeLog(supabase, functionName, level, message, meta = {}) {
   }
 }
 
+const FALLBACK_EMAIL = 'leadingvation@gmail.com'
+const FROM_EMAIL = 'info@woosyncshop.com'
 
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -37,22 +40,71 @@ export default async (req) => {
     { auth: { persistSession: false } }
   )
 
-  const { error } = await supabase.from('contact_submissions').insert({
+  // 1. Save to Supabase
+  const { error: insertError } = await supabase.from('contact_submissions').insert({
     name, email, subject: subject || null, message,
     created_at: new Date().toISOString(),
   })
 
-  if (error) {
+  if (insertError) {
     await writeLog(supabase, 'contact', 'error', 'contact_submissions insert failed', {
-      code: error.code, detail: error.message, hint: error.hint, email
+      code: insertError.code, detail: insertError.message, email
     })
-    return new Response(JSON.stringify({ error: 'Opslaan mislukt', detail: error.message }), {
+    return new Response(JSON.stringify({ error: 'Opslaan mislukt', detail: insertError.message }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     })
   }
 
-  await writeLog(supabase, 'contact', 'info', 'Contact form submitted', { email, subject })
-  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  // 2. Get notification email from platform_settings
+  let notifyEmail = FALLBACK_EMAIL
+  try {
+    const { data: settings } = await supabase
+      .from('platform_settings')
+      .select('contact_notification_email')
+      .eq('id', 1)
+      .single()
+    if (settings?.contact_notification_email) {
+      notifyEmail = settings.contact_notification_email
+    }
+  } catch (e) {
+    await writeLog(supabase, 'contact', 'warn', 'Could not load notification email, using fallback', { fallback: FALLBACK_EMAIL })
+  }
+
+  // 3. Send email via SES
+  try {
+    const ses = new SESClient({
+      region: Netlify.env.get('AWS_SES_REGION') || 'eu-west-1',
+      credentials: {
+        accessKeyId: Netlify.env.get('AWS_SES_ACCESS_KEY_ID'),
+        secretAccessKey: Netlify.env.get('AWS_SES_SECRET_ACCESS_KEY'),
+      }
+    })
+
+    const emailBody = `Nieuw contactformulier bericht via WooSyncShop.com\n\nNaam: ${name}\nE-mail: ${email}\nOnderwerp: ${subject || '—'}\n\nBericht:\n${message}\n\n---\nVerzonden via woosyncshop.com/contact`
+
+    await ses.send(new SendEmailCommand({
+      Source: FROM_EMAIL,
+      Destination: { ToAddresses: [notifyEmail] },
+      ReplyToAddresses: [email],
+      Message: {
+        Subject: { Data: `[WooSyncShop] Contact: ${subject || name}` },
+        Body: { Text: { Data: emailBody } }
+      }
+    }))
+
+    await writeLog(supabase, 'contact', 'info', 'Contact form submitted + email sent', {
+      email, subject, notify_to: notifyEmail
+    })
+  } catch (sesErr) {
+    // Email failed but submission was saved — log warning, still return ok
+    await writeLog(supabase, 'contact', 'warn', 'SES email failed (submission saved)', {
+      error: sesErr.message, notify_to: notifyEmail, email
+    })
+  }
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  })
 }
 
 export const config = { path: '/api/contact' }
