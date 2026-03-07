@@ -1166,24 +1166,35 @@ const AdminPanel = () => {
   const updUser = (id, field, val) => setUsers(us => us.map(u => u.id === id ? { ...u, [field]: val } : u));
   const saveUser = async (u) => {
     try {
-      const updates = {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      // Derive status: free_forever and pro get "active", suspended stays suspended
+      const derivedStatus = u.plan === "suspended" ? "suspended" : "active";
+      const payload = {
+        id: u.id,
         plan: u.plan,
+        status: derivedStatus,
         max_shops: u.max_shops ? parseInt(u.max_shops) : 10,
         is_admin: u.is_admin ?? false,
         ai_taxonomy_enabled: u.ai_taxonomy_enabled ?? false,
-        ai_taxonomy_model: u.ai_taxonomy_model || "gemini-2.0-flash-lite",
+        ai_taxonomy_model: u.ai_taxonomy_model || "gemini-2.5-flash-image",
         ai_taxonomy_threshold: u.ai_taxonomy_threshold ? parseFloat(u.ai_taxonomy_threshold) : 0.85,
-        gemini_model: u.gemini_model || "gemini-2.0-flash-lite",
+        gemini_model: u.gemini_model || "gemini-2.5-flash-image",
         img_max_kb: u.img_max_kb ? parseInt(u.img_max_kb) : 400,
         img_quality: u.img_quality ? parseInt(u.img_quality) : 85,
         img_max_width: u.img_max_width ? parseInt(u.img_max_width) : 1200,
       };
-      const { error } = await supabase.from("user_profiles").update(updates).eq("id", u.id);
-      if (error) {
-        alert("Opslaan mislukt: " + error.message + " (code: " + error.code + ")");
+      const res = await fetch("/api/admin-users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) {
+        alert("Opslaan mislukt: " + (result.error || res.statusText));
         return;
       }
-      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, ...updates } : usr));
+      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, ...payload } : usr));
       setEditUser(null);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
   };
@@ -1273,9 +1284,8 @@ const AdminPanel = () => {
                 <div style={{ fontSize: 12, color: "var(--dm)" }}>{editUser.sites} shops verbonden</div>
               </div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                <Badge color={editUser.plan === "free_forever" ? "orange" : "blue"}>{editUser.plan === "free_forever" ? "Free forever" : "Pro €19,99/mnd"}</Badge>
-                <Badge color={editUser.status === "active" ? "green" : "amber"}>{editUser.status}</Badge>
-              </div>
+                <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>{editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : "Pro €19,99/mnd"}</Badge>
+                <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>{editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}</Badge>
             </div>
             <Field label="Plan">
               <Sel value={editUser.plan} onChange={e => setEditUser(u => ({ ...u, plan: e.target.value }))} options={[{ value: "pro", label: "Pro – €19,99 / maand" }, { value: "free_forever", label: "Free forever (code: freeforever)" }, { value: "suspended", label: "Gesuspendeerd" }]} />
@@ -1287,7 +1297,7 @@ const AdminPanel = () => {
             <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Gemini model">
-                <Sel value={editUser.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[{ value: "gemini-2.0-flash-lite", label: "Flash Lite (zuinig)" }, { value: "gemini-2.0-flash", label: "Flash (gebalanceerd)" }, { value: "gemini-1.5-pro", label: "1.5 Pro (premium)" }]} />
+                <Sel value={editUser.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[{ value: "gemini-2.5-flash-image", label: "Nano Banana (snel & zuinig)" }, { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2 (hoge efficiëntie)" }, { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro (professioneel)" }]} />
               </Field>
               <Field label="Max bestandsgrootte">
                 <Inp value={editUser.img_max_kb} onChange={e => setEditUser(u => ({ ...u, img_max_kb: e.target.value }))} type="number" suffix="KB" />
@@ -1312,12 +1322,12 @@ const AdminPanel = () => {
               {(editUser.ai_taxonomy_enabled) && <>
                 <Divider my={4} />
                 <Field label="Gemini model voor taxonomie" hint="Kan afwijken van image pipeline model">
-                  <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.0-flash-lite"}
+                  <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.0-flash"}
                     onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_model: e.target.value }))}
                     options={[
                       { value: "gemini-2.0-flash-lite", label: "Flash Lite – zuinig, geschikt voor eenvoudige vertalingen" },
                       { value: "gemini-2.0-flash",      label: "Flash – gebalanceerd (aanbevolen)" },
-                      { value: "gemini-1.5-pro",        label: "1.5 Pro – hoogste kwaliteit, meer tokens" },
+                      { value: "gemini-2.5-pro",        label: "2.5 Pro – hoogste kwaliteit, meer tokens" },
                     ]} />
                 </Field>
                 <Field label="Confidence drempel" hint="Vertalingen onder deze score vereisen handmatige review">

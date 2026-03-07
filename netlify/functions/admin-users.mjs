@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
+const SUPERADMIN_EMAIL = 'leadingvation@gmail.com'
+
 export default async (req) => {
-  if (req.method !== 'GET') {
+  if (req.method !== 'GET' && req.method !== 'PUT') {
     return new Response('Method not allowed', { status: 405 })
   }
 
@@ -17,8 +19,43 @@ export default async (req) => {
   }
   const token = authHeader.slice(7)
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
-  if (authErr || !user || user.email !== 'leadingvation@gmail.com') {
+  if (authErr || !user || user.email !== SUPERADMIN_EMAIL) {
     return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── PUT: update a user profile ──────────────────────────────────────────────
+  if (req.method === 'PUT') {
+    try {
+      const body = await req.json()
+      const { id, ...updates } = body
+      if (!id) return new Response(JSON.stringify({ error: 'Missing user id' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+
+      // Whitelist allowed fields (never allow id to be overwritten)
+      const allowed = {
+        plan: updates.plan,
+        status: updates.status,
+        max_shops: updates.max_shops != null ? parseInt(updates.max_shops) : undefined,
+        is_admin: updates.is_admin ?? undefined,
+        ai_taxonomy_enabled: updates.ai_taxonomy_enabled ?? undefined,
+        ai_taxonomy_model: updates.ai_taxonomy_model || undefined,
+        ai_taxonomy_threshold: updates.ai_taxonomy_threshold != null ? parseFloat(updates.ai_taxonomy_threshold) : undefined,
+        gemini_model: updates.gemini_model || undefined,
+        img_max_kb: updates.img_max_kb != null ? parseInt(updates.img_max_kb) : undefined,
+        img_quality: updates.img_quality != null ? parseInt(updates.img_quality) : undefined,
+        img_max_width: updates.img_max_width != null ? parseInt(updates.img_max_width) : undefined,
+      }
+      // Remove undefined keys
+      Object.keys(allowed).forEach(k => allowed[k] === undefined && delete allowed[k])
+
+      const { error } = await supabase.from('user_profiles').update(allowed).eq('id', id)
+      if (error) {
+        console.error('admin-users PUT error:', error)
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
   }
 
   try {
