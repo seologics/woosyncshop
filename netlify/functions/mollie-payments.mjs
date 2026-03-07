@@ -143,7 +143,7 @@ export default async (req) => {
       const paymentBody = {
         amount: { currency: 'EUR', value: parseFloat(amount).toFixed(2) },
         description: 'WooSyncShop Pro – maandabonnement',
-        redirectUrl: return_url || 'https://woosyncshop.com/#payment-return',
+        redirectUrl: `${return_url || 'https://woosyncshop.com/#payment-return'}?pid=PENDING`,
         webhookUrl: 'https://woosyncshop.com/api/mollie-webhook',
         customerId: customerId,
         sequenceType: 'first',
@@ -158,8 +158,11 @@ export default async (req) => {
         return new Response(JSON.stringify({ error: payment.detail || 'Mollie payment creation failed' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       }
 
-      // 3. Store pending payment ID on profile
-      await supabase.from('user_profiles').update({ mollie_payment_id: payment.id }).eq('id', user.id)
+      // 3. Store pending payment ID on profile + also set plan to pending_payment
+      await supabase.from('user_profiles').update({
+        mollie_payment_id: payment.id,
+        plan: 'pending_payment',
+      }).eq('id', user.id)
 
       return new Response(JSON.stringify({
         checkout_url: payment._links.checkout.href,

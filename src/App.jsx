@@ -1802,6 +1802,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const [testResults, setTestResults] = useState({}); // {shopId: {ok, wc_version, ...}}
   const [savingShop, setSavingShop] = useState(false);
 
+  const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
+
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("user_profiles").select("*").eq("id", user.id).single()
@@ -1819,6 +1821,10 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
             address_street: data.address_street || "",
             address_city: data.address_city || "",
           }));
+          // Block access if payment not completed
+          if (data.plan === "pending_payment") {
+            setPendingPaymentWall(true);
+          }
         }
       });
   }, [user?.id]);
@@ -2328,7 +2334,7 @@ const Dashboard = ({ user, onLogout }) => {
 
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
 const AuthModal = ({ mode, onClose, onSuccess }) => {
-  const [step, setStep] = useState(mode === "signup" ? "form" : mode === "reset" ? "reset" : "login");
+  const [step, setStep] = useState(mode === "signup" ? "form" : mode === "reset" ? "reset" : mode === "payment" ? "payment" : "login");
   const [form, setForm] = useState({
     name: "", email: "", password: "", code: "",
     business_name: "", country: "NL",
@@ -2451,6 +2457,8 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
       });
       const data = await res.json();
       if (data.checkout_url) {
+        // Store payment_id in sessionStorage so we can verify on return
+        if (data.payment_id) sessionStorage.setItem("wss_pending_payment_id", data.payment_id);
         window.location.href = data.checkout_url;
       } else {
         setError(data.error || "Kon geen betaallink aanmaken. Probeer het opnieuw.");
@@ -3394,15 +3402,43 @@ export default function App() {
   }, []);
 
   const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash === "#payment-return");
+  const [paymentReturnStatus, setPaymentReturnStatus] = useState("checking"); // checking | paid | pending | failed | cancelled
 
   useEffect(() => {
-    if (paymentReturn) {
-      // Clear the hash cleanly
-      history.replaceState({}, "", "/");
-      // Auto-dismiss after 5s
-      const t = setTimeout(() => setPaymentReturn(false), 5000);
-      return () => clearTimeout(t);
-    }
+    if (!paymentReturn) return;
+    history.replaceState({}, "", "/");
+
+    const verify = async () => {
+      try {
+        const session = await getSession();
+        if (!session) {
+          // No session = user wasn't logged in, nothing to verify
+          setPaymentReturn(false);
+          return;
+        }
+        const res = await fetch("/api/check-payment", {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        });
+        const data = await res.json();
+        const mollieStatus = data.status; // paid | open | canceled | expired | failed | pending
+        if (mollieStatus === "paid" || data.plan === "pro" || data.plan === "free_forever") {
+          setPaymentReturnStatus("paid");
+          sessionStorage.removeItem("wss_pending_payment_id");
+          // Auto-dismiss after 5s
+          setTimeout(() => setPaymentReturn(false), 5000);
+        } else if (mollieStatus === "canceled" || mollieStatus === "expired" || mollieStatus === "failed") {
+          setPaymentReturnStatus("failed");
+        } else {
+          // open / pending — payment processing
+          setPaymentReturnStatus("pending");
+          setTimeout(() => setPaymentReturn(false), 6000);
+        }
+      } catch {
+        setPaymentReturnStatus("pending");
+        setTimeout(() => setPaymentReturn(false), 5000);
+      }
+    };
+    verify();
   }, [paymentReturn]);
 
   const handleSuccess = (userData) => {
@@ -3459,6 +3495,23 @@ export default function App() {
           ? <SuperAdminDashboard user={user} onLogout={handleLogout} />
           : <Dashboard user={user} onLogout={handleLogout} />
       )}
+
+      {/* Payment wall — shown when user is logged in but hasn't paid yet */}
+      {pendingPaymentWall && view === "app" && user && user.email !== SUPERADMIN_EMAIL && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9990, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", padding: 40, maxWidth: 460, textAlign: "center", boxShadow: "0 8px 48px rgba(0,0,0,0.6)" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>💳</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling nog niet voltooid</h2>
+            <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
+              Je account is aangemaakt maar de betaling is niet afgerond. Voltooi je betaling om toegang te krijgen tot het dashboard.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <Btn variant="secondary" onClick={handleLogout}>Uitloggen</Btn>
+              <Btn variant="primary" onClick={() => { setPendingPaymentWall(false); setAuthModal("payment"); }}>Betaling voltooien →</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       {authModal && (
         <AuthModal
           mode={authModal}
@@ -3470,14 +3523,40 @@ export default function App() {
         <CookieBanner onAccept={acceptCookies} onReject={rejectCookies} />
       )}
       {paymentReturn && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "var(--s1)", border: "1px solid var(--gr)", borderRadius: "var(--rd-xl)", padding: 40, maxWidth: 420, textAlign: "center", boxShadow: "0 8px 48px rgba(0,0,0,0.5)" }}>
-            <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
-            <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling ontvangen!</h2>
-            <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
-              Je betaling wordt verwerkt via Mollie. Je account wordt automatisch geactiveerd zodra de betaling is bevestigd.
-            </p>
-            <Btn variant="primary" onClick={() => setPaymentReturn(false)}>Naar dashboard →</Btn>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "var(--s1)", border: `1px solid ${paymentReturnStatus === "paid" ? "var(--gr)" : paymentReturnStatus === "failed" ? "var(--re)" : "var(--b1)"}`, borderRadius: "var(--rd-xl)", padding: 40, maxWidth: 440, textAlign: "center", boxShadow: "0 8px 48px rgba(0,0,0,0.5)" }}>
+            {paymentReturnStatus === "checking" && <>
+              <div style={{ fontSize: 44, marginBottom: 16 }}>⏳</div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling controleren...</h2>
+              <p style={{ fontSize: 14, color: "var(--mx)", lineHeight: 1.6 }}>Even geduld, we verifiëren je betaling.</p>
+            </>}
+            {paymentReturnStatus === "paid" && <>
+              <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
+              <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling geslaagd!</h2>
+              <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
+                Je account is actief. Factuur is per e-mail verstuurd.
+              </p>
+              <Btn variant="primary" onClick={() => { setPaymentReturn(false); setPendingPaymentWall(false); }}>Naar dashboard →</Btn>
+            </>}
+            {paymentReturnStatus === "pending" && <>
+              <div style={{ fontSize: 44, marginBottom: 16 }}>🕐</div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling wordt verwerkt</h2>
+              <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
+                Je betaling is ontvangen en wordt verwerkt door Mollie. Je account wordt automatisch geactiveerd.
+              </p>
+              <Btn variant="primary" onClick={() => { setPaymentReturn(false); setPendingPaymentWall(false); }}>Naar dashboard →</Btn>
+            </>}
+            {paymentReturnStatus === "failed" && <>
+              <div style={{ fontSize: 44, marginBottom: 16 }}>❌</div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling niet voltooid</h2>
+              <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
+                De betaling is geannuleerd of mislukt. Je account is nog niet actief. Probeer het opnieuw.
+              </p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                <Btn variant="secondary" onClick={() => { setPaymentReturn(false); }}>Sluiten</Btn>
+                <Btn variant="primary" onClick={() => { setPaymentReturn(false); setAuthModal("payment"); }}>Opnieuw betalen →</Btn>
+              </div>
+            </>}
           </div>
         </div>
       )}
