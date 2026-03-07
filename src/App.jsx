@@ -49,7 +49,7 @@ const getVatInfo = (countryCode, vatValidated) => {
 
 // ─── Google Fonts ─────────────────────────────────────────────────────────────
 const fontLink = document.createElement("link");
-fontLink.href = "https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap";
+fontLink.href = "https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap";
 fontLink.rel = "stylesheet";
 document.head.appendChild(fontLink);
 
@@ -70,7 +70,7 @@ const G = () => {
         --tx: #E8EBF4; --mx: #9BA3BC; --dm: #4E5672;
         --rd: 8px; --rd-lg: 12px; --rd-xl: 16px;
         --sh: 0 4px 24px rgba(0,0,0,0.4);
-        --font-h: 'Syne', sans-serif; --font-b: 'DM Sans', sans-serif;
+        --font-h: 'Manrope', sans-serif; --font-b: 'DM Sans', sans-serif;
       }
       body { background: var(--bg); color: var(--tx); font-family: var(--font-b); font-size: 14px; line-height: 1.5; overflow-x: hidden; }
       * { font-family: var(--font-b); }
