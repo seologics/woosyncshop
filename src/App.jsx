@@ -1184,7 +1184,7 @@ const AdminPanel = () => {
         <div style={{ padding: "4px 10px", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 20, fontSize: 11, color: "var(--re)", fontWeight: 700, letterSpacing: "0.05em" }}>ADMIN</div>
         <h2 style={{ fontSize: 18, fontWeight: 700 }}>Beheerpaneel</h2>
       </div>
-      <Tabs tabs={[{ id: "users", label: "👥 Gebruikers" }, { id: "payments", label: "💳 Betalingen" }, { id: "platform", label: "⚙ Platform" }, { id: "tracking", label: "📊 Tracking" }]} active={adminTab} onChange={setAdminTab} />
+      <Tabs tabs={[{ id: "users", label: "👥 Gebruikers" }, { id: "payments", label: "💳 Betalingen" }, { id: "platform", label: "⚙ Platform" }, { id: "tracking", label: "📊 Tracking" }, { id: "logs", label: "📋 Logs" }]} active={adminTab} onChange={setAdminTab} />
       <div style={{ marginTop: 20 }}>
 
         {/* Users */}
@@ -1249,6 +1249,8 @@ const AdminPanel = () => {
 
         {/* Platform */}
         {adminTab === "platform" && <PlatformSettings />}
+        {/* Logs */}
+        {adminTab === "logs" && <SystemLogsPanel />}
       </div>
 
       {/* Per-user config overlay */}
@@ -2694,6 +2696,129 @@ const ContactPage = ({ onBack }) => {
 };
 
 // ─── Tracking Admin Tab ────────────────────────────────────────────────────────
+// ─── System Logs Panel ────────────────────────────────────────────────────────
+const LEVEL_COLORS = {
+  error: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.25)", text: "var(--re)", dot: "#ef4444" },
+  warn:  { bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.25)", text: "var(--am)", dot: "#f59e0b" },
+  info:  { bg: "rgba(99,102,241,0.06)", border: "rgba(99,102,241,0.2)", text: "var(--pr-h)", dot: "#6366f1" },
+};
+
+const SystemLogsPanel = () => {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [levelFilter, setLevelFilter] = useState("all");
+  const [fnFilter, setFnFilter] = useState("all");
+  const [clearing, setClearing] = useState(false);
+
+  const loadLogs = async (level, fn) => {
+    const lvl = level !== undefined ? level : levelFilter;
+    const f = fn !== undefined ? fn : fnFilter;
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const params = new URLSearchParams({ limit: "300" });
+      if (lvl !== "all") params.set("level", lvl);
+      if (f !== "all") params.set("fn", f);
+      const res = await fetch(`/api/system-logs?${params}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Laden mislukt");
+      const data = await res.json();
+      setLogs(data);
+    } catch (e) { console.error("Failed to load logs:", e); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadLogs("all", "all"); }, []);
+
+  const clearLogs = async () => {
+    if (!confirm("Alle logs wissen?")) return;
+    setClearing(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      await fetch("/api/system-logs", { method: "DELETE", headers: { "Authorization": `Bearer ${token}` } });
+      setLogs([]);
+    } catch (e) { alert("Wissen mislukt: " + e.message); }
+    finally { setClearing(false); }
+  };
+
+  const fnNames = ["all", ...new Set(logs.map(l => l.function_name).filter(Boolean))];
+  const filteredLogs = logs.filter(l =>
+    (levelFilter === "all" || l.level === levelFilter) &&
+    (fnFilter === "all" || l.function_name === fnFilter)
+  );
+  const counts = { error: 0, warn: 0, info: 0 };
+  logs.forEach(l => { if (counts[l.level] !== undefined) counts[l.level]++; });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          {["error","warn","info"].map(lvl => (
+            <div key={lvl} style={{ padding: "4px 10px", background: LEVEL_COLORS[lvl].bg, border: `1px solid ${LEVEL_COLORS[lvl].border}`, borderRadius: 20, fontSize: 11, color: LEVEL_COLORS[lvl].text, fontWeight: 700 }}>
+              {lvl.toUpperCase()} · {counts[lvl]}
+            </div>
+          ))}
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <select value={levelFilter} onChange={e => { setLevelFilter(e.target.value); loadLogs(e.target.value, fnFilter); }}
+            style={{ padding: "5px 10px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--tx)", cursor: "pointer" }}>
+            <option value="all">Alle niveaus</option>
+            <option value="error">Errors</option>
+            <option value="warn">Warnings</option>
+            <option value="info">Info</option>
+          </select>
+          <select value={fnFilter} onChange={e => { setFnFilter(e.target.value); loadLogs(levelFilter, e.target.value); }}
+            style={{ padding: "5px 10px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--tx)", cursor: "pointer" }}>
+            {fnNames.map(f => <option key={f} value={f}>{f === "all" ? "Alle functies" : f}</option>)}
+          </select>
+          <Btn variant="secondary" size="sm" onClick={() => loadLogs()}>↻ Vernieuwen</Btn>
+          <Btn variant="ghost" size="sm" onClick={clearLogs} disabled={clearing} style={{ color: "var(--re)" }}>
+            {clearing ? "Wissen..." : "🗑 Alles wissen"}
+          </Btn>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--dm)" }}>
+        Logs worden automatisch verwijderd na 7 dagen · {filteredLogs.length} van {logs.length} getoond
+      </div>
+      {loading ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "var(--mx)", fontSize: 13 }}>
+          <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span> Logs laden...
+        </div>
+      ) : filteredLogs.length === 0 ? (
+        <div style={{ padding: "32px 0", textAlign: "center", color: "var(--dm)", fontSize: 13 }}>
+          Geen logs gevonden {levelFilter !== "all" || fnFilter !== "all" ? "voor dit filter" : "— systeem is schoon ✓"}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 560, overflowY: "auto" }}>
+          {filteredLogs.map((log, i) => {
+            const c = LEVEL_COLORS[log.level] || LEVEL_COLORS.info;
+            const ts = new Date(log.created_at).toLocaleString("nl-NL");
+            return (
+              <div key={log.id || i} style={{ padding: "10px 14px", background: c.bg, border: `1px solid ${c.border}`, borderRadius: "var(--rd)" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.dot, flexShrink: 0, marginTop: 4 }} />
+                  <span style={{ color: c.text, fontWeight: 700, fontSize: 11, textTransform: "uppercase", minWidth: 40, flexShrink: 0 }}>{log.level}</span>
+                  <span style={{ color: "var(--pr-h)", fontWeight: 600, fontSize: 11, minWidth: 100, flexShrink: 0 }}>{log.function_name}</span>
+                  <span style={{ color: "var(--tx)", flex: 1, fontSize: 12 }}>{log.message}</span>
+                  <span style={{ color: "var(--dm)", fontSize: 11, flexShrink: 0 }}>{ts}</span>
+                </div>
+                {log.meta && (
+                  <pre style={{ margin: "6px 0 0 57px", fontSize: 11, color: "var(--mx)", background: "rgba(0,0,0,0.15)", padding: "6px 10px", borderRadius: 4, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                    {JSON.stringify(log.meta, null, 2)}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Platform Settings Component ──────────────────────────────────────────────
 const PlatformSettings = () => {
   const [ps, setPs] = useState({ gemini_api_key: "", tinypng_api_key: "", mollie_api_key: "" });
