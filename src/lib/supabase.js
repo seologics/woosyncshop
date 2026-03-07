@@ -1,21 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// Anon key is intentionally public — safe to expose (protected by RLS)
+// Service role key stays server-side in Netlify env vars only
+const supabaseUrl = 'https://pwrtuqybtvgiiyghqxiw.supabase.co'
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB3cnR1cXlidHZnaWl5Z2hxeGl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4NDM4NTIsImV4cCI6MjA4ODQxOTg1Mn0.hghy63YrDUixzGbdUu5-gF2-OPOGIuQ66zxhNzu_q3Y'
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase env vars not set — running in demo mode')
-}
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder'
-)
-
-// ─── Auth helpers ─────────────────────────────────────────────────────────────
-
-export const signUp = async (email, password) => {
-  const { data, error } = await supabase.auth.signUp({ email, password })
+export const signUp = async (email, password, options = {}) => {
+  const { data, error } = await supabase.auth.signUp({ email, password, ...options })
   if (error) throw error
   return data
 }
@@ -41,8 +34,6 @@ export const getUser = async () => {
   return user
 }
 
-// ─── Shop helpers ─────────────────────────────────────────────────────────────
-
 export const getShops = async (userId) => {
   const { data, error } = await supabase
     .from('shops')
@@ -64,14 +55,9 @@ export const upsertShop = async (shop) => {
 }
 
 export const deleteShop = async (shopId) => {
-  const { error } = await supabase
-    .from('shops')
-    .delete()
-    .eq('id', shopId)
+  const { error } = await supabase.from('shops').delete().eq('id', shopId)
   if (error) throw error
 }
-
-// ─── User profile helpers ─────────────────────────────────────────────────────
 
 export const getUserProfile = async (userId) => {
   const { data, error } = await supabase
