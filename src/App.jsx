@@ -2040,7 +2040,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
     <div style={{ height: 56, background: "var(--s1)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", padding: "0 16px", gap: 10, position: "sticky", top: 0, zIndex: 100, flexShrink: 0 }}>
       {/* Logo */}
       <div onClick={() => setActiveView("products")} style={{ marginRight: 8, cursor: "pointer", display: "flex", alignItems: "center" }}>
-        <img src="/woo-sync-shop.png" alt="Woo Sync Shop" style={{ height: 22, mixBlendMode: "screen" }} />
+        <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 22 }} />
       </div>
 
       {/* Site Switcher */}
@@ -2132,7 +2132,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
       {/* Superadmin nav */}
       <nav style={{ height: 56, padding: "0 24px", display: "flex", alignItems: "center", gap: 16, background: "var(--s1)", borderBottom: "1px solid var(--b1)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <img src="/woo-sync-shop.png" alt="Woo Sync Shop" style={{ height: 24, mixBlendMode: "screen" }} />
+          <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 24 }} />
           <span style={{ fontSize: 11, padding: "2px 6px", background: "var(--pr-l)", color: "var(--pr-h)", borderRadius: 4, fontFamily: "var(--font-b)", fontWeight: 600 }}>SUPERADMIN</span>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
@@ -2659,7 +2659,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
       {/* Nav */}
       <nav style={{ position: "sticky", top: 0, zIndex: 100, padding: "0 32px", height: 64, display: "flex", alignItems: "center", background: "rgba(8,11,18,0.85)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--b1)" }}>
         <div style={{ display: "flex", alignItems: "center" }}>
-          <img src="/woo-sync-shop.png" alt="Woo Sync Shop" style={{ height: 28, mixBlendMode: "screen" }} />
+          <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 28 }} />
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           <Btn variant="ghost" onClick={onLogin}>Inloggen</Btn>
@@ -2749,7 +2749,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
       {/* Footer */}
       <div style={{ borderTop: "1px solid var(--b1)", padding: "24px 32px", display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--dm)", fontSize: 12 }}>
         <div style={{ display: "flex", alignItems: "center" }}>
-          <img src="/woo-sync-shop.png" alt="Woo Sync Shop" style={{ height: 20, mixBlendMode: "screen" }} />
+          <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 20 }} />
         </div>
         <div>© 2026 Woo Sync Shop · Alle rechten voorbehouden</div>
         <div style={{ display: "flex", gap: 16 }}>
@@ -2818,7 +2818,7 @@ const PageLayout = ({ title, children, onBack }) => (
   <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font-b)" }}>
     <nav style={{ position: "sticky", top: 0, zIndex: 100, padding: "0 32px", height: 64, display: "flex", alignItems: "center", background: "rgba(8,11,18,0.9)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--b1)" }}>
       <div onClick={onBack} style={{ cursor: "pointer", display: "flex", alignItems: "center" }}>
-        <img src="/woo-sync-shop.png" alt="Woo Sync Shop" style={{ height: 28, mixBlendMode: "screen" }} />
+        <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 28 }} />
       </div>
       <button onClick={onBack} style={{ marginLeft: "auto", background: "transparent", border: "1px solid var(--b2)", borderRadius: "var(--rd)", padding: "6px 14px", color: "var(--mx)", cursor: "pointer", fontSize: 13 }}>← Terug</button>
     </nav>
