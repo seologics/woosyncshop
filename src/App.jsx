@@ -1304,8 +1304,14 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       <div style={{ marginTop: 20 }}>
         {settingsTab === "sites" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", fontSize: 13, color: "var(--mx)" }}>
-              Voeg je WooCommerce shops toe via REST API. Genereer een Consumer Key &amp; Secret in <strong style={{ color: "var(--tx)" }}>WooCommerce → Instellingen → Geavanceerd → REST API</strong> met <em>lees/schrijf</em>-rechten.
+            <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", fontSize: 13, color: "var(--mx)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 600, color: "var(--tx)", marginBottom: 4 }}>Verbinden via WooCommerce REST API</div>
+                <div>Genereer een Consumer Key &amp; Secret in <strong style={{ color: "var(--tx)" }}>WooCommerce → Instellingen → Geavanceerd → REST API</strong> met <em>lees/schrijf</em>-rechten. Of installeer onze companion plugin voor automatische verbinding.</div>
+              </div>
+              <a href="https://woosyncshop.com/woosyncshop-companion.zip" download style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 12, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
+                🔌 Download plugin
+              </a>
             </div>
             {shops.map(shop => {
               const tr = testResults[shop.id];
@@ -1438,7 +1444,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
               </button>
             ))}
             <div style={{ borderTop: "1px solid var(--b1)", padding: "6px" }}>
-              <button style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "7px 10px", background: "transparent", border: "none", cursor: "pointer", color: "var(--pr-h)", fontSize: 12 }}>
+              <button onClick={() => { setSiteOpen(false); setActiveView("settings"); }} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "7px 10px", background: "transparent", border: "none", cursor: "pointer", color: "var(--pr-h)", fontSize: 12 }}>
                 <span>+</span> Shop toevoegen
               </button>
             </div>
