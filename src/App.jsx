@@ -1142,6 +1142,22 @@ const AdminPanel = () => {
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [editUser, setEditUser] = useState(null);
+  const [paymentsData, setPaymentsData] = useState(null);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+
+  const loadPayments = async () => {
+    setPaymentsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/mollie-payments", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+      const data = await res.json();
+      if (!data.error) setPaymentsData(data);
+      else setPaymentsData({ error: data.error });
+    } catch (e) { setPaymentsData({ error: e.message }); }
+    finally { setPaymentsLoading(false); }
+  };
+
+  useEffect(() => { if (adminTab === "payments") loadPayments(); }, [adminTab]);
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -1241,24 +1257,54 @@ const AdminPanel = () => {
         {/* Payments */}
         {adminTab === "payments" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-              {[["Maandelijks MRR", "€39,98", "2 actieve abonnementen"], ["Totaal klanten", "4", "1 gratis, 3 betaald"], ["Openstaand", "€19,99", "1 in afwachting"]].map(([label, val, sub]) => (
-                <div key={label} style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd-lg)", border: "1px solid var(--b1)" }}>
-                  <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)" }}>{val}</div>
-                  <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{sub}</div>
+            {paymentsLoading ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "40px 0", color: "var(--mx)", fontSize: 13 }}>
+                <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                Mollie data laden...
+              </div>
+            ) : paymentsData?.error ? (
+              <div style={{ padding: 16, background: "var(--re-l)", borderRadius: "var(--rd)", border: "1px solid rgba(239,68,68,0.3)", fontSize: 13, color: "var(--re)" }}>
+                {paymentsData.error === "Mollie API key not configured"
+                  ? "⚠ Mollie API key nog niet ingesteld. Ga naar Platform → Mollie configuratie."
+                  : `Fout bij laden: ${paymentsData.error}`}
+              </div>
+            ) : paymentsData ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+                  {[
+                    ["Maandelijks MRR", `€${parseFloat(paymentsData.stats?.mrr || 0).toFixed(2).replace(".", ",")}`, `${paymentsData.stats?.paidCount || 0} betalingen`],
+                    ["Unieke klanten", paymentsData.stats?.totalCustomers || 0, "via Mollie"],
+                    ["In afwachting", paymentsData.stats?.pendingCount || 0, "openstaande betalingen"],
+                  ].map(([label, val, sub]) => (
+                    <div key={label} style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd-lg)", border: "1px solid var(--b1)" }}>
+                      <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)" }}>{val}</div>
+                      <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{sub}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              <div style={{ padding: "8px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>Recente betalingen (via Mollie)</div>
-              {[["1 mrt 2026", "Jan de Vries", "€19,99", "Geslaagd"], ["1 mrt 2026", "Sophie Martin", "€19,99", "Geslaagd"], ["28 feb 2026", "Lars Nielsen", "€19,99", "In afwachting"], ["1 feb 2026", "Jan de Vries", "€19,99", "Geslaagd"]].map(([d, n, a, s], i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px 100px", gap: 0, padding: "9px 14px", borderBottom: "1px solid var(--b1)", fontSize: 13, alignItems: "center" }}>
-                  <span style={{ color: "var(--dm)" }}>{d}</span><span>{n}</span><span style={{ fontWeight: 600 }}>{a}</span>
-                  <Badge color={s === "Geslaagd" ? "green" : "amber"} size="sm">{s}</Badge>
+                <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+                  <div style={{ padding: "8px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Recente betalingen (via Mollie)</span>
+                    <Btn variant="ghost" size="sm" onClick={loadPayments}>↻ Verversen</Btn>
+                  </div>
+                  {(paymentsData.payments || []).length === 0 ? (
+                    <div style={{ padding: "20px 14px", fontSize: 13, color: "var(--dm)" }}>Geen betalingen gevonden.</div>
+                  ) : (paymentsData.payments || []).map((p, i) => {
+                    const statusLabel = { paid: "Geslaagd", pending: "In afwachting", open: "Open", failed: "Mislukt", canceled: "Geannuleerd", expired: "Verlopen" }[p.status] || p.status;
+                    const statusColor = { paid: "green", pending: "amber", open: "amber", failed: "red", canceled: "red", expired: "red" }[p.status] || "default";
+                    return (
+                      <div key={p.id || i} style={{ display: "grid", gridTemplateColumns: "110px 1fr 80px 110px", gap: 0, padding: "9px 14px", borderBottom: "1px solid var(--b1)", fontSize: 13, alignItems: "center" }}>
+                        <span style={{ color: "var(--dm)" }}>{p.date}</span>
+                        <span style={{ color: "var(--mx)", fontSize: 12 }}>{p.description}</span>
+                        <span style={{ fontWeight: 600 }}>{p.amount}</span>
+                        <Badge color={statusColor} size="sm">{statusLabel}</Badge>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              </>
+            ) : null}
           </div>
         )}
 
@@ -1573,6 +1619,24 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
 // ─── Billing Tab Component ─────────────────────────────────────────────────────
 const BillingTab = ({ userProfile }) => {
   const isFreeForever = userProfile?.plan === "free_forever";
+  const isPending = userProfile?.plan === "pro" && !userProfile?.mollie_customer_id;
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+
+  useEffect(() => {
+    if (isFreeForever || !userProfile?.id) return;
+    const load = async () => {
+      setPaymentsLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/mollie-payments", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+        const data = await res.json();
+        setPayments(data.payments || []);
+      } catch {} finally { setPaymentsLoading(false); }
+    };
+    load();
+  }, [userProfile?.id, isFreeForever]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--b2)" }}>
@@ -1580,18 +1644,38 @@ const BillingTab = ({ userProfile }) => {
         {isFreeForever ? (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
         ) : (
-          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "24,19"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
+          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "19,99"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
         )}
-        <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot {userProfile?.max_shops || 10} WordPress installaties · Actief</div>
+        <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot {userProfile?.max_shops || 10} WordPress installaties</div>
         {isFreeForever
           ? <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Free forever account</Badge>
-          : <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ Pro · betaald via Mollie</Badge>
+          : isPending
+            ? <Badge color="amber" style={{ marginTop: 8, display: "inline-flex" }}>⏳ Betaling in afwachting</Badge>
+            : <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ Pro · betaald via Mollie</Badge>
         }
       </div>
       {!isFreeForever && (
         <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Betalingsgeschiedenis</div>
-          <div style={{ fontSize: 13, color: "var(--dm)", padding: "12px 0" }}>Betalingshistorie wordt geladen via Mollie.</div>
+          <div style={{ fontWeight: 600, marginBottom: 10 }}>Betalingsgeschiedenis</div>
+          {paymentsLoading ? (
+            <div style={{ fontSize: 13, color: "var(--dm)", display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 14, height: 14, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+              Laden...
+            </div>
+          ) : payments.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--dm)" }}>Nog geen betalingen gevonden.</div>
+          ) : payments.map((p, i) => {
+            const statusLabel = { paid: "Geslaagd", pending: "In afwachting", open: "Open", failed: "Mislukt", canceled: "Geannuleerd", expired: "Verlopen" }[p.status] || p.status;
+            const statusColor = { paid: "green", pending: "amber", open: "amber", failed: "red", canceled: "red", expired: "red" }[p.status] || "default";
+            return (
+              <div key={p.id || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: i < payments.length - 1 ? "1px solid var(--b1)" : "none" }}>
+                <span style={{ fontSize: 12, color: "var(--dm)" }}>{p.date}</span>
+                <span style={{ fontSize: 12, color: "var(--mx)", flex: 1, marginLeft: 12 }}>{p.description}</span>
+                <span style={{ fontWeight: 600, fontSize: 13, marginRight: 12 }}>{p.amount}</span>
+                <Badge color={statusColor} size="sm">{statusLabel}</Badge>
+              </div>
+            );
+          })}
         </div>
       )}
       {!isFreeForever && <Btn variant="danger" size="sm" style={{ alignSelf: "flex-start" }}>Abonnement opzeggen</Btn>}
@@ -2189,9 +2273,29 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
-  const handlePayment = () => {
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setStep("success"); }, 1500);
+  const handlePayment = async () => {
+    setLoading(true); setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const vi = getVatInfo(form.country, form.vat_validated);
+      const res = await fetch("/api/mollie-payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({
+          email: form.email,
+          name: form.name,
+          price_total: vi.total,
+          return_url: window.location.origin + "/#payment-return",
+        }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        setError(data.error || "Kon geen betaallink aanmaken. Probeer het opnieuw.");
+        setLoading(false);
+      }
+    } catch (e) { setError(e.message); setLoading(false); }
   };
 
   const handleResetPassword = async () => {
@@ -3084,6 +3188,18 @@ export default function App() {
     init();
   }, []);
 
+  const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash === "#payment-return");
+
+  useEffect(() => {
+    if (paymentReturn) {
+      // Clear the hash cleanly
+      history.replaceState({}, "", "/");
+      // Auto-dismiss after 5s
+      const t = setTimeout(() => setPaymentReturn(false), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [paymentReturn]);
+
   const handleSuccess = (userData) => {
     setUser(userData);
     setAuthModal(null);
@@ -3147,6 +3263,18 @@ export default function App() {
       )}
       {cookieConsent === null && (
         <CookieBanner onAccept={acceptCookies} onReject={rejectCookies} />
+      )}
+      {paymentReturn && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "var(--s1)", border: "1px solid var(--gr)", borderRadius: "var(--rd-xl)", padding: 40, maxWidth: 420, textAlign: "center", boxShadow: "0 8px 48px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling ontvangen!</h2>
+            <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
+              Je betaling wordt verwerkt via Mollie. Je account wordt automatisch geactiveerd zodra de betaling is bevestigd.
+            </p>
+            <Btn variant="primary" onClick={() => setPaymentReturn(false)}>Naar dashboard →</Btn>
+          </div>
+        </div>
       )}
     </>
   );
