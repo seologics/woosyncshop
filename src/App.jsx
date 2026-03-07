@@ -1802,8 +1802,6 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const [testResults, setTestResults] = useState({}); // {shopId: {ok, wc_version, ...}}
   const [savingShop, setSavingShop] = useState(false);
 
-  const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
-
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("user_profiles").select("*").eq("id", user.id).single()
@@ -1821,9 +1819,9 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
             address_street: data.address_street || "",
             address_city: data.address_city || "",
           }));
-          // Block access if payment not completed
-          if (data.plan === "pending_payment") {
-            setPendingPaymentWall(true);
+          // Notify App if payment not completed
+          if (data.plan === "pending_payment" && onPaymentWall) {
+            onPaymentWall(true);
           }
         }
       });
@@ -2152,7 +2150,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 // ─── User Dashboard ────────────────────────────────────────────────────────────
 const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "settings"];
 
-const Dashboard = ({ user, onLogout }) => {
+const Dashboard = ({ user, onLogout, onPaymentWall }) => {
   const [shops, setShops] = useState([]);
   const [shopsLoading, setShopsLoading] = useState(true);
   const [activeSite, setActiveSite] = useState(null);
@@ -3378,7 +3376,7 @@ export default function App() {
       try {
         const session = await getSession();
         if (session) {
-          const u = await getUser();
+          const u = session.user;
           setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
           setView("app");
         } else {
@@ -3402,6 +3400,7 @@ export default function App() {
   }, []);
 
   const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash === "#payment-return");
+  const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
   const [paymentReturnStatus, setPaymentReturnStatus] = useState("checking"); // checking | paid | pending | failed | cancelled
 
   useEffect(() => {
@@ -3493,7 +3492,7 @@ export default function App() {
       {view === "app" && user && (
         user.email === SUPERADMIN_EMAIL
           ? <SuperAdminDashboard user={user} onLogout={handleLogout} />
-          : <Dashboard user={user} onLogout={handleLogout} />
+          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={setPendingPaymentWall} />
       )}
 
       {/* Payment wall — shown when user is logged in but hasn't paid yet */}
