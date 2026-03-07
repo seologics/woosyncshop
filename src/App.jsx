@@ -2450,10 +2450,9 @@ export default function App() {
   const [cookieConsent, setCookieConsent] = useState(() => localStorage.getItem("wss_cookie_consent")); // null | accepted | rejected
 
   // Check for existing Supabase session on mount
-  useState(() => {
+  useEffect(() => {
     const init = async () => {
       try {
-        
         const session = await getSession();
         if (session) {
           const u = await getUser();
