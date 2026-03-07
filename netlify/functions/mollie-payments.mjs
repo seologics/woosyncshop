@@ -21,6 +21,21 @@ async function mollieRequest(apiKey, path, method = 'GET', body = null) {
 
 export default async (req) => {
   const supabase = createClient(Netlify.env.get('SUPABASE_URL'), Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY'))
+  const url = new URL(req.url, 'https://woosyncshop.com')
+
+  // GET ?type=methods — public endpoint, no auth needed (method list is not sensitive)
+  if (req.method === 'GET' && url.searchParams.get('type') === 'methods') {
+    try {
+      const mollieKey = await getMollieKey(supabase)
+      if (!mollieKey) return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      const data = await mollieRequest(mollieKey, '/methods?resource=payments&sequenceType=first&includeWallets=applepay')
+      const methods = (data._embedded?.methods || []).map(m => ({ id: m.id, description: m.description, image: m.image }))
+      return new Response(JSON.stringify(methods), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) {
+      await log(supabase, 'error', 'Failed to fetch Mollie payment methods', { error: err.message })
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+  }
 
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
@@ -33,20 +48,6 @@ export default async (req) => {
   if (!mollieKey) {
     await log(supabase, 'error', 'Mollie API key not configured', { user_id: user.id })
     return new Response(JSON.stringify({ error: 'Mollie API key not configured' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
-  }
-
-  const url = new URL(req.url, 'https://woosyncshop.com')
-
-  // GET ?type=methods
-  if (req.method === 'GET' && url.searchParams.get('type') === 'methods') {
-    try {
-      const data = await mollieRequest(mollieKey, '/methods?resource=payments&sequenceType=first&includeWallets=applepay')
-      const methods = (data._embedded?.methods || []).map(m => ({ id: m.id, description: m.description, image: m.image }))
-      return new Response(JSON.stringify(methods), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    } catch (err) {
-      await log(supabase, 'error', 'Failed to fetch Mollie payment methods', { error: err.message })
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
-    }
   }
 
   // GET: stats + payment history

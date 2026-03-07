@@ -2349,24 +2349,33 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   useEffect(() => {
     if (step !== "payment") return;
     setMethodsLoading(true);
-    fetch("/api/mollie-payments?type=methods")
-      .then(r => r.json())
-      .then(data => {
-        const methods = Array.isArray(data) ? data : (data.methods || []);
-        setPaymentMethods(methods);
-        if (methods.length > 0 && !selectedMethod) setSelectedMethod(methods[0].id);
+    const fallbackMethods = [
+        { id: "ideal", description: "iDEAL", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/ideal.png" } },
+        { id: "creditcard", description: "Creditcard", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/creditcard.png" } },
+        { id: "directdebit", description: "SEPA Overboeking", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/directdebit.png" } },
+        { id: "bancontact", description: "Bancontact", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/bancontact.png" } },
+      ];
+    const useFallback = (list) => { setPaymentMethods(fallbackMethods); setSelectedMethod("ideal"); };
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      fetch("/api/mollie-payments?type=methods", {
+        headers: session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {},
       })
-      .catch(() => {
-        // Fallback static list if API fails
-        setPaymentMethods([
-          { id: "ideal", description: "iDEAL", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/ideal.png" } },
-          { id: "creditcard", description: "Creditcard", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/creditcard.png" } },
-          { id: "directdebit", description: "SEPA Overboeking", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/directdebit.png" } },
-          { id: "bancontact", description: "Bancontact", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/bancontact.png" } },
-        ]);
-        setSelectedMethod("ideal");
-      })
-      .finally(() => setMethodsLoading(false));
+        .then(r => r.json())
+        .then(data => {
+          // data is now an array of {id, description, image: {size1x, size2x}}
+          const methods = Array.isArray(data) ? data : [];
+          if (methods.length === 0 || data.error) { useFallback(); return; }
+          // Normalise image to always have size1x
+          const normalised = methods.map(m => ({
+            ...m,
+            image: m.image?.size1x ? m.image : { size1x: `https://www.mollie.com/external/icons/payment-methods/${m.id}.png` }
+          }));
+          setPaymentMethods(normalised);
+          setSelectedMethod(normalised[0].id);
+        })
+        .catch(useFallback)
+        .finally(() => setMethodsLoading(false));
+    }).catch(() => { useFallback(); setMethodsLoading(false); });
   }, [step]);
   const isFree = form.code.toLowerCase() === "freeforever";
   const vatInfo = getVatInfo(form.country, form.vat_validated);
