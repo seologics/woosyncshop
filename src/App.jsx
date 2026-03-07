@@ -1,3 +1,4 @@
+import { signIn, signUp, signOut, getSession, getUser, supabase } from "./lib/supabase.js";
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ─── Google Fonts ─────────────────────────────────────────────────────────────
@@ -1508,7 +1509,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   const handleLogin = async () => {
     setLoading(true); setError(null);
     try {
-      const { signIn } = await import('./lib/supabase.js');
+      // static import
       const { user } = await signIn(form.email, form.password);
       onSuccess({ id: user.id, name: user.user_metadata?.full_name || form.email, email: user.email });
     } catch (e) {
@@ -1519,7 +1520,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   const handleSignup = async () => {
     setLoading(true); setError(null);
     try {
-      const { signUp } = await import('./lib/supabase.js');
+      // static import
       await signUp(form.email, form.password, { data: { full_name: form.name } });
       if (isFree) { setStep("success"); } else { setStep("payment"); }
     } catch (e) {
@@ -1743,7 +1744,7 @@ export default function App() {
   useState(() => {
     const init = async () => {
       try {
-        const { getSession, getUser, supabase } = await import('./lib/supabase.js');
+        
         const session = await getSession();
         if (session) {
           const u = await getUser();
@@ -1779,7 +1780,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      const { signOut } = await import('./lib/supabase.js');
+      
       await signOut();
     } catch {}
     setUser(null);
