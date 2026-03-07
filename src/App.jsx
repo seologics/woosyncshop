@@ -1165,7 +1165,7 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--pr-h)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Hoe werkt het?</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
             {[
-              ["1. Wijziging detecteren", "Je past een categorie aan op Shop A (nl_NL): "Bamboehaag" wordt "Bamboe & Grassen"."],
+              ["1. Wijziging detecteren", "Je past een categorie aan op Shop A (nl_NL): Bamboehaag wordt Bamboe & Grassen."],
               ["2. AI-vertaling opvragen", "Gemini ontvangt: bronterm, bronlocale, doellocale en de volledige taxonomielijst van de doelshop."],
               ["3. Beste match koppelen", "De AI kiest de dichtstbijzijnde bestaande term in de doelshop of stelt een nieuwe voor. Resultaat wordt gecached."],
             ].map(([title, desc]) => (
