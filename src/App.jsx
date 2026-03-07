@@ -1609,7 +1609,7 @@ const LandingPage = ({ onLogin, onSignup }) => {
     { icon: "📦", title: "Volledig productbeheer", desc: "Variabele producten, voorraadbeheer, tiered pricing, WQM quantity settings — alles op één plek." },
     { icon: "🤖", title: "AI Image pipeline", desc: "Automatische beeldoptimalisatie via Gemini en TinyPNG. Max 400KB, maximale kwaliteit." },
     { icon: "🌐", title: "Hreflang manager", desc: "Automatische hreflang-injectie voor je multiregionale webshops. Geen plugin nodig." },
-    { icon: "💳", title: "Mollie betaling", desc: "Veilig en flexibel betalen via iDEAL, creditcard, Bancontact en meer." },
+    { icon: "📦", title: "Voorraad synchronisatie", desc: "Sync voorraad realtime tussen shops. Inventory-only modus voor aparte shops zonder hreflang-koppeling." },
   ];
 
   return (
@@ -1692,7 +1692,7 @@ const LandingPage = ({ onLogin, onSignup }) => {
           <Badge color="blue" style={{ marginBottom: 20, display: "inline-flex" }}>Meest populair</Badge>
           <div style={{ fontSize: 48, fontWeight: 800, fontFamily: "var(--font-h)", letterSpacing: "-0.03em" }}>€19,99 <span style={{ fontSize: 18, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
           <div style={{ margin: "20px 0", display: "flex", flexDirection: "column", gap: 10, textAlign: "left" }}>
-            {["Tot 10 WordPress installaties", "Onbeperkte producten", "AI image optimalisatie", "Hreflang manager inbegrepen", "Mollie betaalintegratie", "Transactionele e-mails"].map(f => (
+            {["Tot 10 WordPress installaties", "Onbeperkte producten", "AI image optimalisatie", "Hreflang manager inbegrepen", "Realtime voorraadsynchronisatie", "Transactionele e-mails"].map(f => (
               <div key={f} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 14 }}>
                 <span style={{ color: "var(--gr)", fontWeight: 700, fontSize: 15 }}>✓</span>
                 <span style={{ color: "var(--mx)" }}>{f}</span>
