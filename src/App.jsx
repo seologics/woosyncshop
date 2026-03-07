@@ -90,6 +90,44 @@ const G = () => {
       .spin { animation: spin 1s linear infinite; }
       .pulse { animation: pulse 2s ease infinite; }
       @keyframes gradMove { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+
+      /* ── Landing footer ───────────────────────────────────────── */
+      .landing-footer {
+        border-top: 1px solid var(--b1);
+        padding: 24px 32px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--dm);
+        font-size: 12px;
+        gap: 12px;
+      }
+      @media (max-width: 550px) {
+        .landing-footer {
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          gap: 14px;
+          padding: 24px 20px;
+        }
+      }
+
+      /* ── Contact page grid ────────────────────────────────────── */
+      .contact-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 40px;
+      }
+      .contact-info { display: flex; flex-direction: column; gap: 24px; order: 2; }
+      .contact-form { order: 1; }
+      @media (max-width: 550px) {
+        .contact-grid {
+          grid-template-columns: 1fr;
+          gap: 32px;
+        }
+        .contact-info { order: 1; }
+        .contact-form { order: 2; }
+      }
     `;
     document.head.appendChild(s);
     return () => document.head.removeChild(s);
@@ -2835,7 +2873,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
       </div>
 
       {/* Footer */}
-      <div style={{ borderTop: "1px solid var(--b1)", padding: "24px 32px", display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--dm)", fontSize: 12 }}>
+      <div className="landing-footer">
         <div style={{ display: "flex", alignItems: "center" }}>
           <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 20 }} />
         </div>
@@ -3056,19 +3094,9 @@ const ContactPage = ({ onBack }) => {
   return (
     <PageLayout title="Contact" onBack={onBack}>
       <p style={{ marginBottom: 32 }}>Heb je een vraag, een technisch probleem of wil je samenwerken? Stuur ons een bericht en we reageren binnen 1 werkdag.</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40 }}>
-        <div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Field label="Naam"><Inp value={form.name} onChange={e => upd("name", e.target.value)} placeholder="Jouw naam" /></Field>
-            <Field label="E-mailadres"><Inp value={form.email} onChange={e => upd("email", e.target.value)} type="email" placeholder="jij@domein.nl" /></Field>
-            <Field label="Onderwerp"><Inp value={form.subject} onChange={e => upd("subject", e.target.value)} placeholder="Bijv. Technisch probleem" /></Field>
-            <Field label="Bericht"><Inp value={form.message} onChange={e => upd("message", e.target.value)} multiline rows={5} placeholder="Beschrijf je vraag of probleem..." /></Field>
-            {status === "ok" && <div style={{ padding: "12px 16px", background: "var(--gr-l)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--gr)" }}>✓ Bericht verzonden! We reageren binnen 1 werkdag.</div>}
-            {status === "error" && <div style={{ padding: "12px 16px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "#ef4444" }}>Versturen mislukt. Probeer het opnieuw of mail ons direct.</div>}
-            <Btn variant="primary" onClick={send} disabled={status === "sending"}>{status === "sending" ? "Verzenden..." : "Bericht sturen →"}</Btn>
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div className="contact-grid">
+        {/* Info items — shown first on mobile via order */}
+        <div className="contact-info">
           {[
             { icon: "📧", title: "E-mail", val: "info@woosyncshop.com", href: "mailto:info@woosyncshop.com" },
             { icon: "🌐", title: "Website", val: "woosyncshop.com", href: "https://woosyncshop.com" },
@@ -3083,6 +3111,18 @@ const ContactPage = ({ onBack }) => {
               </div>
             </div>
           ))}
+        </div>
+        {/* Form — shown second on mobile */}
+        <div className="contact-form">
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Naam"><Inp value={form.name} onChange={e => upd("name", e.target.value)} placeholder="Jouw naam" /></Field>
+            <Field label="E-mailadres"><Inp value={form.email} onChange={e => upd("email", e.target.value)} type="email" placeholder="jij@domein.nl" /></Field>
+            <Field label="Onderwerp"><Inp value={form.subject} onChange={e => upd("subject", e.target.value)} placeholder="Bijv. Technisch probleem" /></Field>
+            <Field label="Bericht"><Inp value={form.message} onChange={e => upd("message", e.target.value)} multiline rows={5} placeholder="Beschrijf je vraag of probleem..." /></Field>
+            {status === "ok" && <div style={{ padding: "12px 16px", background: "var(--gr-l)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--gr)" }}>✓ Bericht verzonden! We reageren binnen 1 werkdag.</div>}
+            {status === "error" && <div style={{ padding: "12px 16px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "#ef4444" }}>Versturen mislukt. Probeer het opnieuw of mail ons direct.</div>}
+            <Btn variant="primary" onClick={send} disabled={status === "sending"}>{status === "sending" ? "Verzenden..." : "Bericht sturen →"}</Btn>
+          </div>
         </div>
       </div>
     </PageLayout>
