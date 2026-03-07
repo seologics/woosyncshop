@@ -1494,10 +1494,129 @@ const Dashboard = ({ user, onLogout }) => {
 
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
 const AuthModal = ({ mode, onClose, onSuccess }) => {
-  const [step, setStep] = useState(mode === "signup" ? "form" : "login"); // form → payment → success
+  const [step, setStep] = useState(mode === "signup" ? "form" : "login");
   const [form, setForm] = useState({ name: "", email: "", password: "", code: "" });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [isFree, setIsFree] = useState(false);
+
+  const handleCode = (code) => {
+    setForm(f => ({ ...f, code }));
+    setIsFree(code.toLowerCase() === "freeforever");
+  };
+
+  const handleLogin = async () => {
+    setLoading(true); setError(null);
+    try {
+      const { signIn } = await import('./lib/supabase.js');
+      const { user } = await signIn(form.email, form.password);
+      onSuccess({ id: user.id, name: user.user_metadata?.full_name || form.email, email: user.email });
+    } catch (e) {
+      setError(e.message);
+    } finally { setLoading(false); }
+  };
+
+  const handleSignup = async () => {
+    setLoading(true); setError(null);
+    try {
+      const { signUp } = await import('./lib/supabase.js');
+      await signUp(form.email, form.password, { data: { full_name: form.name } });
+      if (isFree) { setStep("success"); } else { setStep("payment"); }
+    } catch (e) {
+      setError(e.message);
+    } finally { setLoading(false); }
+  };
+
+  const handlePayment = () => {
+    setLoading(true);
+    // Mollie payment flow — redirects to Mollie hosted page in production
+    // For now simulate success
+    setTimeout(() => { setLoading(false); setStep("success"); }, 1500);
+  };
+
+  return (
+    <Overlay open onClose={onClose} width={440} title={null}>
+      <div style={{ padding: 32 }}>
+        {error && (
+          <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", marginBottom: 16, fontSize: 13, color: "#ef4444" }}>
+            {error}
+          </div>
+        )}
+
+        {step === "login" && <>
+          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Welkom terug</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>Log in op je Woo Sync Shop account</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field label="E-mailadres"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" /></Field>
+            <Field label="Wachtwoord"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" onKeyDown={e => e.key === "Enter" && handleLogin()} /></Field>
+            <Btn variant="primary" size="lg" onClick={handleLogin} disabled={loading} style={{ width: "100%", marginTop: 8 }}>{loading ? "Bezig..." : "Inloggen"}</Btn>
+            <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
+              Nog geen account? <span onClick={() => { setStep("form"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>Registreren</span>
+            </div>
+          </div>
+        </>}
+
+        {step === "form" && <>
+          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Account aanmaken</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>Start met het beheren van al jouw webshops</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field label="Naam"><Inp value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jouw naam" /></Field>
+            <Field label="E-mailadres"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" /></Field>
+            <Field label="Wachtwoord"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="Min. 8 tekens" /></Field>
+            <Field label="Kortingscode (optioneel)">
+              <Inp value={form.code} onChange={e => handleCode(e.target.value)} placeholder="Voer code in..." />
+              {isFree && <div style={{ padding: "6px 10px", background: "var(--gr-l)", borderRadius: 6, border: "1px solid rgba(34,197,94,0.3)", marginTop: 6 }}>
+                <span style={{ fontSize: 12, color: "var(--gr)", fontWeight: 600 }}>🎉 Code geldig — gratis voor altijd!</span>
+              </div>}
+            </Field>
+            <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Woo Sync Shop Pro</div>
+                <div style={{ fontSize: 12, color: "var(--mx)" }}>Tot 10 WordPress installaties</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                {isFree ? <span style={{ fontWeight: 800, color: "var(--gr)", fontSize: 18 }}>Gratis</span> : <><span style={{ fontWeight: 800, fontSize: 18 }}>€19,99</span><span style={{ fontSize: 11, color: "var(--dm)" }}>/maand</span></>}
+              </div>
+            </div>
+            <Btn variant="primary" size="lg" onClick={handleSignup} disabled={loading} style={{ width: "100%", marginTop: 4 }}>{loading ? "Bezig..." : isFree ? "Account aanmaken →" : "Verder naar betaling →"}</Btn>
+            <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
+              Al een account? <span onClick={() => { setStep("login"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>Inloggen</span>
+            </div>
+          </div>
+        </>}
+
+        {step === "payment" && <>
+          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Betaling</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>Start je Pro abonnement</p>
+          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 20, display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 13, color: "var(--mx)" }}>Woo Sync Shop Pro · 1 maand</span>
+            <span style={{ fontWeight: 700 }}>€19,99</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+            {[["iDEAL", "🏦"], ["Creditcard", "💳"], ["SEPA Overboeking", "🔄"], ["Bancontact", "🇧🇪"]].map(([m, icon]) => (
+              <div key={m} style={{ padding: "10px 14px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <span>{icon}</span><span style={{ fontSize: 13 }}>{m}</span>
+              </div>
+            ))}
+          </div>
+          <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading} style={{ width: "100%" }}>{loading ? "Verwerken..." : "Betalen →"}</Btn>
+        </>}
+
+        {step === "success" && <>
+          <div style={{ textAlign: "center", padding: "10px 0 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 12 }}>🎉</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Account actief!</h2>
+            <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 24 }}>
+              {isFree ? "Je gratis account is aangemaakt." : "Betaling geslaagd. Welkom bij Woo Sync Shop!"}<br />
+              Bevestigingsmail gestuurd naar <strong style={{ color: "var(--tx)" }}>{form.email}</strong>.
+            </p>
+            <Btn variant="primary" size="lg" onClick={() => onSuccess({ name: form.name, email: form.email })} style={{ width: "100%" }}>Naar het dashboard →</Btn>
+          </div>
+        </>}
+      </div>
+    </Overlay>
+  );
+};
 
   const handleCode = (code) => {
     setForm(f => ({ ...f, code }));
@@ -1718,15 +1837,70 @@ const LandingPage = ({ onLogin, onSignup }) => {
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [view, setView] = useState("landing"); // landing | app
-  const [authModal, setAuthModal] = useState(null); // login | signup | null
+  const [view, setView] = useState("loading"); // loading | landing | app
+  const [authModal, setAuthModal] = useState(null);
   const [user, setUser] = useState(null);
+
+  // Check for existing Supabase session on mount
+  useState(() => {
+    const init = async () => {
+      try {
+        const { getSession, getUser, supabase } = await import('./lib/supabase.js');
+        const session = await getSession();
+        if (session) {
+          const u = await getUser();
+          setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
+          setView("app");
+        } else {
+          setView("landing");
+        }
+        // Listen for auth changes
+        supabase.auth.onAuthStateChange((_event, session) => {
+          if (session?.user) {
+            const u = session.user;
+            setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
+            setView("app");
+          } else {
+            setUser(null);
+            setView("landing");
+          }
+        });
+      } catch {
+        // Supabase not configured yet — show landing
+        setView("landing");
+      }
+    };
+    init();
+  }, []);
 
   const handleSuccess = (userData) => {
     setUser(userData);
     setAuthModal(null);
     setView("app");
   };
+
+  const handleLogout = async () => {
+    try {
+      const { signOut } = await import('./lib/supabase.js');
+      await signOut();
+    } catch {}
+    setUser(null);
+    setView("landing");
+  };
+
+  if (view === "loading") {
+    return (
+      <>
+        <G />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16 }}>
+          <div style={{ fontFamily: "var(--font-h)", fontWeight: 800, fontSize: 24, color: "var(--tx)" }}>
+            <span style={{ color: "var(--pr-h)" }}>Woo</span> Sync<span style={{ color: "var(--pr-h)" }}>Shop</span>
+          </div>
+          <div style={{ width: 32, height: 32, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1738,7 +1912,7 @@ export default function App() {
         />
       )}
       {view === "app" && user && (
-        <Dashboard user={user} onLogout={() => { setUser(null); setView("landing"); }} />
+        <Dashboard user={user} onLogout={handleLogout} />
       )}
       {authModal && (
         <AuthModal
