@@ -921,42 +921,223 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite }) => {
 };
 
 // ─── Connected Sites View ─────────────────────────────────────────────────────
-const ConnectedSitesView = ({ products, sites }) => {
-  const [syncMode, setSyncMode] = useState("sku");
+const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
+  const [connections, setConnections] = useState([]); // [{id, source_shop_id, source_product_id, target_shop_id, target_product_id, target_sku}]
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState({}); // { connectionKey: true }
+  const [searchModal, setSearchModal] = useState(null); // { product, targetShop }
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const SYNC_FIELDS = ["name","description","short_description","regular_price","sale_price","stock_quantity","categories","attributes"];
+
+  const getToken = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const token = await getToken();
+        const res = await fetch("/api/connected-products", { headers: { "Authorization": `Bearer ${token}` } });
+        const data = await res.json();
+        setConnections(Array.isArray(data) ? data : []);
+      } catch (e) { console.error("Load connections failed:", e); }
+      finally { setLoading(false); }
+    };
+    load();
+  }, []);
+
+  const isConnected = (sourceProductId, targetShopId) =>
+    connections.some(c => c.source_shop_id === activeSite?.id && c.source_product_id === sourceProductId && c.target_shop_id === targetShopId);
+
+  const getConn = (sourceProductId, targetShopId) =>
+    connections.find(c => c.source_shop_id === activeSite?.id && c.source_product_id === sourceProductId && c.target_shop_id === targetShopId);
+
+  const disconnect = async (conn) => {
+    const token = await getToken();
+    await fetch(`/api/connected-products?id=${conn.id}`, { method: "DELETE", headers: { "Authorization": `Bearer ${token}` } });
+    setConnections(cs => cs.filter(c => c.id !== conn.id));
+  };
+
+  const openSearch = (product, targetShop) => {
+    setSearchModal({ product, targetShop });
+    setSearchQuery(product.sku || product.name || "");
+    setSearchResults([]);
+  };
+
+  useEffect(() => {
+    if (!searchModal || !searchQuery.trim()) { setSearchResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await wooCall(searchModal.targetShop.id, `products?search=${encodeURIComponent(searchQuery)}&per_page=20`);
+        setSearchResults(Array.isArray(data) ? data : []);
+      } catch { setSearchResults([]); }
+      finally { setSearching(false); }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchModal?.targetShop?.id]);
+
+  const connect = async (sourceProduct, targetShop, targetProduct) => {
+    setSaving(true);
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/connected-products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          source_shop_id: activeSite.id, source_product_id: sourceProduct.id,
+          source_sku: sourceProduct.sku, source_product_name: sourceProduct.name,
+          target_shop_id: targetShop.id, target_product_id: targetProduct.id, target_sku: targetProduct.sku,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) { setConnections(cs => [...cs, data]); setSearchModal(null); }
+      else alert(data.error || "Verbinden mislukt");
+    } catch (e) { alert(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const syncProduct = async (sourceProduct, targetShopId, connId) => {
+    const key = `${sourceProduct.id}_${targetShopId}`;
+    setSyncing(s => ({ ...s, [key]: true }));
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/sync-products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ source_shop_id: activeSite.id, product_id: sourceProduct.id, fields: SYNC_FIELDS, target_shop_ids: [targetShopId] }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) alert(data.error || "Sync mislukt");
+    } catch (e) { alert(e.message); }
+    finally { setSyncing(s => { const n = { ...s }; delete n[key]; return n; }); }
+  };
+
+  const otherSites = sites.filter(s => s.id !== activeSite?.id);
+
+  if (loading) return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
+      <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      Verbindingen laden...
+    </div>
+  );
+
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20, gap: 16 }}>
         <div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Verbonden producten beheren</h2>
-          <p style={{ fontSize: 13, color: "var(--mx)" }}>Koppel producten van verschillende shops aan elkaar via SKU of 'identifier' attribuut.</p>
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Verbonden producten</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)" }}>
+            Koppel producten van <strong>{activeSite?.name}</strong> aan dezelfde producten in andere shops.
+            Gebruik daarna "Sync" om velden door te sturen.
+          </p>
         </div>
-        <Tabs tabs={[{ id: "sku", label: "Via SKU" }, { id: "identifier", label: "Via Identifier" }]} active={syncMode} onChange={setSyncMode} size="sm" />
+        <Badge color={connections.length > 0 ? "green" : "default"}>{connections.length} verbindingen</Badge>
       </div>
+
+      {otherSites.length === 0 && (
+        <div style={{ padding: 24, textAlign: "center", border: "1px dashed var(--b2)", borderRadius: "var(--rd-lg)", color: "var(--dm)", fontSize: 13 }}>
+          Voeg eerst meerdere shops toe via <strong>Instellingen</strong> om producten te koppelen.
+        </div>
+      )}
+
+      {otherSites.length > 0 && products.length === 0 && (
+        <div style={{ padding: 24, textAlign: "center", border: "1px dashed var(--b2)", borderRadius: "var(--rd-lg)", color: "var(--dm)", fontSize: 13 }}>
+          Geen producten geladen. Ga naar <strong>Producten</strong> tab om producten te laden.
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {products.map(p => (
-          <div key={p.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", padding: 14, background: "var(--s1)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              {p.featured_image && <img src={p.featured_image} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover" }} />}
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
-                <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {p.sku}</div>
-              </div>
-              {(p.connected_sites || []).length > 1 && <Badge color="green" style={{ marginLeft: "auto" }}>🔗 {p.connected_sites.length} shops verbonden</Badge>}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {sites.map(s => (
-                <div key={s.id} style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--rd)", border: `1px solid ${(p.connected_sites || []).includes(s.id) ? s.color + "60" : "var(--b1)"}`, background: (p.connected_sites || []).includes(s.id) ? s.color + "15" : "var(--s2)", display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>{s.flag} {s.name}</span>
-                    <Tog checked={(p.connected_sites || []).includes(s.id)} onChange={() => {}} />
-                  </div>
-                  {(p.connected_sites || []).includes(s.id) && <span style={{ fontSize: 10, color: "var(--mx)" }}>SKU: {p.sku}</span>}
+        {products.map(p => {
+          const thumb = p.images?.[0]?.src || p.featured_image;
+          return (
+            <div key={p.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden", background: "var(--s1)" }}>
+              {/* Product header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--b1)", background: "var(--s2)" }}>
+                {thumb && <img src={thumb} alt="" style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {p.sku || "—"} · {p.type}</div>
                 </div>
-              ))}
+                {otherSites.every(s => isConnected(p.id, s.id)) && otherSites.length > 0
+                  ? <Badge color="green" size="sm">🔗 Volledig verbonden</Badge>
+                  : otherSites.some(s => isConnected(p.id, s.id))
+                    ? <Badge color="amber" size="sm">⚡ Gedeeltelijk verbonden</Badge>
+                    : <Badge color="default" size="sm">Niet verbonden</Badge>
+                }
+              </div>
+
+              {/* Per-shop connection rows */}
+              <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                {otherSites.map(targetShop => {
+                  const conn = getConn(p.id, targetShop.id);
+                  const syncKey = `${p.id}_${targetShop.id}`;
+                  const isSyncing = syncing[syncKey];
+                  return (
+                    <div key={targetShop.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: "var(--rd)", border: `1px solid ${conn ? "rgba(91,214,141,0.4)" : "var(--b1)"}`, background: conn ? "rgba(91,214,141,0.06)" : "var(--s2)" }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>{targetShop.flag}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{targetShop.name}</div>
+                        {conn
+                          ? <div style={{ fontSize: 11, color: "var(--mx)" }}>→ product #{conn.target_product_id} {conn.target_sku ? `(SKU: ${conn.target_sku})` : ""}</div>
+                          : <div style={{ fontSize: 11, color: "var(--dm)" }}>Nog niet gekoppeld</div>
+                        }
+                      </div>
+                      {conn ? (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Btn variant="primary" size="sm" disabled={isSyncing} onClick={() => syncProduct(p, targetShop.id, conn.id)}>
+                            {isSyncing ? <><span style={{ display: "inline-block", width: 10, height: 10, border: "1.5px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} /> Syncing...</> : "↑ Sync"}
+                          </Btn>
+                          <Btn variant="ghost" size="sm" onClick={() => disconnect(conn)}>✕</Btn>
+                        </div>
+                      ) : (
+                        <Btn variant="secondary" size="sm" onClick={() => openSearch(p, targetShop)}>🔗 Koppelen</Btn>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Search / Connect modal */}
+      {searchModal && (
+        <Overlay open title={`Koppel aan ${searchModal.targetShop.flag} ${searchModal.targetShop.name}`} onClose={() => setSearchModal(null)} width={520}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ padding: "10px 12px", background: "var(--s2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+              Zoek het overeenkomende product in <strong>{searchModal.targetShop.name}</strong> en klik op Koppelen.
+            </div>
+            <Inp value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Zoek op naam of SKU..." />
+            {searching && <div style={{ fontSize: 12, color: "var(--dm)", padding: "8px 0" }}>Zoeken...</div>}
+            {!searching && searchResults.length === 0 && searchQuery.trim() && (
+              <div style={{ fontSize: 12, color: "var(--dm)", padding: "8px 0" }}>Geen producten gevonden.</div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
+              {searchResults.map(r => {
+                const thumb = r.images?.[0]?.src;
+                return (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--b1)", borderRadius: "var(--rd)", background: "var(--s2)" }}>
+                    {thumb && <img src={thumb} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: "cover", flexShrink: 0 }} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {r.sku || "—"} · #{r.id}</div>
+                    </div>
+                    <Btn variant="primary" size="sm" disabled={saving} onClick={() => connect(searchModal.product, searchModal.targetShop, r)}>
+                      {saving ? "..." : "Koppelen"}
+                    </Btn>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        ))}
-      </div>
+        </Overlay>
+      )}
     </div>
   );
 };
@@ -1257,43 +1438,136 @@ const MarketingView = ({ activeSite, shops, user }) => {
 
 // ─── Hreflang Manager ─────────────────────────────────────────────────────────
 const HreflangView = ({ sites }) => {
-  const [mappings, setMappings] = useState([
-    { id: 1, source_site: 1, target_site: 2, source_url: "/bamboe-planten/", target_url: "/plantes-bambou/", x_default: true },
-    { id: 2, source_site: 1, target_site: 3, source_url: "/bamboe-planten/", target_url: "/bamboe-planten/", x_default: false },
-  ]);
+  const [connections, setConnections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [xDefaults, setXDefaults] = useState({}); // { connId: bool }
+  const [copied, setCopied] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/connected-products", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+        const data = await res.json();
+        const conns = Array.isArray(data) ? data : [];
+        setConnections(conns);
+        // Auto-set x-default for first connection per source product
+        const defaults = {};
+        const seen = new Set();
+        conns.forEach(c => {
+          const key = `${c.source_shop_id}_${c.source_product_id}`;
+          if (!seen.has(key)) { defaults[c.id] = true; seen.add(key); }
+        });
+        setXDefaults(defaults);
+      } catch (e) { console.error("Load connections failed:", e); }
+      finally { setLoading(false); }
+    };
+    load();
+  }, []);
+
+  const getSite = id => sites.find(s => s.id === id);
+
+  const generateTag = (conn) => {
+    const src = getSite(conn.source_shop_id);
+    const tgt = getSite(conn.target_shop_id);
+    if (!src || !tgt) return "";
+    const srcBase = src.site_url?.replace(/\/$/, "") || "";
+    const tgtBase = tgt.site_url?.replace(/\/$/, "") || "";
+    const srcLocale = src.locale?.replace("_", "-").toLowerCase() || "nl";
+    const tgtLocale = tgt.locale?.replace("_", "-").toLowerCase() || "nl";
+    const srcSlug = conn.source_sku ? `/${conn.source_sku}/` : "/product/";
+    const tgtSlug = conn.target_sku ? `/${conn.target_sku}/` : "/product/";
+    return `<!-- ${conn.source_product_name || "Product"} -->
+<link rel="alternate" hreflang="${srcLocale}" href="${srcBase}${srcSlug}" />
+<link rel="alternate" hreflang="${tgtLocale}" href="${tgtBase}${tgtSlug}" />${xDefaults[conn.id] ? `
+<link rel="alternate" hreflang="x-default" href="${srcBase}${srcSlug}" />` : ""}`;
+  };
+
+  const copyAll = () => {
+    const all = connections.map(c => generateTag(c)).join("
+
+");
+    navigator.clipboard.writeText(all).then(() => { setCopied("all"); setTimeout(() => setCopied(null), 2000); });
+  };
+
+  if (loading) return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
+      <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      Hreflang laden...
+    </div>
+  );
+
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Hreflang Manager</h2>
-        <p style={{ fontSize: 13, color: "var(--mx)" }}>Beheer hreflang-koppelingen tussen jouw shops. Elke shop heeft zijn eigen WordPress installatie.</p>
-      </div>
-      <div style={{ padding: 14, background: "var(--pr-l)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)", marginBottom: 16 }}>
-        <div style={{ fontSize: 12, color: "var(--pr-h)", fontWeight: 600, marginBottom: 4 }}>Automatische hreflang-injectie</div>
-        <div style={{ fontSize: 12, color: "var(--mx)" }}>Woo Sync Shop genereert automatisch correcte hreflang-tags op basis van verbonden producten en pagina-koppelingen. De tags worden via onze WordPress plugin geïnjecteerd.</div>
-      </div>
-      <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>URL Koppelingen</div>
-        <Btn variant="primary" size="sm" onClick={() => alert("Koppel producten via de 'Verbonden' tab — selecteer een product en klik 🔗 om het te verbinden.")}>+ Koppeling toevoegen</Btn>
-      </div>
-      <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 90px", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
-          {["Bronshop + URL", "Doelshop + URL", "Hreflang tag", "x-default"].map((h, i) => <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>)}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20, gap: 16 }}>
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Hreflang Manager</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)" }}>Gegenereerde hreflang-tags op basis van jouw verbonden producten. Kopieer ze naar je WordPress theme of plugin.</p>
         </div>
-        {mappings.map(m => {
-          const src = sites.find(s => s.id === m.source_site);
-          const tgt = sites.find(s => s.id === m.target_site);
-          return (
-            <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 90px", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center" }}>
-              <div><Badge color="default" size="sm">{src?.flag} {src?.name}</Badge><div style={{ fontSize: 11, color: "var(--dm)", marginTop: 3 }}>{m.source_url}</div></div>
-              <div><Badge color="default" size="sm">{tgt?.flag} {tgt?.name}</Badge><div style={{ fontSize: 11, color: "var(--dm)", marginTop: 3 }}>{m.target_url}</div></div>
-              <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--pr-h)" }}>
-                hreflang="{tgt?.locale.replace("_", "-").toLowerCase()}"
-              </div>
-              <Chk checked={m.x_default} onChange={() => {}} label="x-default" />
-            </div>
-          );
-        })}
+        {connections.length > 0 && (
+          <Btn variant="secondary" size="sm" onClick={copyAll}>{copied === "all" ? "✓ Gekopieerd!" : "📋 Kopieer alles"}</Btn>
+        )}
       </div>
+
+      <div style={{ padding: 14, background: "var(--pr-l)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)", marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: "var(--pr-h)", fontWeight: 600, marginBottom: 4 }}>💡 Automatische hreflang-injectie</div>
+        <div style={{ fontSize: 12, color: "var(--mx)" }}>
+          Tags worden gegenereerd op basis van verbonden producten. Koppel producten eerst via de <strong>Verbonden</strong> tab.
+          De Hreflang Manager Pro plugin leest deze data automatisch uit via de companion plugin REST API.
+        </div>
+      </div>
+
+      {connections.length === 0 ? (
+        <div style={{ padding: 32, textAlign: "center", border: "1px dashed var(--b2)", borderRadius: "var(--rd-lg)", color: "var(--dm)", fontSize: 13 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🌐</div>
+          Geen verbonden producten gevonden.<br />
+          Ga naar <strong>Verbonden</strong> tab om producten te koppelen.
+        </div>
+      ) : (
+        <>
+          {/* Table */}
+          <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden", marginBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 160px 80px 80px", background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
+              {["Bronshop / Product", "Doelshop / Product", "Hreflang locale", "x-default", ""].map((h, i) => (
+                <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
+              ))}
+            </div>
+            {connections.map(conn => {
+              const srcSite = getSite(conn.source_shop_id);
+              const tgtSite = getSite(conn.target_shop_id);
+              const locale = tgtSite?.locale?.replace("_", "-").toLowerCase() || "?";
+              const tag = generateTag(conn);
+              return (
+                <div key={conn.id} style={{ borderBottom: "1px solid var(--b1)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 160px 80px 80px", padding: "10px 14px", alignItems: "center", gap: 8 }}>
+                    <div>
+                      <Badge color="default" size="sm">{srcSite?.flag} {srcSite?.name}</Badge>
+                      <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {conn.source_product_name || `#${conn.source_product_id}`}
+                      </div>
+                    </div>
+                    <div>
+                      <Badge color="default" size="sm">{tgtSite?.flag} {tgtSite?.name}</Badge>
+                      <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 3 }}>#{conn.target_product_id} {conn.target_sku ? `(${conn.target_sku})` : ""}</div>
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--pr-h)", background: "var(--s2)", padding: "3px 8px", borderRadius: 4 }}>
+                      hreflang="{locale}"
+                    </div>
+                    <Chk checked={!!xDefaults[conn.id]} onChange={v => setXDefaults(d => ({ ...d, [conn.id]: v }))} label="" />
+                    <Btn variant="ghost" size="sm" onClick={() => {
+                      navigator.clipboard.writeText(tag).then(() => { setCopied(conn.id); setTimeout(() => setCopied(null), 2000); });
+                    }}>{copied === conn.id ? "✓" : "📋"}</Btn>
+                  </div>
+                  {/* Collapsible tag preview */}
+                  <div style={{ padding: "0 14px 10px", fontFamily: "monospace", fontSize: 11, color: "var(--mx)", background: "var(--s3)", whiteSpace: "pre", overflowX: "auto" }}>
+                    {tag}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1697,18 +1971,9 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
 };
 
 // ─── AI Translation Cache Viewer ─────────────────────────────────────────────
-const MOCK_AI_CACHE = [
-  { source_locale: "nl_NL", target_locale: "fr_BE", field: "category", source_term: "Bamboe planten", target_term: "Plantes de bambou", confidence: 0.97, model: "gemini-2.0-flash", used: 14 },
-  { source_locale: "nl_NL", target_locale: "fr_BE", field: "category", source_term: "Fargesia", target_term: "Fargesia", confidence: 1.00, model: "gemini-2.0-flash", used: 9 },
-  { source_locale: "nl_NL", target_locale: "fr_BE", field: "category", source_term: "Bamboehaag", target_term: "Haie de bambou", confidence: 0.94, model: "gemini-2.0-flash", used: 7 },
-  { source_locale: "nl_NL", target_locale: "fr_BE", field: "attribute", source_term: "Groen", target_term: "Vert", confidence: 1.00, model: "gemini-2.0-flash", used: 22 },
-  { source_locale: "nl_NL", target_locale: "fr_BE", field: "attribute", source_term: "100-125cm", target_term: "100-125cm", confidence: 1.00, model: "gemini-2.0-flash", used: 18 },
-  { source_locale: "nl_NL", target_locale: "nl_BE", field: "category", source_term: "Bamboe planten", target_term: "Bamboe planten", confidence: 1.00, model: "gemini-2.0-flash-lite", used: 14 },
-  { source_locale: "nl_NL", target_locale: "nl_BE", field: "attribute", source_term: "Op voorraad", target_term: "Op voorraad", confidence: 1.00, model: "gemini-2.0-flash-lite", used: 8 },
-];
-
 const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => {
-  const [cache, setCache] = useState(MOCK_AI_CACHE);
+  const [cache, setCache] = useState([]);
+  const [cacheLoading, setCacheLoading] = useState(false);
   const [filterLocale, setFilterLocale] = useState("all");
   const [filterField, setFilterField] = useState("all");
   const [testOpen, setTestOpen] = useState(false);
@@ -1717,22 +1982,61 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
   const [testTgtLocale, setTestTgtLocale] = useState("fr_BE");
   const [testResult, setTestResult] = useState(null);
   const [testLoading, setTestLoading] = useState(false);
+  const [testError, setTestError] = useState(null);
+
+  // Load real translation cache from Supabase
+  useEffect(() => {
+    if (!enabled) return;
+    const load = async () => {
+      setCacheLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("ai_translation_cache")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (!error && data) setCache(data);
+      } catch {}
+      finally { setCacheLoading(false); }
+    };
+    load();
+  }, [enabled]);
 
   const filteredCache = cache.filter(e =>
     (filterLocale === "all" || e.target_locale === filterLocale) &&
     (filterField === "all" || e.field === filterField)
   );
 
-  const runTest = () => {
+  const runTest = async () => {
     setTestLoading(true);
     setTestResult(null);
-    setTimeout(() => {
-      setTestResult({ term: "Haie de bambou", confidence: 0.94, cached: false, model: "gemini-2.0-flash" });
+    setTestError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/ai-translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ term: testSource, source_locale: testSrcLocale, target_locale: testTgtLocale, field: "category" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Vertaling mislukt");
+      setTestResult(data);
+      // Refresh cache after test
+      const { data: cacheData } = await supabase.from("ai_translation_cache").select("*").order("created_at", { ascending: false }).limit(200);
+      if (cacheData) setCache(cacheData);
+    } catch (e) {
+      setTestError(e.message);
+    } finally {
       setTestLoading(false);
-    }, 1400);
+    }
   };
 
-  const clearEntry = (idx) => setCache(c => c.filter((_, i) => i !== idx));
+  const clearEntry = async (entry) => {
+    setCache(c => c.filter(e => e.id !== entry.id));
+    if (entry.id) {
+      await supabase.from("ai_translation_cache").delete().eq("id", entry.id);
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
@@ -1837,20 +2141,27 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
                 {testLoading ? "Bezig..." : "Vertalen"}
               </Btn>
               {testResult && (
-                <div style={{ gridColumn: "1/-1", padding: 12, background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b2)", display: "flex", gap: 16, alignItems: "center" }} className="slide-up">
-                  <div>
-                    <span style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Resultaat</span>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "var(--gr)", marginTop: 2 }}>{testResult.term}</div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Betrouwbaarheid</span>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: testResult.confidence >= 0.9 ? "var(--gr)" : "var(--ac)", marginTop: 2 }}>{Math.round(testResult.confidence * 100)}%</div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Model</span>
-                    <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 2 }}>{testResult.model}</div>
-                  </div>
-                  <Badge color={testResult.cached ? "amber" : "blue"} style={{ marginLeft: "auto" }}>{testResult.cached ? "📦 Uit cache" : "✨ Nieuw gegenereerd"}</Badge>
+                <div style={{ gridColumn: "1/-1", padding: 12, background: testResult.error ? "rgba(239,68,68,0.08)" : "var(--s3)", borderRadius: "var(--rd)", border: `1px solid ${testResult.error ? "rgba(239,68,68,0.3)" : "var(--b2)"}`, display: "flex", gap: 16, alignItems: "center" }} className="slide-up">
+                  {testResult.error ? (
+                    <div style={{ fontSize: 13, color: "var(--re)" }}>⚠ {testResult.error}</div>
+                  ) : <>
+                    <div>
+                      <span style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Resultaat</span>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--gr)", marginTop: 2 }}>{testResult.term}</div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Betrouwbaarheid</span>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: testResult.confidence >= 0.9 ? "var(--gr)" : "var(--ac)", marginTop: 2 }}>{Math.round((testResult.confidence || 0) * 100)}%</div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Model</span>
+                      <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 2 }}>{testResult.model}</div>
+                    </div>
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                      <Badge color={testResult.cached ? "amber" : "blue"}>{testResult.cached ? "📦 Uit cache" : "✨ Nieuw gegenereerd"}</Badge>
+                      {testResult.is_existing && <Badge color="green" size="sm">Bestaande term</Badge>}
+                    </div>
+                  </>}
                 </div>
               )}
             </div>
@@ -1864,7 +2175,13 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
             <div style={{ display: "flex", gap: 6 }}>
               <Sel value={filterLocale} onChange={e => setFilterLocale(e.target.value)} options={[{ value: "all", label: "Alle doellocales" }, { value: "fr_BE", label: "→ fr_BE" }, { value: "nl_BE", label: "→ nl_BE" }]} style={{ fontSize: 12 }} />
               <Sel value={filterField} onChange={e => setFilterField(e.target.value)} options={[{ value: "all", label: "Alle veldtypen" }, { value: "category", label: "Categorieën" }, { value: "attribute", label: "Attributen" }, { value: "tag", label: "Tags" }]} style={{ fontSize: 12 }} />
-              <Btn variant="danger" size="sm" onClick={() => setCache([])}>Cache wissen</Btn>
+              <Btn variant="danger" size="sm" onClick={async () => {
+                  if (!confirm("Weet je zeker dat je de volledige vertaalcache wilt wissen?")) return;
+                  setCache([]);
+                  const { data: { session } } = await supabase.auth.getSession();
+                  // Delete all cache entries for this user via Supabase
+                  await supabase.from("ai_translation_cache").delete().neq("id", 0);
+                }}>Cache wissen</Btn>
             </div>
           </div>
           <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
@@ -1873,9 +2190,13 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
                 <span key={i} style={{ fontSize: 10, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
               ))}
             </div>
-            {filteredCache.length === 0 && (
-              <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 13 }}>Geen gecachede vertalingen.</div>
-            )}
+            {cacheLoading ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 20, justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
+                <div style={{ width: 14, height: 14, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> Cache laden...
+              </div>
+            ) : filteredCache.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 13 }}>Geen gecachede vertalingen. Gebruik de testknop of sync een product om vertalingen te genereren.</div>
+            ) : null}
             {filteredCache.map((e, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "90px 80px 1fr 1fr 70px 50px 24px", gap: 0, padding: "8px 12px", borderBottom: "1px solid var(--b1)", alignItems: "center", fontSize: 12 }}>
                 <Badge color={e.field === "category" ? "blue" : "default"} size="sm">{e.field === "category" ? "categorie" : "attribuut"}</Badge>
@@ -1884,7 +2205,7 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
                 <span style={{ fontWeight: 500 }}>{e.target_term}</span>
                 <span style={{ color: e.confidence >= 0.95 ? "var(--gr)" : e.confidence >= 0.80 ? "var(--ac)" : "var(--re)", fontWeight: 600 }}>{Math.round(e.confidence * 100)}%</span>
                 <span style={{ color: "var(--dm)" }}>{e.used}×</span>
-                <button onClick={() => clearEntry(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 13, padding: 0 }} title="Verwijder uit cache">×</button>
+                <button onClick={() => clearEntry(e)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 13, padding: 0 }} title="Verwijder uit cache">×</button>
               </div>
             ))}
           </div>
@@ -2271,8 +2592,16 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
   const [syncing, setSyncing] = useState(false);
   const [pushing, setPushing] = useState(false);
 
-  const handleSync = () => { setSyncing(true); setTimeout(() => { setSyncing(false); onSync?.(); }, 1800); };
-  const handlePush = () => { setPushing(true); setTimeout(() => { setPushing(false); onPush?.(); }, 2200); };
+  const handleSync = async () => {
+    setSyncing(true);
+    try { await onSync?.(); } catch {}
+    finally { setSyncing(false); }
+  };
+  const handlePush = async () => {
+    setPushing(true);
+    try { await onPush?.(); } catch {}
+    finally { setPushing(false); }
+  };
 
   return (
     <div style={{ height: 56, background: "var(--s1)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", padding: "0 16px", gap: 10, position: "sticky", top: 0, zIndex: 100, flexShrink: 0 }}>
@@ -2555,8 +2884,48 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
         sites={shops} activeView={activeView} setActiveView={setActiveView}
         pendingCount={pendingCount} isAdmin={false}
         onLogout={onLogout} user={user}
-        onSync={() => notify("Synchronisatie gestart ✓")}
-        onPush={() => notify("Wijzigingen gepushed ✓")} />
+        onSync={async () => {
+          // Re-fetch products from WooCommerce for the active shop
+          if (!activeSite) return;
+          setProductsLoading(true);
+          try {
+            const data = await wooCall(activeSite.id, "products?per_page=100&orderby=date&order=desc");
+            if (Array.isArray(data)) setProducts(data.map(p => ({ ...p, pending_changes: {} })));
+            notify("Producten gesynchroniseerd van " + activeSite.name + " ✓");
+          } catch (e) {
+            notify("Sync mislukt: " + e.message, "error");
+          } finally {
+            setProductsLoading(false);
+          }
+        }}
+        onPush={async () => {
+          // Push all products that have connections to their connected shops
+          if (!activeSite) return;
+          try {
+            const token = await getToken();
+            const connRes = await fetch("/api/connected-products", { headers: { "Authorization": `Bearer ${token}` } });
+            const conns = await connRes.json();
+            const sourceConns = Array.isArray(conns) ? conns.filter(c => c.source_shop_id === activeSite.id) : [];
+            if (sourceConns.length === 0) { notify("Geen verbonden producten om te pushen"); return; }
+            const uniqueProductIds = [...new Set(sourceConns.map(c => c.source_product_id))];
+            const SYNC_FIELDS = ["name","description","short_description","regular_price","sale_price","stock_quantity","categories","attributes"];
+            let ok = 0, fail = 0;
+            await Promise.all(uniqueProductIds.map(async pid => {
+              try {
+                const res = await fetch("/api/sync-products", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                  body: JSON.stringify({ source_shop_id: activeSite.id, product_id: pid, fields: SYNC_FIELDS }),
+                });
+                const d = await res.json();
+                if (d.ok) ok += d.synced; else fail++;
+              } catch { fail++; }
+            }));
+            notify(fail > 0 ? `Push klaar: ${ok} geslaagd, ${fail} mislukt` : `${ok} producten gepushed naar verbonden shops ✓`);
+          } catch (e) {
+            notify("Push mislukt: " + e.message, "error");
+          }
+        }} />
       <div style={{ flex: 1, overflow: "auto", padding: "24px 28px" }}>
         {shops.length === 0 && activeView !== "settings" ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 16, textAlign: "center" }}>
@@ -2579,7 +2948,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
                 <ProductsTable products={products} onEdit={p => { setEditProduct(p); setEditOpen(true); }} onConnect={() => setActiveView("connected")} activeSite={activeSite} />
               )
             )}
-            {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} />}
+            {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} activeSite={activeSite} wooCall={wooCall} />}
             {activeView === "hreflang" && <HreflangView sites={shops} />}
             {activeView === "marketing" && <MarketingView activeSite={activeSite} shops={shops} user={user} />}
           </>

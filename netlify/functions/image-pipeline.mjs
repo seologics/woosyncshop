@@ -36,7 +36,53 @@ export default async (req) => {
     let processedMimeType = media_type
     const originalSize = Math.round(base64.length * 0.75 / 1024) // approx KB
 
-    // ── Step 1: TinyPNG compression (if key available) ──────────────────────
+    // ── Step 1: Gemini resize/optimize (if key available and image > 400KB) ─
+    const MAX_KB = 400;
+    const originalKb = Math.round(base64.length * 0.75 / 1024);
+
+    if (geminiKey && originalKb > MAX_KB) {
+      try {
+        const sizeHint = originalKb > 2000 ? 1024 : originalKb > 800 ? 800 : 600;
+        const prompt = `Resize and optimize this product image to fit within ${sizeHint}px on the longest side. 
+Preserve all product details, colors, and sharpness. Output as a clean JPEG suitable for e-commerce.
+Return ONLY the image data, nothing else.`
+
+        const geminiImageRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: prompt },
+                  { inline_data: { mime_type: media_type, data: processedBase64 } }
+                ]
+              }],
+              generationConfig: { response_mime_type: 'image/jpeg' }
+            }),
+          }
+        )
+
+        if (geminiImageRes.ok) {
+          const geminiResult = await geminiImageRes.json()
+          const imgPart = geminiResult.candidates?.[0]?.content?.parts?.find(p => p.inline_data?.data)
+          if (imgPart?.inline_data?.data) {
+            processedBase64 = imgPart.inline_data.data
+            processedMimeType = imgPart.inline_data.mime_type || 'image/jpeg'
+            const resizedKb = Math.round(processedBase64.length * 0.75 / 1024)
+            await log(supabase, 'info', `Gemini resized ${filename}: ${originalKb}KB → ${resizedKb}KB`, {
+              user_id: user.id, shop_id
+            })
+          }
+        }
+      } catch (e) {
+        await log(supabase, 'warn', `Gemini resize failed for ${filename}, continuing`, { error: e.message })
+        // Non-fatal — continue with original
+      }
+    }
+
+    // ── Step 2: TinyPNG compression (if key available) ──────────────────────
     if (tinypngKey) {
       try {
         const imgBuffer = Buffer.from(base64, 'base64')
@@ -72,7 +118,7 @@ export default async (req) => {
       }
     }
 
-    // ── Step 2: Upload to WooCommerce via WordPress media API ───────────────
+    // ── Step 3: Upload to WooCommerce via WordPress media API ───────────────
     const { data: shop } = await supabase
       .from('shops')
       .select('site_url, consumer_key, consumer_secret')
