@@ -1,5 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
-import { writeLog } from './_log.mjs'
+
+// Inline log helper
+async function writeLog(supabase, functionName, level, message, meta = {}) {
+  try {
+    await supabase.from('system_logs').insert({
+      function_name: functionName,
+      level,
+      message,
+      meta: Object.keys(meta).length ? meta : null,
+      created_at: new Date().toISOString(),
+    })
+  } catch (e) {
+    console.error('writeLog failed:', e.message)
+  }
+}
+
 
 export default async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
