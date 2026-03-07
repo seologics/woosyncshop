@@ -318,7 +318,7 @@ const BASE_EDIT_TABS = [
 ];
 // "Hoeveelheid" tab is only shown when the active shop has WQM installed
 
-const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite }) => {
+const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTermAdded, shopCache, sites, activeSite }) => {
   const hasWqm = activeSite?.installed_plugins?.includes("woocommerce-quantity-manager") || activeSite?.has_wqm;
   const editTabs = hasWqm
     ? [...BASE_EDIT_TABS.slice(0, 3), { id: "quantity", label: "Hoeveelheid", icon: "🔢" }, ...BASE_EDIT_TABS.slice(3)]
@@ -326,8 +326,44 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
   const [tab, setTab] = useState("general");
   const [p, setP] = useState(null);
   const [confirmAttr, setConfirmAttr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [variationsLoading, setVariationsLoading] = useState(false);
 
-  useEffect(() => { if (product) setP(JSON.parse(JSON.stringify(product))); }, [product]);
+  // Use live attributes/categories from shopCache, fallback to empty
+  const liveAttributes = shopCache?.attributes || [];
+  const liveCategories = shopCache?.categories || [];
+
+  useEffect(() => {
+    if (!product || !open) return;
+    const fresh = JSON.parse(JSON.stringify(product));
+    setP(fresh);
+    setSaveError(null);
+    setTab("general");
+
+    // Fetch full variation details if variable product (products list only has variation IDs)
+    if (product.type === "variable" && product.id && activeSite?.id) {
+      const hasFullVariations = Array.isArray(product.variations) && product.variations.length > 0 && typeof product.variations[0] === "object" && product.variations[0].regular_price !== undefined;
+      if (!hasFullVariations) {
+        setVariationsLoading(true);
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          fetch("/api/woo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+            body: JSON.stringify({ shop_id: activeSite.id, endpoint: `products/${product.id}/variations?per_page=100`, method: "GET" }),
+          })
+            .then(r => r.json())
+            .then(vars => {
+              if (Array.isArray(vars) && vars.length > 0) {
+                setP(prev => prev ? { ...prev, variations: vars } : prev);
+              }
+            })
+            .catch(err => console.error("Variations fetch failed:", err))
+            .finally(() => setVariationsLoading(false));
+        });
+      }
+    }
+  }, [product?.id, open]);
 
   if (!open || !p) return null;
 
@@ -341,7 +377,7 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
   };
 
   const isVariable = p.type === "variable";
-  const filteredTabs = isVariable ? EDIT_TABS : EDIT_TABS.filter(t => t.id !== "variations");
+  const filteredTabs = isVariable ? editTabs : editTabs.filter(t => t.id !== "variations");
 
   return (
     <Overlay open={open} onClose={onClose} width={940} title={null}>
@@ -431,11 +467,20 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
         {/* ── VARIATIES ── */}
         {tab === "variations" && isVariable && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} className="fade-in">
-            {p.variations.map((v, vi) => (
+            {variationsLoading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 16, color: "var(--mx)", fontSize: 13 }}>
+                <div style={{ width: 14, height: 14, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                Variaties laden van WooCommerce...
+              </div>
+            )}
+            {!variationsLoading && (!p.variations || p.variations.length === 0) && (
+              <div style={{ padding: 16, color: "var(--dm)", fontSize: 13 }}>Geen variaties gevonden voor dit product.</div>
+            )}
+            {!variationsLoading && (p.variations || []).filter(v => typeof v === "object" && v.id).map((v, vi) => (
               <div key={v.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
                 <div style={{ padding: "10px 14px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 10 }}>
                   <Badge color="default">#{v.id}</Badge>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes).map(([k, val]) => `${GLOBAL_ATTRIBUTES.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
                   <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dm)" }}>SKU: {v.sku}</span>
                 </div>
                 <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -509,7 +554,11 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
         {/* ── ATTRIBUTEN ── */}
         {tab === "attributes" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }} className="fade-in">
-            {GLOBAL_ATTRIBUTES.map(attr => {
+            {(liveAttributes.length === 0 && !shopCache?.loaded) ? (
+              <div style={{ color: "var(--dm)", fontSize: 13, padding: 16 }}>Attributen laden...</div>
+            ) : liveAttributes.length === 0 ? (
+              <div style={{ color: "var(--dm)", fontSize: 13, padding: 16 }}>Geen attributen gevonden voor deze shop.</div>
+            ) : liveAttributes.map(attr => {
               const pa = p.attributes?.find(a => a.slug === attr.slug) || { id: attr.id, slug: attr.slug, values: [], visible: false, variation: false };
               const idx = p.attributes?.findIndex(a => a.slug === attr.slug) ?? -1;
               const setAttr = (newPa) => {
@@ -567,42 +616,89 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
             </Field>
             <Field label="Categorieën">
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 10, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
-                {CATEGORIES.map(cat => (
-                  <Chk key={cat.id} checked={(p.categories || []).includes(cat.id)} onChange={c => {
-                    const cats = c ? [...(p.categories || []), cat.id] : (p.categories || []).filter(id => id !== cat.id);
-                    upd("categories", cats);
-                  }} label={cat.name} />
-                ))}
+                {liveCategories.map(cat => {
+                  // p.categories from WooCommerce is [{id, name}], normalize to check by id
+                  const catIds = (p.categories || []).map(c => typeof c === "object" ? c.id : c);
+                  return (
+                    <Chk key={cat.id} checked={catIds.includes(cat.id)} onChange={c => {
+                      const current = (p.categories || []).map(x => typeof x === "object" ? x : { id: x });
+                      const updated = c ? [...current, { id: cat.id, name: cat.name }] : current.filter(x => x.id !== cat.id);
+                      upd("categories", updated);
+                    }} label={cat.name} />
+                  );
+                })}
               </div>
             </Field>
           </div>
         )}
 
         {/* ── AFBEELDINGEN ── */}
-        {tab === "images" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
-            <Field label="Uitgelichte afbeelding">
-              <div style={{ width: 140, height: 140, border: "2px dashed var(--b2)", borderRadius: "var(--rd-lg)", overflow: "hidden", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--s2)", position: "relative" }}>
-                {p.featured_image ? <img src={p.featured_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ textAlign: "center", color: "var(--dm)", fontSize: 12 }}>📷<br/>Klik om te uploaden</div>}
+        {tab === "images" && (() => {
+          const currentImages = p.images || (p.featured_image ? [{ src: p.featured_image, alt: "" }, ...(p.gallery_images || []).map(s => ({ src: s, alt: "" }))] : []);
+          const uploadImage = async (file, replaceIdx = null) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+              const base64 = e.target.result.split(",")[1];
+              const { data: { session } } = await supabase.auth.getSession();
+              try {
+                // Pipeline: base64 → image-pipeline → compressed base64 → WooCommerce media
+                const pipeRes = await fetch("/api/image-pipeline", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+                  body: JSON.stringify({ base64, filename: file.name, shop_id: activeSite?.id, media_type: file.type }),
+                });
+                if (!pipeRes.ok) throw new Error("Pipeline failed");
+                const pipeData = await pipeRes.json();
+                const newImg = { src: pipeData.url || pipeData.src, alt: "" };
+                const imgs = [...currentImages];
+                if (replaceIdx !== null) { imgs[replaceIdx] = newImg; } else { imgs.push(newImg); }
+                upd("images", imgs);
+              } catch (err) {
+                alert("Upload mislukt: " + err.message);
+              }
+            };
+            reader.readAsDataURL(file);
+          };
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+              <Field label="Uitgelichte afbeelding">
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  <label style={{ width: 140, height: 140, border: "2px dashed var(--b2)", borderRadius: "var(--rd-lg)", overflow: "hidden", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--s2)", position: "relative", flexShrink: 0 }}>
+                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) uploadImage(e.target.files[0], 0); }} />
+                    {currentImages[0]?.src
+                      ? <img src={currentImages[0].src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : <div style={{ textAlign: "center", color: "var(--dm)", fontSize: 12 }}>📷<br/>Klik om<br/>te uploaden</div>
+                    }
+                  </label>
+                  {currentImages[0]?.src && (
+                    <Btn variant="ghost" size="sm" onClick={() => { const imgs = [...currentImages]; imgs.splice(0, 1); upd("images", imgs); }}>🗑 Verwijderen</Btn>
+                  )}
+                </div>
+              </Field>
+              <Divider />
+              <Field label="Galerij afbeeldingen">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {currentImages.slice(1).map((img, i) => (
+                    <div key={i} style={{ width: 90, height: 90, border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden", position: "relative", cursor: "pointer" }}
+                      onClick={() => { const imgs = [...currentImages]; imgs.splice(i + 1, 1); upd("images", imgs); }}
+                      title="Klik om te verwijderen">
+                      <img src={img.src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <div style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff" }}>✕</div>
+                    </div>
+                  ))}
+                  <label style={{ width: 90, height: 90, border: "2px dashed var(--b2)", borderRadius: "var(--rd)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--s2)", color: "var(--dm)", fontSize: 24 }}>
+                    <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => { Array.from(e.target.files).forEach(f => uploadImage(f)); }} />
+                    +
+                  </label>
+                </div>
+              </Field>
+              <div style={{ padding: 12, background: "var(--pr-l)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)" }}>
+                <div style={{ fontSize: 12, color: "var(--pr-h)", fontWeight: 600, marginBottom: 4 }}>🤖 AI Image Pipeline</div>
+                <div style={{ fontSize: 12, color: "var(--mx)" }}>Uploads gaan via Gemini (resize/optimize) → TinyPNG (compressie) → max 400KB. Klik op een galerij-afbeelding om die te verwijderen.</div>
               </div>
-            </Field>
-            <Divider />
-            <Field label="Galerij afbeeldingen">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {(p.gallery_images || []).map((img, i) => (
-                  <div key={i} style={{ width: 90, height: 90, border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden", position: "relative" }}>
-                    <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  </div>
-                ))}
-                <div style={{ width: 90, height: 90, border: "2px dashed var(--b2)", borderRadius: "var(--rd)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--s2)", color: "var(--dm)", fontSize: 24 }}>+</div>
-              </div>
-            </Field>
-            <div style={{ padding: 12, background: "var(--pr-l)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)" }}>
-              <div style={{ fontSize: 12, color: "var(--pr-h)", fontWeight: 600, marginBottom: 4 }}>🤖 AI Image Pipeline actief</div>
-              <div style={{ fontSize: 12, color: "var(--mx)" }}>Geüploade afbeeldingen worden automatisch geoptimaliseerd via Gemini (resize) → TinyPNG (compressie) → max 400KB output.</div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── VERBONDEN SITES ── */}
         {tab === "connected" && (
@@ -638,10 +734,31 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
 
       {/* Footer */}
       <div style={{ padding: "14px 20px", borderTop: "1px solid var(--b1)", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-        <div style={{ fontSize: 12, color: "var(--dm)" }}>Wijzigingen worden lokaal opgeslagen · Gebruik <strong style={{ color: "var(--tx)" }}>Push</strong> om te publiceren</div>
+        <div style={{ fontSize: 12 }}>
+          {saveError
+            ? <span style={{ color: "var(--re)" }}>⚠ {saveError}</span>
+            : <span style={{ color: "var(--dm)" }}>Wijzigingen worden direct opgeslagen naar WooCommerce</span>
+          }
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn variant="secondary" onClick={onClose}>Annuleren</Btn>
-          <Btn variant="primary" onClick={() => { onSave(p); onClose(); }}>Opslaan</Btn>
+          <Btn variant="secondary" onClick={onClose} disabled={saving}>Annuleren</Btn>
+          <Btn variant="primary" disabled={saving} onClick={async () => {
+            setSaving(true);
+            setSaveError(null);
+            try {
+              await onSaveDirect(p);
+              onClose();
+            } catch (err) {
+              setSaveError(err.message || "Opslaan mislukt");
+            } finally {
+              setSaving(false);
+            }
+          }}>
+            {saving
+              ? <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.6s linear infinite" }} />Opslaan...</span>
+              : "Opslaan naar WooCommerce"
+            }
+          </Btn>
         </div>
       </div>
 
@@ -655,7 +772,7 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
             </p>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <Btn variant="secondary" onClick={() => setConfirmAttr(null)}>Annuleren</Btn>
-              <Btn variant="primary" onClick={() => {
+              <Btn variant="primary" onClick={async () => {
                 const attr = confirmAttr.attr;
                 const pa = p.attributes?.find(a => a.slug === attr.slug) || { id: attr.id, slug: attr.slug, values: [], visible: false, variation: false };
                 const idx = p.attributes?.findIndex(a => a.slug === attr.slug) ?? -1;
@@ -663,6 +780,10 @@ const ProductEditModal = ({ product, open, onClose, onSave, sites, activeSite })
                 const attrs = [...(p.attributes || [])];
                 if (idx >= 0) attrs[idx] = newPa; else attrs.push(newPa);
                 upd("attributes", attrs);
+                // POST new term to WooCommerce so it's available for other products
+                if (onAttributeTermAdded && attr.id) {
+                  onAttributeTermAdded(attr.id, confirmAttr.term).catch(err => console.warn("Term add failed:", err));
+                }
                 setConfirmAttr(null);
               }}>Bevestigen & Toevoegen</Btn>
             </div>
@@ -759,7 +880,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite }) => {
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "var(--mx)" }}>
-                      {Object.entries(v.attributes).map(([k, val]) => <Badge key={k} color="default" size="sm">{GLOBAL_ATTRIBUTES.find(a => a.slug === k)?.name}: {val}</Badge>)}
+                      {Object.entries(v.attributes).map(([k, val]) => <Badge key={k} color="default" size="sm">{liveAttributes.find(a => a.slug === k)?.name || k}: {val}</Badge>)}
                     </span>
                   </div>
                   <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "monospace" }}>{v.sku}</span>
@@ -2296,6 +2417,25 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
   const [editOpen, setEditOpen] = useState(false);
   const [notification, setNotification] = useState(null);
 
+  // Per-shop cache: attributes (with terms) + categories
+  const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
+
+  const getToken = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  const wooCall = async (shopId, endpoint, method = "GET", data = null) => {
+    const token = await getToken();
+    const res = await fetch("/api/woo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ shop_id: shopId, endpoint, method, data }),
+    });
+    if (!res.ok) throw new Error(`WooCommerce ${method} ${endpoint} failed: HTTP ${res.status}`);
+    return res.json();
+  };
+
   const notify = (msg, type = "success") => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
@@ -2320,37 +2460,59 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
     loadShops();
   }, [user.id]);
 
-  // Load products from WooCommerce when active shop changes
+  // Load products + shop metadata (attributes, categories) when active shop changes
   useEffect(() => {
     if (!activeSite) return;
+    const shopId = activeSite.id;
+
     const loadProducts = async () => {
       setProductsLoading(true);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token) throw new Error("Niet ingelogd");
-        const res = await fetch("/api/woo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ shop_id: activeSite.id, endpoint: "products?per_page=50&orderby=date&order=desc", method: "GET" })
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data = await wooCall(shopId, "products?per_page=100&orderby=date&order=desc");
         if (Array.isArray(data)) {
           setProducts(data.map(p => ({ ...p, pending_changes: {} })));
         } else {
-          console.error("WooCommerce error:", data);
           setProducts([]);
         }
       } catch (e) {
-        console.error("Failed to load products:", e);
         notify("Producten laden mislukt: " + e.message, "error");
         setProducts([]);
       } finally {
         setProductsLoading(false);
       }
     };
+
+    const loadShopMeta = async () => {
+      if (shopCache[shopId]?.loaded) return; // already cached
+      try {
+        // Fetch attributes + their terms in parallel
+        const [rawAttrs, rawCats] = await Promise.all([
+          wooCall(shopId, "products/attributes?per_page=100"),
+          wooCall(shopId, "products/categories?per_page=100&hide_empty=false"),
+        ]);
+
+        const attrs = Array.isArray(rawAttrs) ? rawAttrs : [];
+        const cats = Array.isArray(rawCats) ? rawCats : [];
+
+        // Fetch terms for each attribute in parallel
+        const attrTermsPromises = attrs.map(attr =>
+          wooCall(shopId, `products/attributes/${attr.id}/terms?per_page=100`)
+            .then(terms => ({ ...attr, terms: Array.isArray(terms) ? terms.map(t => t.name) : [] }))
+            .catch(() => ({ ...attr, terms: [] }))
+        );
+        const attrsWithTerms = await Promise.all(attrTermsPromises);
+
+        setShopCache(prev => ({
+          ...prev,
+          [shopId]: { attributes: attrsWithTerms, categories: cats, loaded: true },
+        }));
+      } catch (e) {
+        console.error("Shop meta load failed:", e);
+      }
+    };
+
     loadProducts();
+    loadShopMeta();
   }, [activeSite?.id]);
 
   const handleShopAdded = (newShop) => {
@@ -2432,9 +2594,108 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
       </div>
 
       <ProductEditModal product={editProduct} open={editOpen} onClose={() => setEditOpen(false)}
-        onSave={updated => {
-          setProducts(products.map(p => p.id === updated.id ? { ...updated, pending_changes: { ...p.pending_changes, _edited: true } } : p));
-          notify("Product opgeslagen — gebruik Sync/Push om te publiceren");
+        shopCache={shopCache[activeSite?.id] || { attributes: [], categories: [], loaded: false }}
+        onSaveDirect={async (updated) => {
+          const shopId = activeSite?.id;
+          if (!shopId) throw new Error("Geen actieve shop");
+
+          // Build WooCommerce product payload
+          const payload = {
+            name: updated.name,
+            slug: updated.slug,
+            description: updated.description || "",
+            short_description: updated.short_description || "",
+            status: updated.status || "publish",
+            catalog_visibility: updated.catalog_visibility || "visible",
+          };
+          // Price (simple products only)
+          if (updated.type !== "variable") {
+            if (updated.regular_price !== undefined) payload.regular_price = String(updated.regular_price || "");
+            if (updated.sale_price !== undefined) payload.sale_price = String(updated.sale_price || "");
+          }
+          // Stock
+          payload.manage_stock = !!updated.manage_stock;
+          if (updated.manage_stock) {
+            payload.stock_quantity = parseInt(updated.stock_quantity) || 0;
+            payload.stock_status = updated.stock_status || "instock";
+          } else {
+            payload.stock_status = updated.stock_status || "instock";
+          }
+          // Backorders
+          if (updated.backorders !== undefined) payload.backorders = updated.backorders;
+          // Categories
+          if (updated.categories) {
+            payload.categories = (updated.categories || []).map(cat =>
+              typeof cat === "object" ? { id: cat.id } : { id: cat }
+            );
+          }
+          // Attributes
+          if (updated.attributes) {
+            payload.attributes = (updated.attributes || []).map(attr => ({
+              id: attr.id || 0,
+              name: attr.name || attr.slug || "",
+              visible: !!attr.visible,
+              variation: !!attr.variation,
+              options: attr.values || attr.options || [],
+            }));
+          }
+          // Images
+          const images = [];
+          if (updated.images && updated.images.length > 0) {
+            // WooCommerce images array: first is featured
+            updated.images.forEach(img => {
+              if (img && (img.src || img.id)) images.push(img.id ? { id: img.id } : { src: img.src });
+            });
+          } else {
+            if (updated.featured_image) images.push({ src: updated.featured_image });
+            (updated.gallery_images || []).forEach(src => { if (src) images.push({ src }); });
+          }
+          if (images.length > 0) payload.images = images;
+
+          // PUT the main product
+          await wooCall(shopId, `products/${updated.id}`, "PUT", payload);
+
+          // PUT variations if variable and variations changed
+          if (updated.type === "variable" && updated.variations?.length > 0) {
+            const varPromises = updated.variations.map(v => {
+              if (!v.id) return Promise.resolve();
+              const varPayload = {
+                sku: v.sku || "",
+                regular_price: String(v.regular_price || ""),
+                sale_price: String(v.sale_price || ""),
+                manage_stock: !!v.manage_stock,
+                stock_status: v.stock_status || "instock",
+                status: v.enabled === false ? "private" : "publish",
+              };
+              if (v.manage_stock) varPayload.stock_quantity = parseInt(v.stock_quantity) || 0;
+              if (v.backorders !== undefined) varPayload.backorders = v.backorders;
+              return wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
+            });
+            await Promise.all(varPromises);
+          }
+
+          // Update local state
+          setProducts(prev => prev.map(p => p.id === updated.id ? { ...updated, pending_changes: {} } : p));
+        }}
+        onAttributeTermAdded={async (attributeId, termName) => {
+          // POST new term to WooCommerce + refresh cache
+          const shopId = activeSite?.id;
+          if (!shopId) return;
+          await wooCall(shopId, `products/attributes/${attributeId}/terms`, "POST", { name: termName });
+          // Refresh this attribute's terms in cache
+          const terms = await wooCall(shopId, `products/attributes/${attributeId}/terms?per_page=100`);
+          setShopCache(prev => {
+            const cur = prev[shopId] || { attributes: [], categories: [] };
+            return {
+              ...prev,
+              [shopId]: {
+                ...cur,
+                attributes: cur.attributes.map(a =>
+                  a.id === attributeId ? { ...a, terms: Array.isArray(terms) ? terms.map(t => t.name) : a.terms } : a
+                ),
+              },
+            };
+          });
         }}
         sites={shops} activeSite={activeSite} />
 

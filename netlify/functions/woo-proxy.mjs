@@ -27,7 +27,10 @@ export default async (req) => {
   }
 
   const baseUrl = shop.site_url.replace(/\/$/, '')
-  const wooUrl = `${baseUrl}/wp-json/wc/v3/${endpoint.replace(/^\//, '')}`
+  // Support both WooCommerce REST API (wc/v3/) and WordPress REST API (wp/v2/)
+  const wooUrl = endpoint.startsWith('wp/v2/')
+    ? `${baseUrl}/wp-json/${endpoint}`
+    : `${baseUrl}/wp-json/wc/v3/${endpoint.replace(/^\//, '')}`
   const credentials = btoa(`${shop.consumer_key}:${shop.consumer_secret}`)
   const fetchOptions = { method, headers: { 'Authorization': `Basic ${credentials}`, 'Content-Type': 'application/json' } }
   if (data && method !== 'GET') fetchOptions.body = JSON.stringify(data)
