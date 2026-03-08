@@ -72,6 +72,8 @@ export default async (req) => {
             payment_id: paymentId,
             amount: payment.amount?.value || '19.99',
             mollie_method: payment.method || null,
+            plan: payment.metadata?.plan || 'growth',
+            billing_period: payment.metadata?.billing_period || 'monthly',
           }),
         })
       } catch (invoiceErr) {

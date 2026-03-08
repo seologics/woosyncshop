@@ -58,6 +58,7 @@ export default async (req) => {
       const allowed = {
         plan: updates.plan,
         max_shops: updates.max_shops != null ? parseInt(updates.max_shops) : undefined,
+        max_connected_products: updates.max_connected_products != null ? parseInt(updates.max_connected_products) : undefined,
         is_admin: updates.is_admin ?? undefined,
         ai_taxonomy_enabled: updates.ai_taxonomy_enabled ?? undefined,
         ai_taxonomy_model: updates.ai_taxonomy_model || undefined,

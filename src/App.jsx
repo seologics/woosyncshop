@@ -2378,7 +2378,8 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
       const payload = {
         id: u.id,
         plan: u.plan,
-        max_shops: u.max_shops ? parseInt(u.max_shops) : 10,
+        max_shops: u.max_shops ? parseInt(u.max_shops) : (PLANS[u.plan]?.sites || 10),
+        max_connected_products: u.max_connected_products ? parseInt(u.max_connected_products) : (PLANS[u.plan]?.connected_products || 500),
         is_admin: u.is_admin ?? false,
         ai_taxonomy_enabled: u.ai_taxonomy_enabled ?? false,
         ai_taxonomy_model: u.ai_taxonomy_model || "gemini-2.5-flash-image",
@@ -2447,9 +2448,20 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
           const loadInvoices = async (u) => {
             setInvoiceUser(u); setInvoicesLoading(true);
             try {
+              // First try DB
               const { data } = await supabase.from("invoices").select("*").eq("user_id", u.id).order("issued_at", { ascending: false });
-              setUserInvoices(data || []);
-            } catch {} finally { setInvoicesLoading(false); }
+              if (data?.length) { setUserInvoices(data); setInvoicesLoading(false); return; }
+              // If no DB records but user has a paid mollie_payment_id, try get-invoice which creates on-demand
+              if (u.mollie_payment_id && PLANS[u.plan]) {
+                const { data: { session } } = await supabase.auth.getSession();
+                const res = await fetch(`/api/get-invoice?payment_id=${u.mollie_payment_id}`, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+                if (res.ok) {
+                  // After on-demand creation, re-query DB
+                  const { data: fresh } = await supabase.from("invoices").select("*").eq("user_id", u.id).order("issued_at", { ascending: false });
+                  setUserInvoices(fresh || []);
+                } else { setUserInvoices([]); }
+              } else { setUserInvoices([]); }
+            } catch { setUserInvoices([]); } finally { setInvoicesLoading(false); }
           };
 
           const visibleUsers = users.filter(u => showArchived ? u.archived : !u.archived);
@@ -2650,7 +2662,9 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                 <div style={{ fontSize: 12, color: "var(--dm)" }}>{editUser.sites} shops verbonden</div>
               </div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>{editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : "Pro €19,99/mnd"}</Badge>
+                <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>
+                  {editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
+                </Badge>
                 <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>{editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}</Badge>
               </div>
             </div>
@@ -2664,9 +2678,16 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
   { value: "pending_payment", label: "In afwachting betaling" },
 ]} />
             </Field>
-            <Field label="Max shops (override)" hint="Standaard: 10">
-              <Inp value="10" onChange={() => {}} type="number" />
-            </Field>
+            <div className="settings-2col">
+              <Field label="Max shops (override)" hint={`Standaard plan: ${PLANS[editUser.plan]?.sites ?? "—"}`}>
+                <Inp value={editUser.max_shops ?? (PLANS[editUser.plan]?.sites || 10)}
+                  onChange={e => setEditUser(u => ({ ...u, max_shops: e.target.value }))} type="number" />
+              </Field>
+              <Field label="Max verbonden producten (override)" hint={`Standaard plan: ${(PLANS[editUser.plan]?.connected_products || 0).toLocaleString("nl-NL")}`}>
+                <Inp value={editUser.max_connected_products ?? (PLANS[editUser.plan]?.connected_products || 500)}
+                  onChange={e => setEditUser(u => ({ ...u, max_connected_products: e.target.value }))} type="number" />
+              </Field>
+            </div>
             <Divider />
             <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
             <div className="settings-2col">
@@ -3052,9 +3073,13 @@ const BillingTab = ({ userProfile }) => {
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "19,99"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
         )}
         {currentPlan && (
-          <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12, color: "var(--mx)" }}>
-            <span>🏪 Tot {currentPlan.sites} shops</span>
-            <span>🔗 {currentPlan.connected_products.toLocaleString("nl-NL")} verbonden producten</span>
+          <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12, color: "var(--mx)", flexWrap: "wrap" }}>
+            <span>🏪 Tot {userProfile?.max_shops || currentPlan.sites} shops</span>
+            <span>🔗 {(userProfile?.max_connected_products || currentPlan.connected_products).toLocaleString("nl-NL")} verbonden producten
+              {userProfile?.max_connected_products && userProfile.max_connected_products !== currentPlan.connected_products
+                ? <span style={{ marginLeft: 4, fontSize: 10, color: "var(--pr-h)", fontWeight: 700 }}>✦ aangepast</span>
+                : null}
+            </span>
             <span>📅 {billingPeriod === "annual" ? "Jaarlijks" : "Maandelijks"}</span>
           </div>
         )}

@@ -133,9 +133,8 @@ export default async (req) => {
   )
 
   try {
-    const { user_id, payment_id, amount, mollie_method } = await req.json()
+    const { user_id, payment_id, amount, mollie_method, plan, billing_period } = await req.json()
     if (!user_id || !amount) return new Response(JSON.stringify({ error: 'Missing params' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
-
     // ── DUPLICATE GUARD ─────────────────────────────────────────────────────
     // If we already have an invoice for this payment_id, return it without creating a duplicate
     if (payment_id) {
@@ -155,6 +154,11 @@ export default async (req) => {
     const { data: authUser } = await supabase.auth.admin.getUserById(user_id)
     const email = authUser?.user?.email || ''
     if (!email) return new Response(JSON.stringify({ error: 'User email not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+
+    const PLAN_NAMES = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
+    const planName = PLAN_NAMES[plan] || PLAN_NAMES[profile?.plan] || 'Pro'
+    const billingLabel = billing_period === 'annual' ? 'jaarabonnement' : 'maandabonnement'
+    const planDescription = `WooSyncShop ${planName} – ${billingLabel}`
 
     // Get notify email for BCC
     const { data: settings } = await supabase.from('platform_settings').select('contact_notification_email').eq('id', 1).single()
@@ -209,9 +213,9 @@ export default async (req) => {
       from: `"WooSyncShop" <${FROM_EMAIL}>`,
       to: email,
       bcc: adminEmail,
-      subject: `Factuur ${invoiceNumber} – WooSyncShop Pro`,
+      subject: `Factuur ${invoiceNumber} – ${planDescription}`,
       html: `<p>Beste${userObj.full_name ? ` ${userObj.full_name.split(' ')[0]}` : ''},</p>
-<p>Bedankt voor je betaling! Hierbij ontvang je de factuur voor je WooSyncShop Pro abonnement.</p>
+<p>Bedankt voor je betaling! Hierbij ontvang je de factuur voor je ${planDescription}.</p>
 <p>Je kunt de factuur downloaden als PDF via de bijlage.</p>
 <p>Met vriendelijke groet,<br>Het WooSyncShop team</p>`,
       attachments: [{
