@@ -420,8 +420,21 @@ const Field = ({ label, hint, required, children, style }) => (
 );
 
 const Inp = ({ value, onChange, placeholder, type = "text", multiline, rows = 3, style: extStyle, prefix, suffix, ...p }) => {
+  const [showPw, setShowPw] = React.useState(false);
+  const resolvedType = type === "password" ? (showPw ? "text" : "password") : type;
   const base = { background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 13, padding: "7px 10px", width: "100%", transition: "border 0.15s", ...extStyle };
   if (multiline) return <textarea value={value} onChange={onChange} placeholder={placeholder} rows={rows} style={{ ...base, resize: "vertical", lineHeight: 1.6 }} {...p} />;
+  if (type === "password") return (
+    <div style={{ display: "flex", alignItems: "center", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
+      <input value={value ?? ""} onChange={onChange} placeholder={placeholder} type={resolvedType}
+        autoComplete="new-password" data-form-type="other"
+        style={{ ...base, border: "none", borderRadius: 0, flex: 1 }} {...p} />
+      <button type="button" onClick={() => setShowPw(v => !v)}
+        style={{ padding: "0 10px", background: "var(--s3)", border: "none", borderLeft: "1px solid var(--b1)", cursor: "pointer", color: "var(--dm)", fontSize: 12, height: "100%", minHeight: 32, flexShrink: 0 }}>
+        {showPw ? "🙈" : "👁"}
+      </button>
+    </div>
+  );
   if (prefix || suffix) return (
     <div style={{ display: "flex", alignItems: "center", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
       {prefix && <span style={{ padding: "7px 8px 7px 10px", color: "var(--dm)", fontSize: 13, background: "var(--s3)", borderRight: "1px solid var(--b1)" }}>{prefix}</span>}
@@ -6195,6 +6208,8 @@ const PlatformSettings = () => {
   const [methods, setMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
   const [eanPool, setEanPool]           = useState(null);
+  const [eanPoolLoading, setEanPoolLoading] = useState(false);
+  const [eanPoolError, setEanPoolError] = useState(null);
   const [eanImporting, setEanImporting] = useState(false);
   const [eanImportResult, setEanImportResult] = useState(null); // {imported,skipped} | {error}
   const [eanExporting, setEanExporting] = useState(false);
@@ -6204,14 +6219,22 @@ const PlatformSettings = () => {
   const [eanTab, setEanTab]             = useState("status"); // status | import | export
 
   const loadEanPool = async () => {
+    setEanPoolLoading(true);
+    setEanPoolError(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch("/api/ean-assign", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const d = await res.json();
+      if (!res.ok) { setEanPoolError(d.error || `HTTP ${res.status}`); return; }
       setEanPool(d);
       if (d.alert_threshold !== undefined) setEanThreshold(d.alert_threshold);
       if (d.alert_email !== undefined) setEanAlertEmail(d.alert_email || "");
-    } catch {}
+    } catch (e) {
+      setEanPoolError(e.message);
+    } finally {
+      setEanPoolLoading(false);
+    }
+  };
   };
 
   const loadMethods = async () => {
@@ -6469,7 +6492,7 @@ const PlatformSettings = () => {
                   {low && <Badge color="red">⚠ Bijna leeg</Badge>}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 2 }}>
-                  {eanPool ? `${eanPool.available.toLocaleString("nl-NL")} beschikbaar van ${eanPool.total.toLocaleString("nl-NL")} totaal` : "Laden..."}
+                  {eanPoolLoading ? "Laden..." : eanPool ? `${eanPool.available.toLocaleString("nl-NL")} beschikbaar van ${eanPool.total.toLocaleString("nl-NL")} totaal` : eanPoolError ? "Fout bij laden" : "—"}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -6478,8 +6501,18 @@ const PlatformSettings = () => {
                     {{ status: "📊 Status", import: "📥 Importeer", export: "📤 Exporteer" }[t]}
                   </Btn>
                 ))}
-                <Btn variant="ghost" size="sm" onClick={loadEanPool} title="Vernieuwen">↻</Btn>
+                <Btn variant="ghost" size="sm" onClick={loadEanPool} disabled={eanPoolLoading} title="Vernieuwen"
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30 }}>
+                  <span style={{ display: "inline-block", animation: eanPoolLoading ? "spin 0.8s linear infinite" : "none" }}>↻</span>
+                </Btn>
               </div>
+            </div>
+
+            {eanPoolError && (
+              <div style={{ margin: "0 20px 14px", padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>
+                ❌ Fout bij ophalen EAN pool: {eanPoolError}
+              </div>
+            )}
             </div>
 
             <div style={{ padding: 20 }}>
