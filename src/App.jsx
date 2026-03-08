@@ -268,6 +268,32 @@ const G = () => {
         .admin-user-table-header { display: none !important; }
         .admin-user-row { flex-direction: column !important; align-items: flex-start !important; }
       }
+
+      /* ── SuperAdmin header ────────────────────────────────────── */
+      /* Desktop: show inline nav, email, logout; hide hamburger + current-tab label */
+      @media (min-width: 769px) {
+        .sa-desktop-nav  { display: flex !important; }
+        .sa-hamburger    { display: none !important; }
+        .sa-current-tab  { display: none !important; }
+        .sa-email-label  { display: block !important; }
+        .sa-logout-desktop { display: inline-flex !important; }
+      }
+
+      /* Mobile: hide inline nav + email + logout; show hamburger + current-tab */
+      @media (max-width: 768px) {
+        .sa-desktop-nav     { display: none !important; }
+        .sa-hamburger       { display: flex !important; }
+        .sa-current-tab     { display: block !important; }
+        .sa-email-label     { display: none !important; }
+        .sa-logout-desktop  { display: none !important; }
+      }
+
+      /* Drawer slide-in animation */
+      @keyframes slideRight {
+        from { transform: translateX(-100%); opacity: 0; }
+        to   { transform: translateX(0);    opacity: 1; }
+      }
+      .slide-right { animation: slideRight 0.22s cubic-bezier(0.32,0.72,0,1); }
     `;
     document.head.appendChild(s);
     return () => document.head.removeChild(s);
@@ -2227,8 +2253,7 @@ const HreflangView = ({ sites }) => {
 };
 
 // ─── Admin Panel (superadmin only) ────────────────────────────────────────────
-const AdminPanel = () => {
-  const [adminTab, setAdminTab] = useState("users");
+const AdminPanel = ({ adminTab, setAdminTab }) => {
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [editUser, setEditUser] = useState(null);
@@ -2343,12 +2368,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
 
   return (
     <div className="fade-in">
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-        <div style={{ padding: "4px 10px", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 20, fontSize: 11, color: "var(--re)", fontWeight: 700, letterSpacing: "0.05em" }}>ADMIN</div>
-        <h2 style={{ fontSize: 18, fontWeight: 700 }}>Beheerpaneel</h2>
-      </div>
-      <Tabs tabs={[{ id: "users", label: "👥 Gebruikers" }, { id: "payments", label: "💳 Betalingen" }, { id: "platform", label: "⚙ Platform" }, { id: "tracking", label: "📊 Tracking" }, { id: "logs", label: "📋 Logs" }]} active={adminTab} onChange={setAdminTab} />
-      <div style={{ marginTop: 20 }}>
+      <div style={{ marginTop: 4 }}>
 
         {/* Users */}
         {adminTab === "users" && (() => {
@@ -3362,22 +3382,98 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
 };
 
 // ─── SuperAdmin Dashboard ──────────────────────────────────────────────────────
+const ADMIN_TABS = [
+  { id: "users",    icon: "👥", label: "Gebruikers" },
+  { id: "payments", icon: "💳", label: "Betalingen" },
+  { id: "platform", icon: "⚙",  label: "Platform" },
+  { id: "tracking", icon: "📊", label: "Tracking" },
+  { id: "logs",     icon: "📋", label: "Logs" },
+];
+
 const SuperAdminDashboard = ({ user, onLogout }) => {
+  const [adminTab, setAdminTab] = useState("users");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const activeTabDef = ADMIN_TABS.find(t => t.id === adminTab);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
-      {/* Superadmin nav */}
-      <nav style={{ height: 56, padding: "0 24px", display: "flex", alignItems: "center", gap: 16, background: "var(--s1)", borderBottom: "1px solid var(--b1)", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 24 }} />
-          <span style={{ fontSize: 11, padding: "2px 6px", background: "var(--pr-l)", color: "var(--pr-h)", borderRadius: 4, fontFamily: "var(--font-b)", fontWeight: 600 }}>SUPERADMIN</span>
+
+      {/* ── Top bar ── */}
+      <nav style={{ height: 56, padding: "0 16px", display: "flex", alignItems: "center", gap: 10, background: "var(--s1)", borderBottom: "1px solid var(--b1)", flexShrink: 0, position: "sticky", top: 0, zIndex: 100 }}>
+        {/* Logo */}
+        <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 20, flexShrink: 0 }} />
+        <span style={{ fontSize: 10, padding: "2px 7px", background: "rgba(239,68,68,0.15)", color: "var(--re)", borderRadius: 4, fontWeight: 800, letterSpacing: "0.06em", flexShrink: 0 }}>SUPERADMIN</span>
+
+        {/* Current tab label — visible on mobile only */}
+        <span className="sa-current-tab" style={{ fontSize: 13, fontWeight: 600, color: "var(--tx)", marginLeft: 4 }}>
+          {activeTabDef?.icon} {activeTabDef?.label}
+        </span>
+
+        {/* Desktop tab nav */}
+        <div className="sa-desktop-nav" style={{ display: "flex", gap: 2, marginLeft: 8 }}>
+          {ADMIN_TABS.map(t => (
+            <button key={t.id} onClick={() => setAdminTab(t.id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: "var(--rd)", border: adminTab === t.id ? "1px solid var(--b2)" : "1px solid transparent", background: adminTab === t.id ? "var(--s2)" : "transparent", color: adminTab === t.id ? "var(--tx)" : "var(--mx)", fontSize: 12, fontWeight: adminTab === t.id ? 600 : 400, cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap" }}>
+              <span>{t.icon}</span><span>{t.label}</span>
+            </button>
+          ))}
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--mx)" }}>{user.email}</span>
-          <Btn variant="ghost" size="sm" onClick={onLogout}>Uitloggen</Btn>
+
+        {/* Right: email + logout (desktop) / hamburger (mobile) */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="sa-email-label" style={{ fontSize: 12, color: "var(--mx)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{user.email}</span>
+          <Btn className="sa-logout-desktop" variant="ghost" size="sm" onClick={onLogout}>Uitloggen</Btn>
+          {/* Hamburger — mobile only */}
+          <button className="sa-hamburger" onClick={() => setDrawerOpen(true)} style={{ display: "none", width: 36, height: 36, alignItems: "center", justifyContent: "center", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", cursor: "pointer", flexShrink: 0 }}>
+            <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><rect y="0" width="16" height="2" rx="1" fill="currentColor"/><rect y="5" width="16" height="2" rx="1" fill="currentColor"/><rect y="10" width="16" height="2" rx="1" fill="currentColor"/></svg>
+          </button>
         </div>
       </nav>
-      <div style={{ flex: 1, overflow: "auto", padding: "clamp(16px, 3vw, 32px)" }}>
-        <AdminPanel />
+
+      {/* ── Mobile drawer overlay ── */}
+      {drawerOpen && (
+        <>
+          <div onClick={() => setDrawerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200 }} />
+          <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: 260, background: "var(--s1)", borderRight: "1px solid var(--b1)", zIndex: 201, display: "flex", flexDirection: "column", boxShadow: "4px 0 24px rgba(0,0,0,0.4)" }} className="slide-right">
+            {/* Drawer header */}
+            <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <img src="/woo-sync-shop-logo.png" alt="" style={{ height: 18 }} />
+                <span style={{ fontSize: 10, padding: "2px 6px", background: "rgba(239,68,68,0.15)", color: "var(--re)", borderRadius: 4, fontWeight: 800, letterSpacing: "0.05em" }}>SUPERADMIN</span>
+              </div>
+              <button onClick={() => setDrawerOpen(false)} style={{ background: "none", border: "none", color: "var(--mx)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+
+            {/* Drawer account info */}
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--b1)" }}>
+              <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 2 }}>Ingelogd als</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--tx)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+            </div>
+
+            {/* Drawer nav */}
+            <nav style={{ flex: 1, padding: "8px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
+              {ADMIN_TABS.map(t => (
+                <button key={t.id} onClick={() => { setAdminTab(t.id); setDrawerOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", borderRadius: "var(--rd)", border: "none", background: adminTab === t.id ? "var(--s2)" : "transparent", color: adminTab === t.id ? "var(--tx)" : "var(--mx)", fontSize: 14, fontWeight: adminTab === t.id ? 600 : 400, cursor: "pointer", textAlign: "left", transition: "background 0.15s", borderLeft: adminTab === t.id ? "3px solid var(--pr-h)" : "3px solid transparent" }}>
+                  <span style={{ fontSize: 18, width: 24, textAlign: "center", flexShrink: 0 }}>{t.icon}</span>
+                  {t.label}
+                </button>
+              ))}
+            </nav>
+
+            {/* Drawer footer: logout */}
+            <div style={{ padding: "12px 8px", borderTop: "1px solid var(--b1)" }}>
+              <button onClick={onLogout} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", width: "100%", borderRadius: "var(--rd)", border: "none", background: "transparent", color: "var(--re)", fontSize: 14, fontWeight: 500, cursor: "pointer", textAlign: "left" }}>
+                <span style={{ fontSize: 18, width: 24, textAlign: "center" }}>⎋</span>
+                Afmelden
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Content ── */}
+      <div style={{ flex: 1, overflow: "auto", padding: "clamp(14px, 3vw, 28px)" }}>
+        <AdminPanel adminTab={adminTab} setAdminTab={setAdminTab} />
       </div>
     </div>
   );
