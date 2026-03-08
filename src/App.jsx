@@ -2448,17 +2448,21 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
           const loadInvoices = async (u) => {
             setInvoiceUser(u); setInvoicesLoading(true);
             try {
-              // First try DB
-              const { data } = await supabase.from("invoices").select("*").eq("user_id", u.id).order("issued_at", { ascending: false });
-              if (data?.length) { setUserInvoices(data); setInvoicesLoading(false); return; }
+              const { data: { session } } = await supabase.auth.getSession();
+              // Use API endpoint (service role key, bypasses RLS) instead of direct client query
+              const res = await fetch(`/api/get-invoice?user_id=${u.id}`, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+              if (res.ok) {
+                const d = await res.json();
+                if (d.invoices?.length) { setUserInvoices(d.invoices); setInvoicesLoading(false); return; }
+              }
               // If no DB records but user has a paid mollie_payment_id, try get-invoice which creates on-demand
               if (u.mollie_payment_id && PLANS[u.plan]) {
-                const { data: { session } } = await supabase.auth.getSession();
-                const res = await fetch(`/api/get-invoice?payment_id=${u.mollie_payment_id}`, { headers: { Authorization: `Bearer ${session?.access_token}` } });
-                if (res.ok) {
-                  // After on-demand creation, re-query DB
-                  const { data: fresh } = await supabase.from("invoices").select("*").eq("user_id", u.id).order("issued_at", { ascending: false });
-                  setUserInvoices(fresh || []);
+                const res2 = await fetch(`/api/get-invoice?payment_id=${u.mollie_payment_id}`, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+                if (res2.ok) {
+                  // After on-demand creation, re-fetch list
+                  const res3 = await fetch(`/api/get-invoice?user_id=${u.id}`, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+                  if (res3.ok) { const d3 = await res3.json(); setUserInvoices(d3.invoices || []); }
+                  else { setUserInvoices([]); }
                 } else { setUserInvoices([]); }
               } else { setUserInvoices([]); }
             } catch { setUserInvoices([]); } finally { setInvoicesLoading(false); }

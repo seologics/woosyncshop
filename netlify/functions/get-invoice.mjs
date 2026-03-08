@@ -101,11 +101,17 @@ export default async (req) => {
   const url = new URL(req.url, 'https://woosyncshop.com')
   const invoiceId = url.searchParams.get('id')
   const paymentId = url.searchParams.get('payment_id')
+  const targetUserId = url.searchParams.get('user_id') // superadmin only — list all invoices for a user
 
   const isSuperAdmin = user.email === 'leadingvation@gmail.com'
 
-  // Fetch invoice — must belong to this user (or superadmin can access any)
-  let invoice
+  // Superadmin: list all invoices for a given user_id
+  if (targetUserId && isSuperAdmin) {
+    const { data: invoiceList } = await supabase.from('invoices').select('*').eq('user_id', targetUserId).order('issued_at', { ascending: false })
+    return new Response(JSON.stringify({ invoices: invoiceList || [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // Fetch invoice — must belong to this user (or superadmin can access any)\n  let invoice
   if (invoiceId) {
     const q = supabase.from('invoices').select('*').eq('id', invoiceId)
     if (!isSuperAdmin) q.eq('user_id', user.id)
