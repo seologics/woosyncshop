@@ -1429,15 +1429,17 @@ const AiScanModal = ({ sourceShop, targetShop, onClose, onConfirmMatches, getTok
   );
 };
 
-// ─── EAN-13 generator (valid check digit) ────────────────────────────────────
-const generateEAN13 = () => {
-  // Use GS1 prefix 879 (Estonia) as a neutral non-conflicting prefix
-  const prefix = "879";
-  const mid = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join("");
-  const digits = (prefix + mid).split("").map(Number);
-  const checksum = digits.reduce((sum, d, i) => sum + d * (i % 2 === 0 ? 1 : 3), 0);
-  const check = (10 - (checksum % 10)) % 10;
-  return prefix + mid + check;
+// ─── EAN pool helper ──────────────────────────────────────────────────────────
+const fetchEanFromPool = async (sku, productId = null) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch("/api/ean-assign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+    body: JSON.stringify({ sku, product_id: productId }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || "EAN pool fout");
+  return json.ean;
 };
 
 // ─── Duplicate Product Modal ──────────────────────────────────────────────────
@@ -1476,9 +1478,8 @@ const DuplicateProductModal = ({ product, open, onClose, wooCall, onCreated }) =
   // ── AI generation ──
   const runAI = async () => {
     setStep("generating");
-    setProgress("AI genereert beschrijving, SKU en EAN...");
+    setProgress("AI genereert beschrijving en SKU...");
     try {
-      const newEan = generateEAN13();
       const prompt = `You are a WooCommerce product data assistant. Generate data for a new product.
 
 Original product:
@@ -1511,6 +1512,11 @@ Rules:
       const raw = data.content?.[0]?.text || "";
       const clean = raw.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
+
+      // Now fetch EAN from pool using the AI-generated SKU
+      setProgress("EAN ophalen uit pool...");
+      const newEan = await fetchEanFromPool(parsed.sku);
+
       setPreview({ short_description: parsed.short_description, sku: parsed.sku, ean: newEan });
       setStep("preview");
     } catch (e) {
@@ -1562,7 +1568,11 @@ Rules:
         setProgress(`Variaties aanmaken (${product.variations.length})...`);
         const isSingleVar = product.variations.length === 1;
         for (const v of product.variations) {
-          const varEan = isSingleVar ? ean : generateEAN13(); // same EAN only if 1 variant
+          // Single variation: reuse same EAN as parent. Multi: fetch fresh from pool.
+          const varEan = isSingleVar ? ean : await fetchEanFromPool(
+            (sku + "-V" + (product.variations.indexOf(v) + 1)),
+            created.id
+          );
           const varPayload = {
             sku: v.sku ? sku + "-V" + (product.variations.indexOf(v) + 1) : "",
             regular_price: v.regular_price || "",
@@ -1653,7 +1663,8 @@ Rules:
             </div>
             <div style={{ padding: "8px 12px", background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
               💡 Product wordt aangemaakt als <strong>Concept</strong> — je kunt het daarna publiceren in WooCommerce.
-              EAN wordt opgeslagen in het native WooCommerce veld <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>global_unique_id</code> én in het plugin veld <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>_alg_ean</code>.
+              EAN <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{preview.ean}</code> is opgehaald uit de <strong>EAN pool</strong> en gemarkeerd als gebruikt.
+              Opgeslagen in native WooCommerce veld <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>global_unique_id</code> én plugin veld <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>_alg_ean</code>.
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setStep("input")}>← Terug</Btn>
@@ -6183,6 +6194,16 @@ const PlatformSettings = () => {
   const [saved, setSaved] = useState(false);
   const [methods, setMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
+  const [eanPool, setEanPool] = useState(null);
+
+  const loadEanPool = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/ean-assign", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+      const d = await res.json();
+      setEanPool(d);
+    } catch {}
+  };
 
   const loadMethods = async () => {
     setMethodsLoading(true);
@@ -6218,10 +6239,8 @@ const PlatformSettings = () => {
       setLoading(false);
     };
     load();
+    loadEanPool();
   }, []);
-
-  const save = async () => {
-    setSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       await fetch("/api/platform-settings", {
@@ -6349,6 +6368,40 @@ const PlatformSettings = () => {
             <Inp value={ps.contact_notification_email} onChange={e => setPs(p => ({ ...p, contact_notification_email: e.target.value }))} type="email" placeholder="info@woosyncshop.com" />
           </Field>
         </div>
+      </div>
+
+      {/* ── EAN Pool Status ── */}
+      <div style={{ padding: 20, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>🏷 EAN Pool (EAN_Codes_201709777)</div>
+          <Btn variant="ghost" size="sm" onClick={loadEanPool}>↻ Vernieuwen</Btn>
+        </div>
+        {!eanPool ? (
+          <div style={{ fontSize: 13, color: "var(--dm)" }}>Laden...</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+              {[
+                { label: "Totaal", value: eanPool.total, color: "var(--tx)" },
+                { label: "Gebruikt", value: eanPool.used, color: "var(--ac)" },
+                { label: "Beschikbaar", value: eanPool.available, color: eanPool.available < 100 ? "var(--re)" : "var(--gr)" },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ padding: "12px 14px", background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
+                  <div style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontWeight: 800, fontSize: 22, color }}>{value?.toLocaleString("nl-NL")}</div>
+                </div>
+              ))}
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: 6, background: "var(--s3)", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${((eanPool.used / eanPool.total) * 100).toFixed(1)}%`, background: eanPool.available < 100 ? "var(--re)" : "var(--pr)", borderRadius: 99, transition: "width 0.4s" }} />
+            </div>
+            <div style={{ fontSize: 12, color: "var(--dm)" }}>
+              {((eanPool.used / eanPool.total) * 100).toFixed(1)}% gebruikt · EAN codes worden automatisch toegewezen bij product duplicatie
+              {eanPool.available < 100 && <span style={{ color: "var(--re)", fontWeight: 600 }}> — ⚠ Minder dan 100 EAN codes beschikbaar!</span>}
+            </div>
+          </div>
+        )}
       </div>
 
       <Btn variant="primary" onClick={save} disabled={saving} style={{ alignSelf: "flex-start", minWidth: 160 }}>
