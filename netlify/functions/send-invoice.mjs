@@ -10,7 +10,7 @@ function buildInvoiceNumber(seq) {
 }
 
 // Generate PDF buffer using pdfkit (pure Node.js, no binary deps)
-async function buildInvoicePDF({ invoiceNumber, date, user, amount, amountExcl, vatAmount, vatRate, paid }) {
+async function buildInvoicePDF({ invoiceNumber, date, user, amount, amountExcl, vatAmount, vatRate, paid, planDescription }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 })
     const chunks = []
@@ -22,100 +22,109 @@ async function buildInvoicePDF({ invoiceNumber, date, user, amount, amountExcl, 
     const dark = '#1a1a2e'
     const gray = '#666666'
     const lightgray = '#f8f8fc'
-    const pageW = doc.page.width - 100 // margins
+    const pageW = doc.page.width - 100 // 515pt usable
+    const rightEdge = 50 + pageW
 
-    // Header bar
-    doc.rect(50, 50, pageW, 70).fill(purple)
-    doc.fontSize(20).fillColor('#ffffff').font('Helvetica-Bold').text('WooSyncShop', 65, 68)
-    doc.fontSize(11).font('Helvetica').fillColor('rgba(255,255,255,0.85)').text('Factuur', 65, 93)
-    // Invoice number top-right in header
-    doc.fontSize(11).fillColor('#ffffff').text(invoiceNumber, 350, 68, { width: pageW - 300, align: 'right' })
-    doc.fontSize(9).fillColor('rgba(255,255,255,0.75)').text(date, 350, 88, { width: pageW - 300, align: 'right' })
+    // ── Header bar (purple, 80pt tall) ──────────────────────────────────────
+    doc.rect(50, 50, pageW, 80).fill(purple)
 
-    let y = 145
+    // Left: logo + subtitle
+    doc.fontSize(22).fillColor('#ffffff').font('Helvetica-Bold').text('WooSyncShop', 65, 64)
+    doc.fontSize(11).font('Helvetica').fillColor('rgba(255,255,255,0.80)').text('Factuur', 65, 91)
 
-    // Company details (top-right below header)
-    const companyX = 350
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1a1a2e').text('Webs Media', companyX, y, { width: pageW - (companyX - 50), align: 'right' })
-    y += 14
-    doc.font('Helvetica').fontSize(9).fillColor('#555555')
-    ;['De Wittenkade 152H', '1051 AN Amsterdam'].forEach(line => {
-      doc.text(line, companyX, y, { width: pageW - (companyX - 50), align: 'right' }); y += 13
-    })
-    doc.fillColor('#888888').fontSize(8)
-    ;['KVK: 59853824', 'BTW: NL001529194B75', 'IBAN: NL29 ABNA 0439 6716 47', 'BIC: ABNANL2A'].forEach(line => {
-      doc.text(line, companyX, y, { width: pageW - (companyX - 50), align: 'right' }); y += 12
-    })
-    y = Math.max(y + 10, 220)
+    // Right: company name + invoice number + date (stacked)
+    doc.fontSize(11).fillColor('#ffffff').font('Helvetica-Bold')
+    doc.text('Webs Media', 300, 58, { width: rightEdge - 300, align: 'right' })
+    doc.fontSize(10).font('Helvetica').fillColor('rgba(255,255,255,0.90)')
+    doc.text(invoiceNumber, 300, 76, { width: rightEdge - 300, align: 'right' })
+    doc.fontSize(9).fillColor('rgba(255,255,255,0.70)')
+    doc.text(date, 300, 93, { width: rightEdge - 300, align: 'right' })
 
-    // Meta row — reset y to a fixed position so it sits below company block
-    y = Math.max(y, 245)
+    let y = 155
+
+    // ── Meta row ──────────────────────────────────────────────────────────────
     doc.fontSize(9).fillColor(gray).font('Helvetica')
     doc.text('Factuurnummer:', 50, y)
-    doc.font('Helvetica-Bold').fillColor(dark).text(invoiceNumber, 140, y)
+    doc.font('Helvetica-Bold').fillColor(dark).text(invoiceNumber, 138, y)
     doc.font('Helvetica').fillColor(gray).text('Datum:', 310, y)
-    doc.font('Helvetica-Bold').fillColor(dark).text(date, 345, y)
+    doc.font('Helvetica-Bold').fillColor(dark).text(date, 348, y)
+    y += 28
 
-    y += 26
+    // ── Two-column block: Aan (left) | Van / company (right) ─────────────────
+    const colRight = 320
+    const colRightW = rightEdge - colRight
 
-    // "Aan" block
+    // LEFT — Aan
+    const yStart = y
     doc.font('Helvetica-Bold').fontSize(10).fillColor(dark).text('Aan:', 50, y)
     y += 16
     doc.font('Helvetica').fontSize(10).fillColor(dark)
-    if (user.business_name) { doc.text(user.business_name, 50, y); y += 15 }
-    if (user.full_name) { doc.text(user.full_name, 50, y); y += 15 }
-    doc.fillColor(gray).text(user.email, 50, y); y += 15
-    if (user.address_street) { doc.fillColor(dark).text(user.address_street, 50, y); y += 15 }
+    if (user.business_name) { doc.text(user.business_name, 50, y); y += 14 }
+    if (user.full_name) { doc.text(user.full_name, 50, y); y += 14 }
+    doc.fillColor(gray).text(user.email, 50, y); y += 14
+    if (user.address_street) { doc.fillColor(dark).text(user.address_street, 50, y); y += 14 }
     const zipCity = [user.address_zip, user.address_city].filter(Boolean).join(' ')
-    if (zipCity) { doc.text(zipCity, 50, y); y += 15 }
-    if (user.country) { doc.text(user.country, 50, y); y += 15 }
-    if (user.vat_number) { doc.fillColor(gray).text(`BTW: ${user.vat_number}${user.vat_validated ? ' ✓' : ''}`, 50, y); y += 15 }
+    if (zipCity) { doc.text(zipCity, 50, y); y += 14 }
+    if (user.country) { doc.text(user.country, 50, y); y += 14 }
+    if (user.vat_number) { doc.fillColor(gray).text(`BTW: ${user.vat_number}${user.vat_validated ? ' ✓' : ''}`, 50, y); y += 14 }
 
-    y += 20
+    // RIGHT — Van (company details)
+    let yR = yStart
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(dark).text('Webs Media', colRight, yR, { width: colRightW, align: 'right' })
+    yR += 14
+    doc.font('Helvetica').fontSize(9).fillColor('#555555')
+    ;['De Wittenkade 152H', '1051 AN Amsterdam'].forEach(line => {
+      doc.text(line, colRight, yR, { width: colRightW, align: 'right' }); yR += 13
+    })
+    doc.fillColor('#888888').fontSize(8)
+    ;['KVK: 59853824', 'BTW: NL001529194B75', 'IBAN: NL29 ABNA 0439 6716 47', 'BIC: ABNANL2A'].forEach(line => {
+      doc.text(line, colRight, yR, { width: colRightW, align: 'right' }); yR += 12
+    })
 
-    // Table header
-    doc.rect(50, y, pageW, 26).fill(lightgray)
+    y = Math.max(y, yR) + 24
+
+    // ── Table header ──────────────────────────────────────────────────────────
+    doc.rect(50, y, pageW, 24).fill(lightgray)
     doc.font('Helvetica-Bold').fontSize(9).fillColor(gray)
-    doc.text('OMSCHRIJVING', 62, y + 9)
-    doc.text('BEDRAG', 50 + pageW - 60, y + 9, { width: 60, align: 'right' })
-    y += 26
+    doc.text('OMSCHRIJVING', 62, y + 8)
+    doc.text('BEDRAG', rightEdge - 60, y + 8, { width: 60, align: 'right' })
+    y += 24
 
     // Table row
-    doc.rect(50, y, pageW, 1).fill('#f0f0f0')
-    y += 1
+    doc.rect(50, y, pageW, 1).fill('#f0f0f0'); y += 1
     doc.font('Helvetica').fontSize(10).fillColor(dark)
-    doc.text('WooSyncShop abonnement', 62, y + 10)
-    doc.fontSize(9).fillColor(gray).text(`Factuurnummer: ${invoiceNumber}`, 62, y + 24)
-    doc.fontSize(10).fillColor(dark).font('Helvetica').text(`€${amountExcl}`, 50 + pageW - 60, y + 10, { width: 60, align: 'right' })
-    y += 50
+    doc.text(planDescription || 'WooSyncShop abonnement', 62, y + 10)
+    doc.fontSize(9).fillColor(gray).text(`Factuurnummer: ${invoiceNumber}`, 62, y + 25)
+    doc.fontSize(10).fillColor(dark).text(`€${amountExcl}`, rightEdge - 60, y + 10, { width: 60, align: 'right' })
+    y += 52
 
-    // Totals section
-    doc.rect(50, y, pageW, 1).fill('#f0f0f0'); y += 8
-    const totalsX = 350
+    // ── Totals section ────────────────────────────────────────────────────────
+    doc.rect(50, y, pageW, 1).fill('#f0f0f0'); y += 10
+    const totalsX = 330
 
     doc.font('Helvetica').fontSize(10).fillColor(gray)
     doc.text('Subtotaal', totalsX, y)
-    doc.fillColor(dark).text(`€${amountExcl}`, 50 + pageW - 60, y, { width: 60, align: 'right' })
+    doc.fillColor(dark).text(`€${amountExcl}`, rightEdge - 60, y, { width: 60, align: 'right' })
     y += 18
     doc.fillColor(gray).text(`BTW (${vatRate}%)`, totalsX, y)
-    doc.fillColor(dark).text(`€${vatAmount}`, 50 + pageW - 60, y, { width: 60, align: 'right' })
-    y += 8
+    doc.fillColor(dark).text(`€${vatAmount}`, rightEdge - 60, y, { width: 60, align: 'right' })
+    y += 10
 
-    // Total row with top border
-    doc.rect(totalsX, y, pageW - (totalsX - 50), 2).fill(purple); y += 10
+    // Total row
+    doc.rect(totalsX, y, pageW - (totalsX - 50), 2).fill(purple); y += 12
     doc.font('Helvetica-Bold').fontSize(12).fillColor(dark)
     doc.text('Totaal', totalsX, y)
-    doc.text(`€${amount}`, 50 + pageW - 60, y, { width: 60, align: 'right' })
-    y += 30
+    doc.text(`€${amount}`, rightEdge - 60, y, { width: 60, align: 'right' })
+    y += 32
 
-    // Paid badge
+    // ── Paid badge ────────────────────────────────────────────────────────────
     if (paid) {
-      doc.rect(50, y, 100, 22).fill('#dcfce7')
-      doc.font('Helvetica-Bold').fontSize(10).fillColor('#16a34a').text('✓ Betaald', 56, y + 6)
+      doc.rect(50, y, 90, 20).fill('#dcfce7')
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#16a34a').text('✓ Betaald', 56, y + 5)
     }
 
-    // Footer
-    const footerY = doc.page.height - 60
+    // ── Footer ────────────────────────────────────────────────────────────────
+    const footerY = doc.page.height - 55
     doc.rect(50, footerY - 10, pageW, 1).fill('#eeeeee')
     doc.font('Helvetica').fontSize(9).fillColor(gray)
     doc.text('WooSyncShop  ·  woosyncshop.com  ·  info@woosyncshop.com', 50, footerY, { width: pageW, align: 'center' })
@@ -200,6 +209,7 @@ export default async (req) => {
       invoiceNumber, date, user: userObj,
       amount: amountFormatted, amountExcl, vatAmount,
       vatRate: vatRateDisplay, paid: true,
+      planDescription,
     })
 
     // Send via SES SMTP with PDF attachment

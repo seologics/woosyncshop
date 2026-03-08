@@ -4418,7 +4418,167 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
 
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 // ─── Welcome View (shown after first payment) ─────────────────────────────────
-const WelcomeView = ({ user, plan, onContinue }) => {
+
+// ─── How It Works / Intro View ────────────────────────────────────────────────
+const HowItWorksView = ({ onBack, onAddShop }) => {
+  const [activeSection, setActiveSection] = useState("overview");
+
+  const SECTIONS = [
+    { id: "overview", icon: "🗺️", label: "Overzicht" },
+    { id: "sync", icon: "🔄", label: "Sync & Push" },
+    { id: "matching", icon: "🔗", label: "Producten koppelen" },
+    { id: "ai", icon: "🤖", label: "AI functies" },
+    { id: "hreflang", icon: "🌐", label: "Hreflang" },
+    { id: "images", icon: "🖼️", label: "Image pipeline" },
+  ];
+
+  const SECTION_CONTENT = {
+    overview: {
+      title: "Wat is WooSyncShop?",
+      subtitle: "De centrale hub voor al je WooCommerce webshops",
+      hero: "🗺️",
+      blocks: [
+        { icon: "🎯", title: "Eén dashboard, meerdere shops", body: "Beheer al je WooCommerce installaties vanuit één plek. Of je nu 2 shops hebt of 10 — je ziet alles overzichtelijk naast elkaar. Wissel direct van actieve shop via de dropdown bovenin." },
+        { icon: "🔌", title: "Verbinding via REST API", body: "WooSyncShop verbindt met je WooCommerce shop via de officiële REST API. Je genereert een Consumer Key + Consumer Secret in je WordPress backend (WooCommerce → Instellingen → Geavanceerd → REST API) en voert die in bij het toevoegen van een shop." },
+        { icon: "⚡", title: "Sync vs Push", body: "Sync haalt de nieuwste productdata op vanuit je WooCommerce shop naar WooSyncShop. Push stuurt wijzigingen die je hebt gekoppeld naar alle verbonden shops. Twee aparte acties zodat je altijd controle houdt." },
+        { icon: "🔐", title: "Veiligheid & toegang", body: "Alle API-sleutels worden versleuteld opgeslagen. WooSyncShop leest en schrijft alleen via lees/schrijf-rechten die jij hebt ingesteld. We slaan nooit wachtwoorden op." },
+      ],
+    },
+    sync: {
+      title: "Synchronisatie & Push",
+      subtitle: "Houd productdata consistent over al je shops",
+      hero: "🔄",
+      blocks: [
+        { icon: "⬇️", title: "Sync: van WooCommerce naar WooSyncShop", body: "Met de Sync-knop haal je de actuele productenlijst op van je actieve shop. WooSyncShop vergelijkt dit met de eerder opgeslagen staat en toont je welke producten er zijn en hoe ze zijn gelinkt. Dit is altijd een leesactie — er wordt niets aangepast in je shop." },
+        { icon: "⬆️", title: "Push: van WooSyncShop naar verbonden shops", body: "Push stuurt de productdata van je bronshop naar alle gekoppelde doelshops. Je kiest per koppeling welke velden worden gesynchroniseerd: naam, beschrijving, prijs, voorraad, afbeeldingen, categorieën, attributen. Velden die je niet aanvinkt worden nooit overschreven." },
+        { icon: "🎛️", title: "Selectieve veldsync", body: "Per verbonden product kun je exact instellen welke velden worden gesynchroniseerd. Wil je prijs en voorraad wel synchroniseren maar de omschrijving lokaal houden? Geen probleem. Elke koppeling heeft zijn eigen set gesynchroniseerde velden." },
+        { icon: "📦", title: "Variabele producten", body: "WooSyncShop ondersteunt ook variabele producten met attributen (maat, kleur etc.) en varianten. Voorraad per variant kan worden gesynchroniseerd zodat je nooit meer een mismatch hebt tussen locaties." },
+      ],
+    },
+    matching: {
+      title: "Producten koppelen",
+      subtitle: "Drie manieren om bronproducten te linken aan doelproducten",
+      hero: "🔗",
+      blocks: [
+        { icon: "🔢", title: "Koppelen via SKU", body: "De eenvoudigste koppelstrategie: als je bronshop en doelshop dezelfde SKU-codes gebruiken, kan WooSyncShop automatisch alle producten matchen. Eén klik en alle overeenkomende SKU's zijn gekoppeld." },
+        { icon: "🏷️", title: "Koppelen via attribuut", body: "Als je shops een gedeeld product-ID of kenmerk gebruiken (bijv. een EAN, artikel-ID of merk), kies dan koppelen via attribuut. Je kiest het attribuut en WooSyncShop zoekt de overeenkomsten." },
+        { icon: "✋", title: "Handmatig koppelen", body: "Wil je volledige controle? In de verbonden producten-view kun je voor elk bronproduct handmatig het bijbehorende doelproduct selecteren uit de lijst. Zoek op naam of SKU en sla de koppeling op." },
+        { icon: "🤖", title: "AI automatisch matchen", body: "De krachtigste optie: laat Gemini of GPT-4o de producten van je bron- en doelshop vergelijken op basis van naam, omschrijving en attributen. De AI geeft elk voorstel een confidence score zodat je twijfelachtige koppelingen kunt reviewen." },
+      ],
+    },
+    ai: {
+      title: "AI functies",
+      subtitle: "Van matching tot vertaling tot beeldoptimalisatie",
+      hero: "🤖",
+      blocks: [
+        { icon: "🧠", title: "AI matching — hoe het werkt", body: "WooSyncShop stuurt batches van maximaal 30 bronproducten tegelijk naar het AI-model met een gestructureerde prompt. Het model vergelijkt elk bronproduct met de kandidaten uit de doelshop en geeft per match een confidence score van 0-100%. Alles boven een drempel (standaard 85%) wordt automatisch goedgekeurd, de rest vlag je als 'review needed'." },
+        { icon: "🌍", title: "AI Vertaling", body: "Activeer vertaling vanuit Instellingen → AI Vertaling. WooSyncShop vertaalt productnaam, beschrijving en korte beschrijving naar de taal van je doelshop. De AI behoudt HTML-opmaak, bullet points en speciale tekens. Taxonomieën (categorieën, tags) kunnen optioneel ook worden vertaald." },
+        { icon: "⚙️", title: "Kies je AI-provider", body: "Als superadmin kun je via Platform-instellingen kiezen welke AI-provider wordt gebruikt: Google Gemini of OpenAI GPT-4o. Gemini is standaard voor beelden (via multimodal vision), GPT-4o voor teksttaken. Per gebruiker kunnen standaarden worden overschreven." },
+        { icon: "📊", title: "Transparantie & logs", body: "Elke AI-actie wordt gelogd in het systeem: welk model werd gebruikt, hoeveel producten verwerkt, en of er fouten optraden. Superadmins zien alle logs via het Admin-dashboard onder Logs." },
+      ],
+    },
+    hreflang: {
+      title: "Hreflang manager",
+      subtitle: "Internationale SEO zonder gedoe",
+      hero: "🌐",
+      blocks: [
+        { icon: "🔍", title: "Wat is hreflang?", body: "Hreflang-tags vertellen zoekmachines welke pagina's vertalingen van elkaar zijn. Zonder hreflang kan Google de verkeerde versie van je shop indexeren voor een bepaald land of taal, wat je internationale SEO beschadigt." },
+        { icon: "🗂️", title: "Hoe WooSyncShop het regelt", body: "Koppel producten via de Hreflang-tab. WooSyncShop genereert automatisch de juiste hreflang link tags voor elk gekoppeld product. Je hoeft geen WordPress plugin te installeren — de tags worden rechtstreeks via de WooCommerce REST API geïnjecteerd." },
+        { icon: "🏁", title: "Locale & taalcodes", body: "WooSyncShop ondersteunt alle standaard hreflang-codes (nl-NL, fr-BE, de-DE, en-US etc.). Elke shop heeft een locale die je instelt bij het verbinden. Zorg dat de locale overeenkomt met de taal en het land van die shop voor de beste resultaten." },
+        { icon: "✅", title: "Validatie & preview", body: "In de Hreflang-tab zie je voor elk product welke tags worden gegenereerd en of er eventuele ontbrekende koppelingen zijn. Groene vinkjes = alles in orde. Oranje = product niet gekoppeld in alle talen." },
+      ],
+    },
+    images: {
+      title: "Image pipeline",
+      subtitle: "Automatische beeldoptimalisatie via AI",
+      hero: "🖼️",
+      blocks: [
+        { icon: "👁️", title: "Stap 1 — Gemini analyseert", body: "Wanneer je de image pipeline activeert op een product, stuurt WooSyncShop de productafbeelding naar Google Gemini Vision. Gemini analyseert de afbeelding, genereert een beschrijvende alt-tekst in de taal van je shop, en controleert of de afbeelding voldoet aan kwaliteitseisen." },
+        { icon: "🗜️", title: "Stap 2 — TinyPNG comprimeert", body: "Na de analyse gaat de afbeelding door TinyPNG voor verliesloze compressie. WooSyncShop respecteert je ingestelde limiet (standaard 400KB) en maximale breedte (standaard 1200px). Grote productfoto's worden automatisch verkleind zonder zichtbaar kwaliteitsverlies." },
+        { icon: "⬆️", title: "Stap 3 — Terug naar WooCommerce", body: "De geoptimaliseerde afbeelding met bijgewerkte alt-tekst wordt via de API teruggestuurd naar je WooCommerce shop. Het origineel wordt vervangen. Alle stappen zijn gelogd zodat je precies ziet hoeveel KB er is bespaard per product." },
+        { icon: "🎛️", title: "Configuratie per gebruiker", body: "Superadmins kunnen per gebruiker de Gemini model-variant instellen (Nano Banana voor snelheid, Pro voor kwaliteit), de maximale bestandsgrootte, compressiekwaliteit en maximale breedte. Gebruikers zien hun instellingen in het profiel." },
+      ],
+    },
+  };
+
+  const section = SECTION_CONTENT[activeSection];
+
+  return (
+    <div style={{ fontFamily: "var(--font-b)", minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column" }}>
+      {/* Top bar */}
+      <div style={{ background: "var(--s1)", borderBottom: "1px solid var(--b1)", padding: "14px 24px", display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 100 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mx)", fontSize: 20, padding: "4px 8px", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 500 }}>
+          ← Terug
+        </button>
+        <div style={{ width: 1, height: 20, background: "var(--b1)" }} />
+        <img src="/woo-sync-shop-logo.png" alt="WooSyncShop" style={{ height: 20 }} />
+        <div style={{ marginLeft: "auto" }}>
+          <Btn variant="primary" size="sm" onClick={onAddShop}>
+            🏪 Shop toevoegen →
+          </Btn>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flex: 1, maxWidth: 1100, margin: "0 auto", width: "100%", padding: "0 16px" }}>
+        {/* Sidebar nav */}
+        <div style={{ width: 220, flexShrink: 0, padding: "32px 0 32px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, paddingLeft: 8 }}>Documentatie</div>
+          {SECTIONS.map(s => (
+            <button key={s.id} onClick={() => setActiveSection(s.id)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: activeSection === s.id ? "var(--s2)" : "transparent", border: activeSection === s.id ? "1px solid var(--b2)" : "1px solid transparent", borderRadius: "var(--rd)", cursor: "pointer", color: activeSection === s.id ? "var(--tx)" : "var(--mx)", fontSize: 13, fontWeight: activeSection === s.id ? 600 : 400, textAlign: "left", transition: "all 0.15s", width: "100%" }}>
+              <span style={{ fontSize: 16 }}>{s.icon}</span>
+              <span>{s.label}</span>
+              {activeSection === s.id && <span style={{ marginLeft: "auto", color: "var(--pr-h)", fontSize: 10 }}>▶</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Main content */}
+        <div style={{ flex: 1, padding: "40px 0 60px 40px", minWidth: 0 }}>
+          {/* Hero */}
+          <div style={{ marginBottom: 40 }}>
+            <div style={{ fontSize: 52, marginBottom: 16 }}>{section.hero}</div>
+            <h1 style={{ fontSize: "clamp(24px,3vw,36px)", fontWeight: 800, letterSpacing: "-0.03em", fontFamily: "var(--font-h)", marginBottom: 8, lineHeight: 1.2 }}>{section.title}</h1>
+            <p style={{ fontSize: 16, color: "var(--mx)", lineHeight: 1.6, maxWidth: 600 }}>{section.subtitle}</p>
+          </div>
+
+          {/* Content blocks */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20 }}>
+            {section.blocks.map((b, i) => (
+              <div key={i} style={{ padding: "24px", background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", transition: "border-color 0.2s, transform 0.2s", cursor: "default" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(91,91,214,0.4)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--b1)"; e.currentTarget.style.transform = "none"; }}>
+                <div style={{ fontSize: 28, marginBottom: 14 }}>{b.icon}</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, fontFamily: "var(--font-h)" }}>{b.title}</div>
+                <div style={{ fontSize: 13, color: "var(--mx)", lineHeight: 1.75 }}>{b.body}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Section navigation */}
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 48, paddingTop: 24, borderTop: "1px solid var(--b1)" }}>
+            {SECTIONS.findIndex(s => s.id === activeSection) > 0 ? (
+              <Btn variant="secondary" onClick={() => setActiveSection(SECTIONS[SECTIONS.findIndex(s => s.id === activeSection) - 1].id)}>
+                ← {SECTIONS[SECTIONS.findIndex(s => s.id === activeSection) - 1].label}
+              </Btn>
+            ) : <span />}
+            {SECTIONS.findIndex(s => s.id === activeSection) < SECTIONS.length - 1 ? (
+              <Btn variant="secondary" onClick={() => setActiveSection(SECTIONS[SECTIONS.findIndex(s => s.id === activeSection) + 1].id)}>
+                {SECTIONS[SECTIONS.findIndex(s => s.id === activeSection) + 1].label} →
+              </Btn>
+            ) : (
+              <Btn variant="primary" onClick={onAddShop}>
+                🏪 Klaar! Eerste shop toevoegen →
+              </Btn>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WelcomeView = ({ user, plan, onContinue, onAddShop, onHowItWorks }) => {
   const planInfo = PLANS[plan] || PLANS.growth;
   const STEPS = [
     { step: "01", icon: "🏪", title: "Verbind je shops", desc: "Ga naar Instellingen → Mijn shops. Voeg je WooCommerce shops toe met je Consumer Key + Secret. Verbind minimaal 2 shops om te synchroniseren." },
@@ -4454,9 +4614,14 @@ const WelcomeView = ({ user, plan, onContinue }) => {
                 <strong style={{ color: "var(--tx)" }}>{planInfo.sites} shops</strong> verbinden en{" "}
                 <strong style={{ color: "var(--tx)" }}>{planInfo.connected_products.toLocaleString("nl-NL")} producten</strong> synchroniseren.
               </p>
-              <Btn variant="primary" size="lg" onClick={onContinue} style={{ fontSize: 15, padding: "13px 28px" }}>
-                Naar het dashboard →
-              </Btn>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <Btn variant="primary" size="lg" onClick={() => { onAddShop?.(); onContinue?.(); }} style={{ fontSize: 15, padding: "13px 28px" }}>
+                  🏪 Eerste shop toevoegen →
+                </Btn>
+                <Btn variant="secondary" size="lg" onClick={onHowItWorks} style={{ fontSize: 15, padding: "13px 24px" }}>
+                  💡 Hoe werkt het?
+                </Btn>
+              </div>
             </div>
             {/* Plan card */}
             <div style={{ background: "var(--s1)", border: "2px solid var(--pr)", borderRadius: "var(--rd-xl)", padding: "20px 24px", minWidth: 200 }}>
@@ -4526,9 +4691,14 @@ const WelcomeView = ({ user, plan, onContinue }) => {
         </div>
 
         <div style={{ textAlign: "center", paddingTop: 16 }}>
-          <Btn variant="primary" size="lg" onClick={onContinue} style={{ fontSize: 15, padding: "13px 32px" }}>
-            Aan de slag → Shop toevoegen
-          </Btn>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+            <Btn variant="primary" size="lg" onClick={() => { onAddShop?.(); onContinue?.(); }} style={{ fontSize: 15, padding: "13px 28px" }}>
+              🏪 Eerste shop toevoegen →
+            </Btn>
+            <Btn variant="secondary" size="lg" onClick={onHowItWorks} style={{ fontSize: 15, padding: "13px 24px" }}>
+              💡 Hoe werkt het?
+            </Btn>
+          </div>
         </div>
       </div>
     </div>
@@ -5700,7 +5870,7 @@ const getPageFromPath = () => {
 
 export default function App() {
   const initPage = getPageFromPath();
-  const [view, setView] = useState(initPage || "loading"); // loading | landing | app | welcome | privacy | voorwaarden | contact
+  const [view, setView] = useState(initPage || "loading"); // loading | landing | app | welcome | how-it-works | privacy | voorwaarden | contact
   const [welcomePlan, setWelcomePlan] = useState(null);
   const [authModal, setAuthModal] = useState(null);
   const [user, setUser] = useState(null);
@@ -5833,7 +6003,13 @@ export default function App() {
     );
   }
 
-  if (view === "welcome") return <><G /><WelcomeView user={user} plan={welcomePlan} onContinue={() => setView("app")} /></>;
+  if (view === "welcome") return <><G /><WelcomeView user={user} plan={welcomePlan}
+    onContinue={() => setView("app")}
+    onAddShop={() => { setView("app"); /* settings tab will be set inside Dashboard */ }}
+    onHowItWorks={() => setView("how-it-works")} /></>;
+  if (view === "how-it-works") return <><G /><HowItWorksView
+    onBack={() => setView("welcome")}
+    onAddShop={() => setView("app")} /></>;
   if (view === "privacy") return <><G /><PrivacyPage onBack={() => goBack()} /></>;
   if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={() => goBack()} /></>;
   if (view === "contact") return <><G /><ContactPage onBack={() => goBack()} /></>;

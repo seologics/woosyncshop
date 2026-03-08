@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountExcl, vatAmount, paid }) {
+function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountExcl, vatAmount, paid, planDescription }) {
   return `<!DOCTYPE html>
 <html lang="nl">
 <head><meta charset="utf-8"><title>Factuur ${invoiceNumber}</title>
@@ -69,7 +69,7 @@ function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountEx
     <table>
       <thead><tr><th>Omschrijving</th><th style="text-align:right">Bedrag</th></tr></thead>
       <tbody>
-        <tr><td>WooSyncShop abonnement<br><small style="color:#888">Factuurnummer: ${invoiceNumber}</small></td><td style="text-align:right">€${amountExcl}</td></tr>
+        <tr><td>${planDescription || 'WooSyncShop abonnement'}<br><small style="color:#888">Factuurnummer: ${invoiceNumber}</small></td><td style="text-align:right">€${amountExcl}</td></tr>
       </tbody>
     </table>
     <table class="totals">
@@ -161,6 +161,11 @@ export default async (req) => {
   const vatAmount = parseFloat(invoice.vat_amount || 0).toFixed(2).replace('.', ',')
   const vatRate = invoice.vat_rate ?? 21
 
+  const PLAN_NAMES = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
+  const planName = PLAN_NAMES[invoice.plan || profile?.plan] || 'abonnement'
+  const billingLabel = invoice.billing_period === 'annual' ? 'jaarabonnement' : 'maandabonnement'
+  const planDescription = `WooSyncShop ${planName} – ${billingLabel}`
+
   const html = buildInvoiceHTML({
     invoiceNumber: invoice.invoice_number,
     date,
@@ -170,6 +175,7 @@ export default async (req) => {
     vatAmount,
     vatRate,
     paid: invoice.paid,
+    planDescription,
   })
 
   return new Response(html, {
