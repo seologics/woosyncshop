@@ -2667,12 +2667,21 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        // Ensure we have a fresh session
+        const { data: { session }, error: sessErr } = await supabase.auth.getSession();
+        if (sessErr || !session) {
+          console.error("No session for admin-users:", sessErr);
+          setUsersLoading(false);
+          return;
+        }
         const res = await fetch("/api/admin-users", {
-          headers: { "Authorization": `Bearer ${token}` }
+          headers: { "Authorization": `Bearer ${session.access_token}` }
         });
-        if (!res.ok) throw new Error("Laden mislukt");
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.error("admin-users GET failed:", res.status, body);
+          throw new Error(`${res.status}: ${body.error || "Laden mislukt"}`);
+        }
         const data = await res.json();
         setUsers(data || []);
       } catch (e) {
@@ -2747,13 +2756,14 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
     if (!window.confirm("Weet je het zeker? Dit verwijdert het account permanent uit de database en authenticatie.")) return;
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { alert("Sessie verlopen — log opnieuw in."); return; }
       const res = await fetch("/api/admin-users", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
         body: JSON.stringify({ id: u.id }),
       });
       const result = await res.json();
-      if (!res.ok) { alert("Fout: " + result.error); return; }
+      if (!res.ok) { alert(`Fout ${res.status}: ${result.error}`); return; }
       setUsers(us => us.filter(usr => usr.id !== u.id));
     } catch (e) { alert("Fout: " + e.message); }
   };
