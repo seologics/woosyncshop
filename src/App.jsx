@@ -6569,7 +6569,6 @@ const PlatformSettings = () => {
                     </div>
                   </div>
                 </div>
-              </div>
               )}
 
               {/* ── TAB: Import ── */}
@@ -6616,7 +6615,6 @@ const PlatformSettings = () => {
                     )
                   )}
                 </div>
-              </div>
               )}
 
               {/* ── TAB: Export ── */}
