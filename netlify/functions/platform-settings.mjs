@@ -34,10 +34,16 @@ export default async (req) => {
       if (authErr || !user || user.email !== SUPERADMIN_EMAIL) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
 
       const body = await req.json()
-      const { gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email } = body
+      const {
+        gtm_id, ga4_id, gads_conversion_id, gads_conversion_label,
+        gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email,
+        openai_api_key,
+        ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
+        ai_model_matching, ai_model_translation,
+      } = body
 
       // Track which keys are being set/cleared for logging
-      const changed = Object.entries({ gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key: gemini_api_key ? '***' : null, tinypng_api_key: tinypng_api_key ? '***' : null, mollie_api_key: mollie_api_key ? '***' : null, contact_notification_email })
+      const changed = Object.entries({ gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key: gemini_api_key ? '***' : null, tinypng_api_key: tinypng_api_key ? '***' : null, mollie_api_key: mollie_api_key ? '***' : null, openai_api_key: openai_api_key ? '***' : null, contact_notification_email, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation })
         .filter(([, v]) => v !== undefined)
         .map(([k]) => k)
 
@@ -46,6 +52,13 @@ export default async (req) => {
         gads_conversion_id: gads_conversion_id || null, gads_conversion_label: gads_conversion_label || null,
         gemini_api_key: gemini_api_key || null, tinypng_api_key: tinypng_api_key || null,
         mollie_api_key: mollie_api_key || null, contact_notification_email: contact_notification_email || null,
+        openai_api_key: openai_api_key || null,
+        ai_provider_matching: ai_provider_matching || 'gemini',
+        ai_provider_translation: ai_provider_translation || 'gemini',
+        ai_provider_image: ai_provider_image || 'gemini',
+        ai_provider_normalization: ai_provider_normalization || 'gemini',
+        ai_model_matching: ai_model_matching || null,
+        ai_model_translation: ai_model_translation || null,
         updated_at: new Date().toISOString()
       })
 
