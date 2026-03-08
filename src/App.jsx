@@ -4310,6 +4310,8 @@ const TrackingInjector = ({ consent }) => {
       try {
         const res = await fetch("/api/platform-settings");
         const settings = await res.json();
+
+        // ── GTM ──
         if (settings.gtm_id && !document.getElementById("wss-gtm")) {
           const s = document.createElement("script");
           s.id = "wss-gtm";
@@ -4317,6 +4319,8 @@ const TrackingInjector = ({ consent }) => {
           document.head.appendChild(s);
           window.dataLayer = window.dataLayer || [];
         }
+
+        // ── GA4 (direct, without GTM) ──
         if (settings.ga4_id && !document.getElementById("wss-ga4")) {
           const s = document.createElement("script");
           s.id = "wss-ga4";
@@ -4328,11 +4332,47 @@ const TrackingInjector = ({ consent }) => {
           window.gtag("js", new Date());
           window.gtag("config", settings.ga4_id);
         }
+
+        // ── Meta Pixel (Facebook + Instagram) ──
+        if (settings.fb_pixel_id && !document.getElementById("wss-fbq")) {
+          const s = document.createElement("script");
+          s.id = "wss-fbq";
+          s.innerHTML = `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${settings.fb_pixel_id}');fbq('track','PageView');`;
+          document.head.appendChild(s);
+        }
+
+        // ── TikTok Pixel ──
+        if (settings.tt_pixel_id && !document.getElementById("wss-ttq")) {
+          const s = document.createElement("script");
+          s.id = "wss-ttq";
+          s.innerHTML = `!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e};ttq.load=function(e,n){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]=n||{};var o=document.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a)};ttq.load('${settings.tt_pixel_id}');ttq.page()}(window,document,'ttq');`;
+          document.head.appendChild(s);
+        }
       } catch {}
     };
     inject();
-  }, []);
+  }, [consent]);
   return null;
+};
+
+// Helper: fire conversion events on signup (call this after successful registration)
+window.wssTrackSignup = (email) => {
+  try {
+    // Google Ads
+    if (window.gtag) {
+      fetch("/api/platform-settings").then(r => r.json()).then(s => {
+        if (s.gads_conversion_id && s.gads_conversion_label) {
+          window.gtag("event", "conversion", { send_to: `${s.gads_conversion_id}/${s.gads_conversion_label}` });
+        }
+      }).catch(() => {});
+    }
+    // Meta Pixel
+    if (window.fbq) window.fbq("track", "CompleteRegistration", { content_name: "WooSyncShop Signup" });
+    // TikTok
+    if (window.ttq) window.ttq.track("CompleteRegistration", { email });
+    // GA4
+    if (window.gtag) window.gtag("event", "signup_complete", { method: "email" });
+  } catch {}
 };
 
 // ─── Page Layout Wrapper ───────────────────────────────────────────────────────
@@ -4531,6 +4571,145 @@ const LEVEL_COLORS = {
   error: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.25)", text: "var(--re)", dot: "#ef4444" },
   warn:  { bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.25)", text: "var(--am)", dot: "#f59e0b" },
   info:  { bg: "rgba(99,102,241,0.06)", border: "rgba(99,102,241,0.2)", text: "var(--pr-h)", dot: "#6366f1" },
+};
+
+// ─── Tracking Settings (superadmin) ───────────────────────────────────────────
+const TrackingSettings = () => {
+  const [ts, setTs] = useState({
+    gtm_id: "", ga4_id: "",
+    gads_conversion_id: "", gads_conversion_label: "",
+    fb_pixel_id: "", tt_pixel_id: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/platform-settings", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+        const d = await res.json();
+        setTs({
+          gtm_id: d.gtm_id || "",
+          ga4_id: d.ga4_id || "",
+          gads_conversion_id: d.gads_conversion_id || "",
+          gads_conversion_label: d.gads_conversion_label || "",
+          fb_pixel_id: d.fb_pixel_id || "",
+          tt_pixel_id: d.tt_pixel_id || "",
+        });
+      } catch {} finally { setLoading(false); }
+    };
+    load();
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/platform-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify(ts),
+      });
+      if (!res.ok) throw new Error("Opslaan mislukt");
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { alert(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const TrackCard = ({ icon, title, hint, active, children }) => (
+    <div style={{ border: `1px solid ${active ? "rgba(99,102,241,0.35)" : "var(--b1)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: active ? "rgba(99,102,241,0.03)" : "var(--s1)" }}>
+      <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>{icon}</span>{title}
+        </div>
+        {active
+          ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(34,197,94,0.15)", color: "#22c55e", fontWeight: 700 }}>● ACTIEF</span>
+          : <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "var(--s3)", color: "var(--dm)", fontWeight: 600 }}>NIET INGESTELD</span>
+        }
+      </div>
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        {hint && <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)" }}>{hint}</div>}
+        {children}
+      </div>
+    </div>
+  );
+
+  if (loading) return <div style={{ padding: 20, color: "var(--mx)", fontSize: 13 }}>Laden...</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 700 }}>
+
+      {/* ── Google Tag Manager ── */}
+      <TrackCard icon="📊" title="Google Tag Manager" active={!!ts.gtm_id}
+        hint="GTM is de aanbevolen methode. Voeg via GTM GA4, Google Ads en andere tags toe zonder code-aanpassingen. GTM laadt automatisch voor bezoekers die cookies accepteren.">
+        <Field label="GTM Container ID" hint="Bijv. GTM-XXXXXXX">
+          <Inp value={ts.gtm_id} onChange={e => setTs(s => ({ ...s, gtm_id: e.target.value }))} placeholder="GTM-XXXXXXX" />
+        </Field>
+      </TrackCard>
+
+      {/* ── GA4 ── */}
+      <TrackCard icon="📈" title="Google Analytics 4" active={!!ts.ga4_id}
+        hint="Directe GA4 integratie (zonder GTM). Gebruikt gtag.js — pageviews en events worden automatisch doorgestuurd. Gebruik dit alleen als je geen GTM gebruikt.">
+        <Field label="GA4 Measurement ID" hint="Bijv. G-XXXXXXXXXX">
+          <Inp value={ts.ga4_id} onChange={e => setTs(s => ({ ...s, ga4_id: e.target.value }))} placeholder="G-XXXXXXXXXX" />
+        </Field>
+      </TrackCard>
+
+      {/* ── Google Ads ── */}
+      <TrackCard icon="🎯" title="Google Ads Conversies" active={!!(ts.gads_conversion_id && ts.gads_conversion_label)}
+        hint="Conversie-event 'signup_complete' wordt gefired bij elke nieuwe registratie via de aanmeldflow. Zorg dat de GA4 ID of GTM ID ook ingevuld is zodat gtag beschikbaar is.">
+        <div className="settings-2col">
+          <Field label="Conversion ID" hint="Bijv. AW-123456789">
+            <Inp value={ts.gads_conversion_id} onChange={e => setTs(s => ({ ...s, gads_conversion_id: e.target.value }))} placeholder="AW-123456789" />
+          </Field>
+          <Field label="Conversion Label" hint="Bijv. AbCdEfGhIjKlMnOp">
+            <Inp value={ts.gads_conversion_label} onChange={e => setTs(s => ({ ...s, gads_conversion_label: e.target.value }))} placeholder="AbCdEfGhIjKlMnOp" />
+          </Field>
+        </div>
+      </TrackCard>
+
+      {/* ── Meta (Facebook + Instagram) ── */}
+      <TrackCard icon="🟦" title="Meta Pixel — Facebook & Instagram" active={!!ts.fb_pixel_id}
+        hint="Één Meta Pixel dekt zowel Facebook als Instagram Ads. PageView wordt automatisch gefired. Het 'CompleteRegistration' event wordt getriggerd bij nieuwe aanmeldingen. Gebruik dezelfde pixel ID in Facebook Business Manager en Instagram Ads Manager.">
+        <Field label="Meta Pixel ID" hint="Te vinden in Events Manager → Pixels — bijv. 1234567890123">
+          <Inp value={ts.fb_pixel_id} onChange={e => setTs(s => ({ ...s, fb_pixel_id: e.target.value }))} placeholder="1234567890123456" />
+        </Field>
+        {ts.fb_pixel_id && (
+          <div style={{ fontSize: 12, color: "var(--mx)", padding: "8px 12px", background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: "var(--rd)" }}>
+            ✓ Dekt <strong>Facebook Ads</strong> en <strong>Instagram Ads</strong> via dezelfde pixel — geen aparte code nodig voor Instagram.
+          </div>
+        )}
+      </TrackCard>
+
+      {/* ── TikTok ── */}
+      <TrackCard icon="🎵" title="TikTok Pixel" active={!!ts.tt_pixel_id}
+        hint="TikTok Pixel voor conversion tracking vanuit TikTok Ads. PageView en 'CompleteRegistration' events worden automatisch gefired. Te vinden in TikTok Ads Manager → Assets → Events → Web Events.">
+        <Field label="TikTok Pixel ID" hint="Bijv. CXXXXXXXXXXXXXXX">
+          <Inp value={ts.tt_pixel_id} onChange={e => setTs(s => ({ ...s, tt_pixel_id: e.target.value }))} placeholder="CXXXXXXXXXXXXXXX" />
+        </Field>
+      </TrackCard>
+
+      {/* ── Search Console ── */}
+      <TrackCard icon="🔍" title="Google Search Console" active={false}
+        hint="Verifieer eigenaarschap via DNS-record of HTML-tag in Search Console. Voeg na verificatie de sitemap toe.">
+        <div style={{ fontFamily: "monospace", fontSize: 13, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)", color: "var(--gr)", userSelect: "all" }}>
+          https://woosyncshop.com/sitemap.xml
+        </div>
+        <a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: "var(--pr-h)", textDecoration: "none" }}>
+          → Openen in Search Console ↗
+        </a>
+      </TrackCard>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Btn variant="primary" onClick={save} disabled={saving} style={{ minWidth: 180 }}>
+          {saving ? "Opslaan..." : "Tracking opslaan"}
+        </Btn>
+        {saved && <span style={{ fontSize: 13, color: "#22c55e" }}>✓ Opgeslagen</span>}
+      </div>
+    </div>
+  );
 };
 
 const SystemLogsPanel = () => {

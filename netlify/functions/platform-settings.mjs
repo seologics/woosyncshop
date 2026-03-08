@@ -19,10 +19,10 @@ export default async (req) => {
           isAdmin = user?.email === SUPERADMIN_EMAIL
         } catch {}
       }
-      const selectFields = isAdmin
-        ? 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email'
-        : 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label'
-      const { data, error } = await supabase.from('platform_settings').select(selectFields).eq('id', 1).single()
+      // Public fields (needed by TrackingInjector on frontend without auth)
+      const publicFields = 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, fb_pixel_id, tt_pixel_id'
+      const adminFields = `${publicFields}, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email, openai_api_key, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation`
+      const { data, error } = await supabase.from('platform_settings').select(isAdmin ? adminFields : publicFields).eq('id', 1).single()
       if (error) return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
       return new Response(JSON.stringify(data || {}), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
@@ -36,20 +36,30 @@ export default async (req) => {
       const body = await req.json()
       const {
         gtm_id, ga4_id, gads_conversion_id, gads_conversion_label,
+        fb_pixel_id, tt_pixel_id,
         gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email,
         openai_api_key,
         ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
         ai_model_matching, ai_model_translation,
       } = body
 
-      // Track which keys are being set/cleared for logging
-      const changed = Object.entries({ gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, gemini_api_key: gemini_api_key ? '***' : null, tinypng_api_key: tinypng_api_key ? '***' : null, mollie_api_key: mollie_api_key ? '***' : null, openai_api_key: openai_api_key ? '***' : null, contact_notification_email, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation })
-        .filter(([, v]) => v !== undefined)
-        .map(([k]) => k)
+      const changed = Object.entries({
+        gtm_id, ga4_id, gads_conversion_id, gads_conversion_label,
+        fb_pixel_id, tt_pixel_id,
+        gemini_api_key: gemini_api_key ? '***' : null,
+        tinypng_api_key: tinypng_api_key ? '***' : null,
+        mollie_api_key: mollie_api_key ? '***' : null,
+        openai_api_key: openai_api_key ? '***' : null,
+        contact_notification_email,
+        ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
+        ai_model_matching, ai_model_translation,
+      }).filter(([, v]) => v !== undefined).map(([k]) => k)
 
       const { error: upsertErr } = await supabase.from('platform_settings').upsert({
-        id: 1, gtm_id: gtm_id || null, ga4_id: ga4_id || null,
+        id: 1,
+        gtm_id: gtm_id || null, ga4_id: ga4_id || null,
         gads_conversion_id: gads_conversion_id || null, gads_conversion_label: gads_conversion_label || null,
+        fb_pixel_id: fb_pixel_id || null, tt_pixel_id: tt_pixel_id || null,
         gemini_api_key: gemini_api_key || null, tinypng_api_key: tinypng_api_key || null,
         mollie_api_key: mollie_api_key || null, contact_notification_email: contact_notification_email || null,
         openai_api_key: openai_api_key || null,
