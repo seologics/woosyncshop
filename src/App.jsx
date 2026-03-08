@@ -27,10 +27,10 @@ const NON_EU_COUNTRIES = [
 const ALL_COUNTRIES = [...EU_COUNTRIES, ...NON_EU_COUNTRIES];
 // ─── Pricing Plans ────────────────────────────────────────────────────────────
 const PLANS = {
-  starter:      { id: "starter",      name: "Starter",      sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19  },
-  growth:       { id: "growth",       name: "Growth",       sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79 },
-  pro:          { id: "pro",          name: "Pro",          sites: 10, connected_products: 10000, monthly: 19.99, annual_mo: 17.99 },
-  free_forever: { id: "free_forever", name: "Free Forever", sites: 2,  connected_products: 500,   monthly: 0,     annual_mo: 0     },
+  starter:      { id: "starter",      name: "Starter",      sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19,  img_max_kb: 300,  img_quality: 80, img_max_width: 1200, gemini_model: "gemini-2.0-flash-lite" },
+  growth:       { id: "growth",       name: "Growth",       sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79, img_max_kb: 400,  img_quality: 85, img_max_width: 1600, gemini_model: "gemini-2.0-flash"      },
+  pro:          { id: "pro",          name: "Pro",          sites: 10, connected_products: 10000, monthly: 19.99, annual_mo: 17.99, img_max_kb: 600,  img_quality: 90, img_max_width: 2400, gemini_model: "gemini-2.5-flash-image" },
+  free_forever: { id: "free_forever", name: "Free Forever", sites: 2,  connected_products: 500,   monthly: 0,     annual_mo: 0,     img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: "gemini-2.0-flash-lite" },
 };
 const PLAN_LIST = [PLANS.starter, PLANS.growth, PLANS.pro];
 const ANNUAL_DISCOUNT = 10; // % off monthly
@@ -2376,19 +2376,24 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+      const planLimits = PLANS[u.plan] || PLANS.growth;
+      // Soft ceiling: cap values at 2× plan limit (allows custom overrides but prevents runaway costs)
+      const capKb    = planLimits.img_max_kb * 2;
+      const capQual  = 100;
+      const capWidth = planLimits.img_max_width * 2;
       const payload = {
         id: u.id,
         plan: u.plan,
-        max_shops: u.max_shops ? parseInt(u.max_shops) : (PLANS[u.plan]?.sites || 10),
-        max_connected_products: u.max_connected_products ? parseInt(u.max_connected_products) : (PLANS[u.plan]?.connected_products || 500),
+        max_shops: u.max_shops ? parseInt(u.max_shops) : (planLimits.sites || 10),
+        max_connected_products: u.max_connected_products ? parseInt(u.max_connected_products) : (planLimits.connected_products || 500),
         is_admin: u.is_admin ?? false,
         ai_taxonomy_enabled: u.ai_taxonomy_enabled ?? false,
         ai_taxonomy_model: u.ai_taxonomy_model || "gemini-2.5-flash-image",
         ai_taxonomy_threshold: u.ai_taxonomy_threshold ? parseFloat(u.ai_taxonomy_threshold) : 0.85,
-        gemini_model: u.gemini_model || "gemini-2.5-flash-image",
-        img_max_kb: u.img_max_kb ? parseInt(u.img_max_kb) : 400,
-        img_quality: u.img_quality ? parseInt(u.img_quality) : 85,
-        img_max_width: u.img_max_width ? parseInt(u.img_max_width) : 1200,
+        gemini_model: u.gemini_model || planLimits.gemini_model,
+        img_max_kb:    Math.min(u.img_max_kb    ? parseInt(u.img_max_kb)    : planLimits.img_max_kb,    capKb),
+        img_quality:   Math.min(u.img_quality   ? parseInt(u.img_quality)   : planLimits.img_quality,   capQual),
+        img_max_width: Math.min(u.img_max_width ? parseInt(u.img_max_width) : planLimits.img_max_width, capWidth),
       };
       const res = await fetch("/api/admin-users", {
         method: "PUT",
@@ -2695,20 +2700,40 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
             </div>
             <Divider />
             <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
-            <div className="settings-2col">
-              <Field label="Gemini model">
-                <Sel value={editUser.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[{ value: "gemini-2.5-flash-image", label: "Nano Banana (snel & zuinig)" }, { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2 (hoge efficiëntie)" }, { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro (professioneel)" }]} />
-              </Field>
-              <Field label="Max bestandsgrootte">
-                <Inp value={editUser.img_max_kb} onChange={e => setEditUser(u => ({ ...u, img_max_kb: e.target.value }))} type="number" suffix="KB" />
-              </Field>
-              <Field label="Compressiekwaliteit">
-                <Inp value={editUser.img_quality} onChange={e => setEditUser(u => ({ ...u, img_quality: e.target.value }))} type="number" suffix="%" />
-              </Field>
-              <Field label="Max breedte">
-                <Inp value={editUser.img_max_width} onChange={e => setEditUser(u => ({ ...u, img_max_width: e.target.value }))} type="number" suffix="px" />
-              </Field>
-            </div>
+            {(() => {
+              const planLimits = PLANS[editUser.plan] || PLANS.growth;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                    Plan <strong style={{ color: "var(--pr-h)" }}>{planLimits.name}</strong> — standaard limieten:
+                    model <strong>{planLimits.gemini_model}</strong> · max <strong>{planLimits.img_max_kb} KB</strong> · kwaliteit <strong>{planLimits.img_quality}%</strong> · max breedte <strong>{planLimits.img_max_width}px</strong>
+                  </div>
+                  <div className="settings-2col">
+                    <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
+                      <Sel value={editUser.gemini_model || planLimits.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
+                        { value: "gemini-2.0-flash-lite", label: "Flash Lite — zuinig (Starter/Free)" },
+                        { value: "gemini-2.0-flash",      label: "Flash — gebalanceerd (Growth)" },
+                        { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
+                        { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
+                      ]} />
+                    </Field>
+                    <Field label="Max bestandsgrootte" hint={`Plan max: ${planLimits.img_max_kb} KB`}>
+                      <Inp value={editUser.img_max_kb ?? planLimits.img_max_kb} onChange={e => setEditUser(u => ({ ...u, img_max_kb: e.target.value }))} type="number" suffix="KB" />
+                    </Field>
+                    <Field label="Compressiekwaliteit" hint={`Plan max: ${planLimits.img_quality}%`}>
+                      <Inp value={editUser.img_quality ?? planLimits.img_quality} onChange={e => setEditUser(u => ({ ...u, img_quality: e.target.value }))} type="number" suffix="%" />
+                    </Field>
+                    <Field label="Max breedte" hint={`Plan max: ${planLimits.img_max_width}px`}>
+                      <Inp value={editUser.img_max_width ?? planLimits.img_max_width} onChange={e => setEditUser(u => ({ ...u, img_max_width: e.target.value }))} type="number" suffix="px" />
+                    </Field>
+                  </div>
+                  <Btn variant="ghost" size="sm" style={{ alignSelf: "flex-start", fontSize: 11 }}
+                    onClick={() => setEditUser(u => ({ ...u, gemini_model: planLimits.gemini_model, img_max_kb: planLimits.img_max_kb, img_quality: planLimits.img_quality, img_max_width: planLimits.img_max_width }))}>
+                    ↺ Reset naar plan standaard
+                  </Btn>
+                </div>
+              );
+            })()}
             <Divider />
             <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🧠 AI Taxonomie Vertaling (per gebruiker)</div>
             <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3398,6 +3423,42 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
               <Field label="Nieuw wachtwoord" hint="Laat leeg om het huidig wachtwoord te bewaren"><Inp value={profileForm.password} onChange={e => setProfileForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" /></Field>
             </div>
             <Btn variant="primary" style={{ alignSelf: "flex-start" }} onClick={handleSaveProfile} disabled={profileSaving}>{profileSaving ? "Opslaan..." : "Profiel opslaan"}</Btn>
+
+            {/* Image pipeline config (read-only, set by admin) */}
+            {userProfile && (() => {
+              const planLimits = PLANS[userProfile.plan] || PLANS.growth;
+              const model     = userProfile.gemini_model   || planLimits.gemini_model;
+              const maxKb     = userProfile.img_max_kb     ?? planLimits.img_max_kb;
+              const quality   = userProfile.img_quality    ?? planLimits.img_quality;
+              const maxWidth  = userProfile.img_max_width  ?? planLimits.img_max_width;
+              const modelLabel = {
+                "gemini-2.0-flash-lite":  "Flash Lite",
+                "gemini-2.0-flash":       "Flash",
+                "gemini-2.5-flash-image": "Flash Image",
+                "gemini-2.5-pro":         "Pro",
+              }[model] || model;
+              return (
+                <div style={{ marginTop: 8, padding: 16, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                    🖼️ Image pipeline configuratie
+                    <span style={{ fontSize: 11, fontWeight: 400, color: "var(--dm)" }}>— ingesteld door beheerder</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+                    {[
+                      { label: "Gemini model", value: modelLabel },
+                      { label: "Max bestandsgrootte", value: `${maxKb} KB` },
+                      { label: "Compressiekwaliteit", value: `${quality}%` },
+                      { label: "Max breedte", value: `${maxWidth}px` },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ padding: "10px 12px", background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+                        <div style={{ fontSize: 10, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "var(--pr-h)" }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
         {settingsTab === "support" && (
