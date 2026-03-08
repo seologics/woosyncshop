@@ -111,7 +111,8 @@ export default async (req) => {
     return new Response(JSON.stringify({ invoices: invoiceList || [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
 
-  // Fetch invoice — must belong to this user (or superadmin can access any)\n  let invoice
+  // Fetch invoice — must belong to this user (or superadmin can access any)
+  let invoice
   if (invoiceId) {
     const q = supabase.from('invoices').select('*').eq('id', invoiceId)
     if (!isSuperAdmin) q.eq('user_id', user.id)
