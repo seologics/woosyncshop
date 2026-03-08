@@ -3027,29 +3027,24 @@ const BillingTab = ({ userProfile }) => {
                 <span style={{ fontSize: 12, color: "var(--mx)", flex: 1, marginLeft: 12 }}>{p.description}</span>
                 <span style={{ fontWeight: 600, fontSize: 13, marginRight: 12 }}>{p.amount}</span>
                 <Badge color={statusColor} size="sm">{statusLabel}</Badge>
-                {p.status === "paid" && (() => {
-                  // Find invoice: prefer payment_id match, fallback to most recent invoice for this payment index
-                  const matched = invoices[p.id];
-                  const paidIdx = payments.filter((x, xi) => x.status === "paid" && xi <= payments.indexOf(p)).length - 1;
-                  const fallback = !matched && invoices.__all?.length > 0 ? (invoices.__all[paidIdx] || invoices.__all[0]) : null;
-                  const inv = matched || fallback;
-                  if (!inv) return null;
-                  const invoiceParam = matched ? `payment_id=${p.id}` : `id=${inv.id}`;
-                  return (
-                    <button
-                      onClick={async () => {
-                        const { data: { session } } = await supabase.auth.getSession();
-                        const win = window.open("about:blank", "_blank");
-                        const res = await fetch(`/api/get-invoice?${invoiceParam}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
-                        const html = await res.text();
-                        win.document.write(html); win.document.close();
-                      }}
-                      style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--pr-h)", background: "none", padding: "3px 8px", border: "1px solid var(--pr)", borderRadius: "var(--rd)", whiteSpace: "nowrap", cursor: "pointer" }}
-                    >
-                      ⬇ Factuur
-                    </button>
-                  );
-                })()}
+                {p.status === "paid" && (
+                  <button
+                    onClick={async () => {
+                      const { data: { session } } = await supabase.auth.getSession();
+                      const win = window.open("about:blank", "_blank");
+                      // Always try payment_id first; API creates invoice on demand if missing
+                      const param = p.id ? `payment_id=${p.id}` : invoices.__all?.[0]?.id ? `id=${invoices.__all[0].id}` : null;
+                      if (!param) { win.close(); return; }
+                      const res = await fetch(`/api/get-invoice?${param}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+                      if (!res.ok) { win.document.write("<p>Factuur niet beschikbaar. Probeer het later opnieuw.</p>"); win.document.close(); return; }
+                      const html = await res.text();
+                      win.document.write(html); win.document.close();
+                    }}
+                    style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--pr-h)", background: "none", padding: "3px 8px", border: "1px solid var(--pr)", borderRadius: "var(--rd)", whiteSpace: "nowrap", cursor: "pointer" }}
+                  >
+                    ⬇ Factuur
+                  </button>
+                )}
               </div>
             );
           })}
@@ -3175,7 +3170,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   return (
     <div>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Instellingen</h2>
-      <Tabs tabs={[{ id: "sites", label: "🏪 Mijn shops" }, { id: "ai", label: "🤖 AI Vertaling" }, { id: "billing", label: "💳 Abonnement" }, { id: "profile", label: "👤 Profiel" }]} active={settingsTab} onChange={setSettingsTab} />
+      <Tabs tabs={[{ id: "sites", label: "🏪 Mijn shops" }, { id: "ai", label: "🤖 AI Vertaling" }, { id: "billing", label: "💳 Abonnement" }, { id: "profile", label: "👤 Profiel" }, { id: "support", label: "💬 Support" }]} active={settingsTab} onChange={setSettingsTab} />
       <div style={{ marginTop: 20 }}>
         {settingsTab === "sites" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -3290,6 +3285,34 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
               <Field label="Nieuw wachtwoord" hint="Laat leeg om het huidig wachtwoord te bewaren"><Inp value={profileForm.password} onChange={e => setProfileForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" /></Field>
             </div>
             <Btn variant="primary" style={{ alignSelf: "flex-start" }} onClick={handleSaveProfile} disabled={profileSaving}>{profileSaving ? "Opslaan..." : "Profiel opslaan"}</Btn>
+          </div>
+        )}
+        {settingsTab === "support" && (
+          <div style={{ maxWidth: 640 }}>
+            {/* Quick contact cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
+              {[
+                { icon: "💬", title: "WhatsApp", sub: "Direct antwoord", val: "+31 (0)6 4020 3503", href: "https://wa.me/31640203503", color: "#25D366" },
+                { icon: "📞", title: "Bellen", sub: "Ma–Vr 9:00–18:00", val: "+31 (0)6 4020 3503", href: "tel:+31640203503", color: "var(--pr-h)" },
+                { icon: "📧", title: "E-mail", sub: "Reactie binnen 1 werkdag", val: "info@woosyncshop.com", href: "mailto:info@woosyncshop.com", color: "var(--ac)" },
+              ].map(c => (
+                <a key={c.title} href={c.href} target={c.href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
+                  style={{ textDecoration: "none", padding: "16px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", display: "block", transition: "border-color 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = "var(--b3)"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "var(--b1)"}>
+                  <span style={{ fontSize: 22 }}>{c.icon}</span>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "var(--tx)", marginTop: 8, marginBottom: 2 }}>{c.title}</div>
+                  <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 6 }}>{c.sub}</div>
+                  <div style={{ fontSize: 12, color: c.color, fontWeight: 600 }}>{c.val}</div>
+                </a>
+              ))}
+            </div>
+            {/* Inline support form */}
+            <div style={{ background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", padding: 20 }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Stuur een bericht</div>
+              <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 18 }}>We reageren binnen 1 werkdag.</p>
+              <SupportForm prefillEmail={user?.email || ""} />
+            </div>
           </div>
         )}
       </div>
@@ -4209,10 +4232,16 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
 
         {step === "payment" && <>
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Betaling</h2>
-          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>Start je Pro abonnement</p>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>Start je {PLANS[form.plan]?.name || "Growth"} abonnement</p>
           <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 13, color: "var(--mx)" }}>Woo Sync Shop Pro · 1 maand</span>
-            <span style={{ fontWeight: 700 }}>€{getVatInfo(form.country, form.vat_validated).total}</span>
+            <div>
+              <div style={{ fontSize: 13, color: "var(--mx)" }}>WooSyncShop {PLANS[form.plan]?.name || "Growth"} · {form.billingPeriod === "annual" ? "jaarabonnement" : "maandabonnement"}</div>
+              <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{PLANS[form.plan]?.sites} shops · {(PLANS[form.plan]?.connected_products || 0).toLocaleString("nl-NL")} verbonden producten</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>€{vatInfo.total}</div>
+              <div style={{ fontSize: 10, color: "var(--dm)" }}>incl. BTW</div>
+            </div>
           </div>
           <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 8, fontWeight: 600 }}>Kies betaalmethode</div>
           {methodsLoading ? (
@@ -4255,6 +4284,124 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
 };
 
 // ─── Landing Page ─────────────────────────────────────────────────────────────
+// ─── Welcome View (shown after first payment) ─────────────────────────────────
+const WelcomeView = ({ user, plan, onContinue }) => {
+  const planInfo = PLANS[plan] || PLANS.growth;
+  const STEPS = [
+    { step: "01", icon: "🏪", title: "Verbind je shops", desc: "Ga naar Instellingen → Mijn shops. Voeg je WooCommerce shops toe met je Consumer Key + Secret. Verbind minimaal 2 shops om te synchroniseren." },
+    { step: "02", icon: "🔗", title: "Koppel producten", desc: "Open Verbonden producten. Selecteer een bron- en doelshop. Match via SKU, attribuut of laat ons AI matching doen voor automatische koppeling." },
+    { step: "03", icon: "🔄", title: "Synchroniseer", desc: "Kies welke velden je wilt synchroniseren: naam, beschrijving, prijs, voorraad, afbeeldingen. Klik Sync en alle gekoppelde producten worden bijgewerkt." },
+    { step: "04", icon: "🤖", title: "AI optioneel inschakelen", desc: "Activeer AI Vertaling voor automatische productvertalingen, of gebruik AI Image Optimalisatie voor automatische beeldcompressie en -verbetering." },
+  ];
+  const FEATURES = [
+    { icon: "🔄", title: "Realtime sync", desc: "Sync productnaam, prijs, voorraad, beschrijving en afbeeldingen tussen al je shops met één klik." },
+    { icon: "🤖", title: "AI matching", desc: "Laat Gemini of GPT-4o automatisch producten matchen tussen shops op basis van naam, attributen en beschrijving." },
+    { icon: "🌐", title: "Hreflang manager", desc: "Automatische hreflang-tags voor internationale SEO. Geen WordPress plugin nodig — rechtstreeks via de API." },
+    { icon: "🗣️", title: "AI Vertaling", desc: "Vertaal productteksten automatisch naar de taal van je doelshop. Behoudt opmaak, bullet points en HTML structuur." },
+    { icon: "🖼️", title: "Image pipeline", desc: "Gemini beschrijft je afbeeldingen en TinyPNG comprimeert ze. Max 400KB, maximale kwaliteit, volledig automatisch." },
+    { icon: "📊", title: "Voorraad sync", desc: "Houd voorraad realtime gesynchroniseerd. Ideaal voor shops met dezelfde producten in verschillende regio's." },
+  ];
+
+  return (
+    <div style={{ fontFamily: "var(--font-b)", minHeight: "100vh", background: "var(--bg)", overflowX: "hidden" }}>
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg, rgba(91,91,214,0.15) 0%, transparent 60%)", borderBottom: "1px solid var(--b1)", padding: "32px 32px 28px" }}>
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+            <img src="/woo-sync-shop-logo.png" alt="WooSyncShop" style={{ height: 28 }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <Badge color="green" style={{ marginBottom: 12, display: "inline-flex" }}>✓ Abonnement actief</Badge>
+              <h1 style={{ fontSize: "clamp(28px,4vw,42px)", fontWeight: 800, letterSpacing: "-0.03em", fontFamily: "var(--font-h)", marginBottom: 8, lineHeight: 1.15 }}>
+                Welkom, {user?.name?.split(" ")[0] || "daar"}! 👋
+              </h1>
+              <p style={{ fontSize: 16, color: "var(--mx)", lineHeight: 1.6, marginBottom: 20, maxWidth: 540 }}>
+                Je <strong style={{ color: "var(--pr-h)" }}>{planInfo.name}</strong> abonnement is actief. Je kunt nu tot{" "}
+                <strong style={{ color: "var(--tx)" }}>{planInfo.sites} shops</strong> verbinden en{" "}
+                <strong style={{ color: "var(--tx)" }}>{planInfo.connected_products.toLocaleString("nl-NL")} producten</strong> synchroniseren.
+              </p>
+              <Btn variant="primary" size="lg" onClick={onContinue} style={{ fontSize: 15, padding: "13px 28px" }}>
+                Naar het dashboard →
+              </Btn>
+            </div>
+            {/* Plan card */}
+            <div style={{ background: "var(--s1)", border: "2px solid var(--pr)", borderRadius: "var(--rd-xl)", padding: "20px 24px", minWidth: 200 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>Jouw plan</div>
+              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)", marginBottom: 8 }}>{planInfo.name}</div>
+              {[`🏪 Tot ${planInfo.sites} shops`, `🔗 ${planInfo.connected_products.toLocaleString("nl-NL")} verbonden producten`, "🤖 AI matching inbegrepen", "🌐 Hreflang manager", "📊 Voorraad sync"].map(f => (
+                <div key={f} style={{ fontSize: 12, color: "var(--mx)", marginBottom: 4 }}>{f}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick start */}
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "48px 32px" }}>
+        <h2 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 6 }}>In 4 stappen live</h2>
+        <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 32 }}>Zo synchroniseer je je eerste producten</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16, marginBottom: 56 }}>
+          {STEPS.map((s, i) => (
+            <div key={s.step} style={{ padding: 20, background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", position: "relative" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--pr)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{s.step}</div>
+                <span style={{ fontSize: 20 }}>{s.icon}</span>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>{s.title}</div>
+              <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>{s.desc}</div>
+              {i < STEPS.length - 1 && (
+                <div style={{ position: "absolute", right: -10, top: "50%", transform: "translateY(-50%)", color: "var(--b3)", fontSize: 18, display: "none" }}>→</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Feature deep-dive */}
+        <h2 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 6 }}>Wat zit er onder de motorkap?</h2>
+        <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 32 }}>Elke functie gebouwd voor serieuze WooCommerce ondernemers</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginBottom: 48 }}>
+          {FEATURES.map(f => (
+            <div key={f.title} style={{ padding: 20, background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", transition: "border-color 0.2s, transform 0.2s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--b3)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--b1)"; e.currentTarget.style.transform = "none"; }}>
+              <div style={{ fontSize: 26, marginBottom: 10 }}>{f.icon}</div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{f.title}</div>
+              <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>{f.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Support callout */}
+        <div style={{ padding: 24, background: "linear-gradient(135deg, rgba(91,91,214,0.1), var(--s1))", border: "1px solid rgba(91,91,214,0.25)", borderRadius: "var(--rd-xl)", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", marginBottom: 16 }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Hulp nodig? We zijn er voor je.</div>
+            <div style={{ fontSize: 13, color: "var(--mx)" }}>Stuur een bericht, bel of WhatsApp ons direct — gemiddeld binnen 2 uur reactie.</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <a href="https://wa.me/31640203503" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+              <Btn variant="secondary" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                <span style={{ fontSize: 16 }}>💬</span> WhatsApp
+              </Btn>
+            </a>
+            <a href="tel:+31640203503" style={{ textDecoration: "none" }}>
+              <Btn variant="secondary" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                <span style={{ fontSize: 16 }}>📞</span> Bellen
+              </Btn>
+            </a>
+          </div>
+        </div>
+
+        <div style={{ textAlign: "center", paddingTop: 16 }}>
+          <Btn variant="primary" size="lg" onClick={onContinue} style={{ fontSize: 15, padding: "13px 32px" }}>
+            Aan de slag → Shop toevoegen
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── Landing Pricing Component ────────────────────────────────────────────────
 const LandingPricing = ({ onSignup }) => {
   const [billing, setBilling] = useState("monthly");
@@ -4678,9 +4825,21 @@ const VoorwaardenPage = ({ onBack }) => (
 );
 
 // ─── Contact Page ──────────────────────────────────────────────────────────────
-const ContactPage = ({ onBack }) => {
-  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
-  const [status, setStatus] = useState(null); // null | "sending" | "ok" | "error"
+const SUPPORT_SUBJECTS = [
+  "Technisch probleem",
+  "Factuur / Betaling",
+  "Plan upgrade of downgrade",
+  "Shop verbinding instellen",
+  "Producten koppelen / matching",
+  "AI functies (vertaling, matching)",
+  "Feature verzoek",
+  "Account verwijderen",
+  "Overig",
+];
+
+const SupportForm = ({ prefillEmail = "" }) => {
+  const [form, setForm] = useState({ name: "", email: prefillEmail, subject: SUPPORT_SUBJECTS[0], message: "" });
+  const [status, setStatus] = useState(null);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const send = async () => {
@@ -4693,48 +4852,70 @@ const ContactPage = ({ onBack }) => {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (data.ok) { setStatus("ok"); setForm({ name: "", email: "", subject: "", message: "" }); }
-      else { setStatus("error"); }
+      if (data.ok) { setStatus("ok"); setForm(f => ({ ...f, message: "" })); }
+      else setStatus("error");
     } catch { setStatus("error"); }
   };
 
+  if (status === "ok") return (
+    <div style={{ padding: "24px 20px", background: "var(--gr-l)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--rd-lg)", textAlign: "center" }}>
+      <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>Bericht ontvangen!</div>
+      <div style={{ fontSize: 13, color: "var(--mx)" }}>We reageren binnen 1 werkdag via {form.email}.</div>
+      <Btn variant="secondary" size="sm" onClick={() => setStatus(null)} style={{ marginTop: 14 }}>Nog een vraag</Btn>
+    </div>
+  );
+
   return (
-    <PageLayout title="Contact" onBack={onBack}>
-      <p style={{ marginBottom: 32 }}>Heb je een vraag, een technisch probleem of wil je samenwerken? Stuur ons een bericht en we reageren binnen 1 werkdag.</p>
-      <div className="contact-grid">
-        {/* Info items — shown first on mobile via order */}
-        <div className="contact-info">
-          {[
-            { icon: "📧", title: "E-mail", val: "info@woosyncshop.com", href: "mailto:info@woosyncshop.com" },
-            { icon: "🌐", title: "Website", val: "woosyncshop.com", href: "https://woosyncshop.com" },
-            { icon: "🕐", title: "Reactietijd", val: "Binnen 1 werkdag" },
-            { icon: "📍", title: "Locatie", val: "Nederland" },
-          ].map(({ icon, title, val, href }) => (
-            <div key={title} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-              <div style={{ width: 40, height: 40, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{icon}</div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13, color: "var(--tx)", marginBottom: 2 }}>{title}</div>
-                {href ? <a href={href} style={{ color: "var(--pr-h)", fontSize: 14, textDecoration: "none" }}>{val}</a> : <div style={{ color: "var(--mx)", fontSize: 14 }}>{val}</div>}
-              </div>
-            </div>
-          ))}
-        </div>
-        {/* Form — shown second on mobile */}
-        <div className="contact-form">
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Field label="Naam"><Inp value={form.name} onChange={e => upd("name", e.target.value)} placeholder="Jouw naam" /></Field>
-            <Field label="E-mailadres"><Inp value={form.email} onChange={e => upd("email", e.target.value)} type="email" placeholder="jij@domein.nl" /></Field>
-            <Field label="Onderwerp"><Inp value={form.subject} onChange={e => upd("subject", e.target.value)} placeholder="Bijv. Technisch probleem" /></Field>
-            <Field label="Bericht"><Inp value={form.message} onChange={e => upd("message", e.target.value)} multiline rows={5} placeholder="Beschrijf je vraag of probleem..." /></Field>
-            {status === "ok" && <div style={{ padding: "12px 16px", background: "var(--gr-l)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--gr)" }}>✓ Bericht verzonden! We reageren binnen 1 werkdag.</div>}
-            {status === "error" && <div style={{ padding: "12px 16px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "#ef4444" }}>Versturen mislukt. Probeer het opnieuw of mail ons direct.</div>}
-            <Btn variant="primary" onClick={send} disabled={status === "sending"}>{status === "sending" ? "Verzenden..." : "Bericht sturen →"}</Btn>
-          </div>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="settings-2col">
+        <Field label="Naam *"><Inp value={form.name} onChange={e => upd("name", e.target.value)} placeholder="Jouw naam" /></Field>
+        <Field label="E-mailadres *"><Inp value={form.email} onChange={e => upd("email", e.target.value)} type="email" placeholder="jij@domein.nl" /></Field>
       </div>
-    </PageLayout>
+      <Field label="Onderwerp">
+        <Sel value={form.subject} onChange={e => upd("subject", e.target.value)}
+          options={SUPPORT_SUBJECTS.map(s => ({ value: s, label: s }))} />
+      </Field>
+      <Field label="Bericht *">
+        <Inp value={form.message} onChange={e => upd("message", e.target.value)} multiline rows={5} placeholder="Beschrijf je vraag zo volledig mogelijk..." />
+      </Field>
+      {status === "error" && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "#ef4444" }}>Versturen mislukt. Mail ons op info@woosyncshop.com</div>}
+      <Btn variant="primary" onClick={send} disabled={status === "sending"}>{status === "sending" ? "Verzenden..." : "Bericht sturen →"}</Btn>
+    </div>
   );
 };
+
+const ContactPage = ({ onBack }) => (
+  <PageLayout title="Support & Contact" onBack={onBack}>
+    <p style={{ marginBottom: 32 }}>Heb je een vraag, technisch probleem of wil je je plan aanpassen? We zijn snel bereikbaar.</p>
+
+    {/* Contact options */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 36 }}>
+      {[
+        { icon: "💬", title: "WhatsApp", sub: "Direct antwoord", val: "+31 (0)6 4020 3503", href: "https://wa.me/31640203503", cta: "Open WhatsApp", color: "#25D366" },
+        { icon: "📞", title: "Bellen", sub: "Ma–Vr 9:00–18:00", val: "+31 (0)6 4020 3503", href: "tel:+31640203503", cta: "Bellen", color: "var(--pr-h)" },
+        { icon: "📧", title: "E-mail", sub: "Reactie binnen 1 werkdag", val: "info@woosyncshop.com", href: "mailto:info@woosyncshop.com", cta: "Mailen", color: "var(--ac)" },
+      ].map(c => (
+        <a key={c.title} href={c.href} target={c.href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer"
+          style={{ textDecoration: "none", padding: "18px 20px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", display: "flex", flexDirection: "column", gap: 4, transition: "border-color 0.15s, transform 0.15s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--b3)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--b1)"; e.currentTarget.style.transform = "none"; }}>
+          <span style={{ fontSize: 26, marginBottom: 4 }}>{c.icon}</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: "var(--tx)" }}>{c.title}</span>
+          <span style={{ fontSize: 12, color: "var(--dm)" }}>{c.sub}</span>
+          <span style={{ fontSize: 13, color: c.color, fontWeight: 600, marginTop: 4 }}>{c.val}</span>
+        </a>
+      ))}
+    </div>
+
+    {/* Form */}
+    <div style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", padding: 24 }}>
+      <h3 style={{ fontWeight: 700, marginBottom: 4 }}>Stuur een bericht</h3>
+      <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Vul het formulier in en we reageren via e-mail.</p>
+      <SupportForm />
+    </div>
+  </PageLayout>
+);
 
 // ─── Tracking Admin Tab ────────────────────────────────────────────────────────
 // ─── System Logs Panel ────────────────────────────────────────────────────────
@@ -5386,7 +5567,8 @@ const getPageFromPath = () => {
 
 export default function App() {
   const initPage = getPageFromPath();
-  const [view, setView] = useState(initPage || "loading"); // loading | landing | app | privacy | voorwaarden | contact
+  const [view, setView] = useState(initPage || "loading"); // loading | landing | app | welcome | privacy | voorwaarden | contact
+  const [welcomePlan, setWelcomePlan] = useState(null);
   const [authModal, setAuthModal] = useState(null);
   const [user, setUser] = useState(null);
   const [cookieConsent, setCookieConsent] = useState(() => localStorage.getItem("wss_cookie_consent")); // null | accepted | rejected
@@ -5443,7 +5625,7 @@ export default function App() {
     init();
   }, []);
 
-  const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash === "#payment-return");
+  const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash.startsWith("#payment-return"));
   const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
   const [paymentReturnStatus, setPaymentReturnStatus] = useState("checking"); // checking | paid | pending | failed | cancelled
 
@@ -5518,6 +5700,7 @@ export default function App() {
     );
   }
 
+  if (view === "welcome") return <><G /><WelcomeView user={user} plan={welcomePlan} onContinue={() => setView("app")} /></>;
   if (view === "privacy") return <><G /><PrivacyPage onBack={() => goBack()} /></>;
   if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={() => goBack()} /></>;
   if (view === "contact") return <><G /><ContactPage onBack={() => goBack()} /></>;
@@ -5581,7 +5764,13 @@ export default function App() {
               <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
                 Je account is actief. Factuur is per e-mail verstuurd.
               </p>
-              <Btn variant="primary" onClick={() => { setPaymentReturn(false); setPendingPaymentWall(false); }}>Naar dashboard →</Btn>
+              <Btn variant="primary" onClick={async () => {
+                setPaymentReturn(false); setPendingPaymentWall(false);
+                // Load user profile to get plan, then show welcome page
+                const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
+                setWelcomePlan(profile?.plan || "growth");
+                setView("welcome");
+              }}>Aan de slag →</Btn>
             </>}
             {paymentReturnStatus === "pending" && <>
               <div style={{ fontSize: 44, marginBottom: 16 }}>🕐</div>

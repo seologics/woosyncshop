@@ -56,7 +56,7 @@ function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountEx
     <table>
       <thead><tr><th>Omschrijving</th><th style="text-align:right">Bedrag</th></tr></thead>
       <tbody>
-        <tr><td>WooSyncShop Pro – maandabonnement<br><small style="color:#888">Tot 10 WordPress installaties</small></td><td style="text-align:right">€${amountExcl}</td></tr>
+        <tr><td>WooSyncShop abonnement<br><small style="color:#888">Factuurnummer: ${invoiceNumber}</small></td><td style="text-align:right">€${amountExcl}</td></tr>
       </tbody>
     </table>
     <table class="totals">
@@ -103,6 +103,35 @@ export default async (req) => {
     if (!isSuperAdmin) q.eq('user_id', user.id)
     const { data } = await q.single()
     invoice = data
+  }
+
+  // If no invoice in DB but we have a payment_id, try to create one on the fly
+  if (!invoice && paymentId) {
+    try {
+      const mollieKey = (await supabase.from('platform_settings').select('mollie_api_key').eq('id', 1).single()).data?.mollie_api_key
+      if (mollieKey) {
+        const mpRes = await fetch(`https://api.mollie.com/v2/payments/${paymentId}`, { headers: { Authorization: `Bearer ${mollieKey}` } })
+        const mp = await mpRes.json()
+        if (mp.status === 'paid' && mp.metadata?.supabase_user_id) {
+          const uid = mp.metadata.supabase_user_id
+          // Generate invoice number
+          const year = new Date().getFullYear()
+          const { count } = await supabase.from('invoices').select('*', { count: 'exact', head: true }).like('invoice_number', `WSS-${year}-%`)
+          const seq = String((count || 0) + 1).padStart(4, '0')
+          const invoiceNumber = `WSS-${year}-${seq}`
+          const amount = parseFloat(mp.amount?.value || 0)
+          const vatRate = 21
+          const amountExcl = parseFloat((amount / 1.21).toFixed(2))
+          const vatAmt = parseFloat((amount - amountExcl).toFixed(2))
+          const { data: newInv } = await supabase.from('invoices').insert({
+            user_id: uid, payment_id: paymentId, invoice_number: invoiceNumber,
+            amount, amount_excl_vat: amountExcl, vat_amount: vatAmt, vat_rate: vatRate,
+            issued_at: new Date().toISOString(), paid: true,
+          }).select().single()
+          invoice = newInv
+        }
+      }
+    } catch {}
   }
 
   if (!invoice) return new Response('Invoice not found', { status: 404 })
