@@ -27,9 +27,10 @@ const NON_EU_COUNTRIES = [
 const ALL_COUNTRIES = [...EU_COUNTRIES, ...NON_EU_COUNTRIES];
 // ─── Pricing Plans ────────────────────────────────────────────────────────────
 const PLANS = {
-  starter: { id: "starter", name: "Starter", sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19  },
-  growth:  { id: "growth",  name: "Growth",  sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79 },
-  pro:     { id: "pro",     name: "Pro",     sites: 10, connected_products: 10000, monthly: 19.99, annual_mo: 17.99 },
+  starter:      { id: "starter",      name: "Starter",      sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19  },
+  growth:       { id: "growth",       name: "Growth",       sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79 },
+  pro:          { id: "pro",          name: "Pro",          sites: 10, connected_products: 10000, monthly: 19.99, annual_mo: 17.99 },
+  free_forever: { id: "free_forever", name: "Free Forever", sites: 2,  connected_products: 500,   monthly: 0,     annual_mo: 0     },
 };
 const PLAN_LIST = [PLANS.starter, PLANS.growth, PLANS.pro];
 const ANNUAL_DISCOUNT = 10; // % off monthly
@@ -6099,11 +6100,14 @@ export default function App() {
   const handleSuccess = (userData) => {
     setUser(userData);
     setAuthModal(null);
-    setView("app");
+    // Show welcome page — load plan from profile
+    supabase.from("user_profiles").select("plan").eq("id", userData.id).single()
+      .then(({ data }) => { setWelcomePlan(data?.plan || "free_forever"); })
+      .catch(() => { setWelcomePlan("free_forever"); });
+    setView("welcome");
     try {
       if (window.gtag) window.gtag("event", "signup_complete", { event_category: "conversion" });
       if (window.dataLayer) window.dataLayer.push({ event: "signup_complete" });
-      // GTM conversion tag fires on registration_complete
       window.dataLayer = window.dataLayer || [];
       window.dataLayer.push({ event: "registration_complete" });
     } catch {}
@@ -6135,11 +6139,11 @@ export default function App() {
 
   if (view === "welcome") return <><G /><WelcomeView user={user} plan={welcomePlan}
     onContinue={() => setView("app")}
-    onAddShop={() => { setView("app"); /* settings tab will be set inside Dashboard */ }}
+    onAddShop={() => { window.location.hash = "settings"; setView("app"); }}
     onHowItWorks={() => setView("how-it-works")} /></>;
   if (view === "how-it-works") return <><G /><HowItWorksView
     onBack={() => setView("welcome")}
-    onAddShop={() => setView("app")} /></>;
+    onAddShop={() => { window.location.hash = "settings"; setView("app"); }} /></>;
   if (view === "privacy") return <><G /><PrivacyPage onBack={() => goBack()} /></>;
   if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={() => goBack()} /></>;
   if (view === "contact") return <><G /><ContactPage onBack={() => goBack()} /></>;
