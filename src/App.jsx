@@ -5421,6 +5421,14 @@ const TrackingSettings = () => {
         {!ts.google_connected && (
           <div style={{ marginTop: 10, fontSize: 11, color: "var(--dm)", lineHeight: 1.6 }}>
             Vereist: <strong>GOOGLE_CLIENT_ID</strong> en <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify environment variables (Settings → Environment variables). Stel de OAuth Redirect URI in op <code style={{ background: "var(--s3)", padding: "1px 5px", borderRadius: 3 }}>https://woosyncshop.com/api/google-oauth-callback</code> in Google Cloud Console → APIs & Services → Credentials.
+            <span style={{ display: "inline-block", marginLeft: 8 }}>
+              <a href="/google-tracking-setup.pdf" target="_blank" rel="noopener noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600,
+                  color: "var(--pr-h)", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)",
+                  borderRadius: "var(--rd)", padding: "3px 10px", textDecoration: "none", whiteSpace: "nowrap" }}>
+                📄 Bekijk setup handleiding ↗
+              </a>
+            </span>
           </div>
         )}
       </div>
