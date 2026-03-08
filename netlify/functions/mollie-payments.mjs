@@ -86,7 +86,7 @@ export default async (req) => {
   if (req.method === 'POST') {
     try {
       const body = await req.json()
-      const { email, name, price_total, return_url, method } = body
+      const { email, name, price_total, return_url, method, plan, billing_period } = body
 
       let customerId = null
       const { data: profile } = await supabase.from('user_profiles').select('mollie_customer_id').eq('id', user.id).single()
@@ -102,15 +102,25 @@ export default async (req) => {
         }
       }
 
-      const amount = price_total ? price_total.toString() : '19.99'
+      const PLAN_PRICES = {
+        starter: { monthly: '7.99', annual_mo: '7.19' },
+        growth:  { monthly: '11.99', annual_mo: '10.79' },
+        pro:     { monthly: '19.99', annual_mo: '17.99' },
+      }
+      const planKey = plan && PLAN_PRICES[plan] ? plan : 'growth'
+      const billingKey = billing_period === 'annual' ? 'annual_mo' : 'monthly'
+      const amount = price_total ? price_total.toString() : PLAN_PRICES[planKey][billingKey]
+      const planNames = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
+      const billingLabel = billing_period === 'annual' ? 'jaarabonnement' : 'maandabonnement'
+      const description = `WooSyncShop ${planNames[planKey] || 'Pro'} – ${billingLabel}`
       const paymentBody = {
         amount: { currency: 'EUR', value: parseFloat(amount).toFixed(2) },
-        description: 'WooSyncShop Pro – maandabonnement',
+        description,
         redirectUrl: `${return_url || 'https://woosyncshop.com/#payment-return'}?pid=PENDING`,
         webhookUrl: 'https://woosyncshop.com/api/mollie-webhook',
         customerId,
         sequenceType: 'first',
-        metadata: { supabase_user_id: user.id, plan: 'pro' },
+        metadata: { supabase_user_id: user.id, plan: planKey, billing_period: billing_period || 'monthly' },
       }
       if (method) paymentBody.method = method
 
@@ -121,7 +131,7 @@ export default async (req) => {
         return new Response(JSON.stringify({ error: payment.detail || 'Mollie payment creation failed' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       }
 
-      await supabase.from('user_profiles').update({ mollie_payment_id: payment.id, plan: 'pending_payment' }).eq('id', user.id)
+      await supabase.from('user_profiles').update({ mollie_payment_id: payment.id, plan: 'pending_payment', billing_period: billing_period || 'monthly' }).eq('id', user.id)
       await log(supabase, 'info', 'Mollie checkout created', { user_id: user.id, payment_id: payment.id, amount, method: method || null, customer_id: customerId })
 
       return new Response(JSON.stringify({ checkout_url: payment._links.checkout.href, payment_id: payment.id }), { status: 200, headers: { 'Content-Type': 'application/json' } })

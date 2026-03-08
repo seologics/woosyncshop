@@ -43,9 +43,12 @@ export default async (req) => {
     }
 
     if (payment.status === 'paid') {
-      // Activate the user plan
+      // Activate the correct plan from payment metadata
+      const activatedPlan = ['starter', 'growth', 'pro'].includes(payment.metadata?.plan) ? payment.metadata.plan : 'growth'
+      const billingPeriod = payment.metadata?.billing_period || 'monthly'
       await supabase.from('user_profiles').update({
-        plan: 'pro',
+        plan: activatedPlan,
+        billing_period: billingPeriod,
         mollie_payment_id: paymentId,
         mollie_customer_id: payment.customerId || null,
       }).eq('id', userId)

@@ -25,24 +25,37 @@ const NON_EU_COUNTRIES = [
   { code: "OTHER", name: "Overig", vat: 0 },
 ];
 const ALL_COUNTRIES = [...EU_COUNTRIES, ...NON_EU_COUNTRIES];
-const PRICE_INCL_VAT_NL = 19.99;  // €19,99 incl. 21% BTW for NL
-const NL_VAT_RATE = 21;
-const BASE_PRICE_EXCL = parseFloat((PRICE_INCL_VAT_NL / 1.21).toFixed(4)); // ~16.52 excl.
+// ─── Pricing Plans ────────────────────────────────────────────────────────────
+const PLANS = {
+  starter: { id: "starter", name: "Starter", sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19  },
+  growth:  { id: "growth",  name: "Growth",  sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79 },
+  pro:     { id: "pro",     name: "Pro",     sites: 10, connected_products: 10000, monthly: 19.99, annual_mo: 17.99 },
+};
+const PLAN_LIST = [PLANS.starter, PLANS.growth, PLANS.pro];
+const ANNUAL_DISCOUNT = 10; // % off monthly
 
-const getVatInfo = (countryCode, vatValidated) => {
+const getPlanPrice = (planId, billingPeriod = "monthly") => {
+  const plan = PLANS[planId];
+  if (!plan) return 0;
+  return billingPeriod === "annual" ? plan.annual_mo : plan.monthly;
+};
+
+// priceInclNL = the plan price incl. 21% Dutch VAT (our listed price)
+const getVatInfo = (countryCode, vatValidated, priceInclNL = 19.99) => {
+  const p = parseFloat(priceInclNL) || 19.99;
+  const excl = parseFloat((p / 1.21).toFixed(4));
   const euC = EU_COUNTRIES.find(c => c.code === countryCode);
   if (!countryCode || countryCode === "NL") {
-    // 19.99 is the incl. price; show excl. as breakdown only
-    return { rate: NL_VAT_RATE, excl: BASE_PRICE_EXCL.toFixed(2), total: PRICE_INCL_VAT_NL.toFixed(2) };
+    return { rate: 21, excl: excl.toFixed(2), total: p.toFixed(2) };
   }
   if (euC && vatValidated) {
-    return { rate: 0, excl: BASE_PRICE_EXCL.toFixed(2), total: BASE_PRICE_EXCL.toFixed(2), reverseCharge: true };
+    return { rate: 0, excl: excl.toFixed(2), total: excl.toFixed(2), reverseCharge: true };
   }
   if (euC) {
-    const total = parseFloat((BASE_PRICE_EXCL * (1 + euC.vat / 100)).toFixed(2));
-    return { rate: euC.vat, excl: BASE_PRICE_EXCL.toFixed(2), total: total.toFixed(2) };
+    const total = parseFloat((excl * (1 + euC.vat / 100)).toFixed(2));
+    return { rate: euC.vat, excl: excl.toFixed(2), total: total.toFixed(2) };
   }
-  return { rate: 0, excl: BASE_PRICE_EXCL.toFixed(2), total: BASE_PRICE_EXCL.toFixed(2) };
+  return { rate: 0, excl: excl.toFixed(2), total: excl.toFixed(2) };
 };
 
 
@@ -2418,11 +2431,11 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       {u.vat_number ? <div style={{ color: u.vat_validated ? "var(--gr)" : "var(--mx)" }}>{u.vat_validated ? "✓ " : ""}{u.vat_number}</div> : <span style={{ color: "var(--dm)" }}>—</span>}
                     </div>
                     <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
-                      {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : "Pro"}
+                      {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "⏳ Pending" : PLANS[u.plan]?.name || u.plan || "–"}
                     </Badge>
                     <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
                     <Badge color={u.plan === "free_forever" ? "green" : u.status === "active" ? "green" : "amber"} size="sm">
-                      {u.plan === "free_forever" ? "Free forever" : u.status === "active" ? "Actief" : "In afwachting"}
+                      {u.plan === "free_forever" ? "Free forever" : u.plan === "pending_payment" ? "In afwachting" : u.status === "active" ? "Actief" : "In afwachting"}
                     </Badge>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                       <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>✏</Btn>
@@ -2443,7 +2456,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                     ) : userInvoices.length === 0 ? (
                       <div>
                         <div style={{ color: "var(--dm)", fontSize: 13, padding: "12px 0 20px" }}>Geen facturen gevonden voor deze gebruiker.</div>
-                        {invoiceUser.plan === "pro" && invoiceUser.mollie_payment_id && (
+                        {PLANS[invoiceUser?.plan] && invoiceUser.mollie_payment_id && (
                           <div style={{ background: "rgba(91,91,214,0.08)", border: "1px solid rgba(91,91,214,0.2)", borderRadius: "var(--rd)", padding: "12px 14px", fontSize: 13 }}>
                             <div style={{ fontWeight: 600, marginBottom: 6 }}>Factuur handmatig aanmaken</div>
                             <div style={{ color: "var(--dm)", fontSize: 12, marginBottom: 10 }}>
@@ -2583,7 +2596,14 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
               </div>
             </div>
             <Field label="Plan">
-              <Sel value={editUser.plan} onChange={e => setEditUser(u => ({ ...u, plan: e.target.value }))} options={[{ value: "pro", label: "Pro – €19,99 / maand" }, { value: "free_forever", label: "Free forever (code: freeforever)" }, { value: "suspended", label: "Gesuspendeerd" }]} />
+              <Sel value={editUser.plan} onChange={e => setEditUser(u => ({ ...u, plan: e.target.value }))} options={[
+  { value: "starter", label: "Starter – €7,99 / maand (2 shops, 500 producten)" },
+  { value: "growth",  label: "Growth – €11,99 / maand (5 shops, 2000 producten)" },
+  { value: "pro",     label: "Pro – €19,99 / maand (10 shops, 10k producten)" },
+  { value: "free_forever", label: "Free forever (code: freeforever)" },
+  { value: "suspended", label: "Gesuspendeerd" },
+  { value: "pending_payment", label: "In afwachting betaling" },
+]} />
             </Field>
             <Field label="Max shops (override)" hint="Standaard: 10">
               <Inp value="10" onChange={() => {}} type="number" />
@@ -2917,7 +2937,10 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
 // ─── Billing Tab Component ─────────────────────────────────────────────────────
 const BillingTab = ({ userProfile }) => {
   const isFreeForever = userProfile?.plan === "free_forever";
-  const isPending = userProfile?.plan === "pro" && !userProfile?.mollie_customer_id;
+  const planKey = userProfile?.plan && PLANS[userProfile.plan] ? userProfile.plan : null;
+  const currentPlan = planKey ? PLANS[planKey] : null;
+  const billingPeriod = userProfile?.billing_period || "monthly";
+  const isPending = !isFreeForever && !userProfile?.mollie_customer_id && userProfile?.plan !== "pending_payment";
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [invoices, setInvoices] = useState({}); // keyed by payment_id
@@ -2959,15 +2982,30 @@ const BillingTab = ({ userProfile }) => {
         <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 4 }}>Huidig abonnement</div>
         {isFreeForever ? (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
+        ) : currentPlan ? (
+          <div>
+            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>
+              {currentPlan.name}
+              <span style={{ fontSize: 16, fontWeight: 400, color: "var(--mx)", marginLeft: 10 }}>€{getPlanPrice(planKey, billingPeriod).toFixed(2).replace(".", ",")} / maand</span>
+            </div>
+          </div>
         ) : (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "19,99"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
         )}
-        <div style={{ fontSize: 13, color: "var(--mx)", marginTop: 4 }}>Tot {userProfile?.max_shops || 10} WordPress installaties</div>
+        {currentPlan && (
+          <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12, color: "var(--mx)" }}>
+            <span>🏪 Tot {currentPlan.sites} shops</span>
+            <span>🔗 {currentPlan.connected_products.toLocaleString("nl-NL")} verbonden producten</span>
+            <span>📅 {billingPeriod === "annual" ? "Jaarlijks" : "Maandelijks"}</span>
+          </div>
+        )}
         {isFreeForever
           ? <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Free forever account</Badge>
-          : isPending
+          : userProfile?.plan === "pending_payment"
             ? <Badge color="amber" style={{ marginTop: 8, display: "inline-flex" }}>⏳ Betaling in afwachting</Badge>
-            : <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ Pro · betaald via Mollie</Badge>
+            : currentPlan
+              ? <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ {currentPlan.name} · actief via Mollie</Badge>
+              : <Badge color="amber" style={{ marginTop: 8, display: "inline-flex" }}>⚠ Onbekend plan</Badge>
         }
       </div>
       {!isFreeForever && (
@@ -3844,13 +3882,19 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
 };
 
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
-const AuthModal = ({ mode, onClose, onSuccess }) => {
-  const [step, setStep] = useState(mode === "signup" ? "form" : mode === "reset" ? "reset" : mode === "payment" ? "payment" : "login");
+const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod }) => {
+  const [step, setStep] = useState(
+    mode === "signup" ? (initialPlan ? "form" : "plan") :
+    mode === "reset" ? "reset" :
+    mode === "payment" ? "payment" : "login"
+  );
   const [form, setForm] = useState({
     name: "", email: "", password: "", code: "",
     business_name: "", country: "NL",
     vat_number: "", vat_validated: false, vat_checking: false, vat_error: null,
     address_street: "", address_zip: "", address_city: "",
+    plan: initialPlan || "growth",
+    billingPeriod: initialBillingPeriod || "monthly",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -3891,7 +3935,8 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
     }).catch(() => { useFallback(); setMethodsLoading(false); });
   }, [step]);
   const isFree = form.code.toLowerCase() === "freeforever";
-  const vatInfo = getVatInfo(form.country, form.vat_validated);
+  const planPrice = getPlanPrice(form.plan, form.billingPeriod);
+  const vatInfo = getVatInfo(form.country, form.vat_validated, planPrice);
   const isEUNonNL = EU_COUNTRIES.some(c => c.code === form.country) && form.country !== "NL";
 
   const handleCode = (code) => setForm(f => ({ ...f, code }));
@@ -3924,7 +3969,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
       if (!form.address_city?.trim()) { setError("Vul je stad in."); return; }
       if (!form.country) { setError("Selecteer je land."); return; }
 
-      const vi = getVatInfo(form.country, form.vat_validated);
+      const vi = getVatInfo(form.country, form.vat_validated, getPlanPrice(form.plan, form.billingPeriod));
 
       // Register via server-side API — creates user pre-confirmed, no confirmation email sent
       const res = await fetch("/api/register", {
@@ -3938,7 +3983,8 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
             country: form.country, vat_number: form.vat_number,
             vat_validated: form.vat_validated, address_street: form.address_street,
             address_zip: form.address_zip, address_city: form.address_city,
-            plan: isFree ? "free_forever" : "pro",
+            plan: isFree ? "free_forever" : form.plan,
+            billing_period: form.billingPeriod,
             price_total: vi.total, vat_rate: vi.rate,
           },
         }),
@@ -3963,13 +4009,15 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
         session = data?.session;
       }
       if (!session?.access_token) { setError("Sessie verlopen. Probeer opnieuw in te loggen."); setLoading(false); return; }
-      const vi = getVatInfo(form.country, form.vat_validated);
+      const vi = getVatInfo(form.country, form.vat_validated, getPlanPrice(form.plan, form.billingPeriod));
       const res = await fetch("/api/mollie-payments", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
         body: JSON.stringify({
           email: form.email,
           name: form.name,
+          plan: form.plan,
+          billing_period: form.billingPeriod,
           price_total: vi.total,
           method: selectedMethod,
           return_url: window.location.origin + "/#payment-return",
@@ -4000,13 +4048,49 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
   };
 
   return (
-    <Overlay open onClose={onClose} width={440} title={null}>
+    <Overlay open onClose={onClose} width={step === "plan" ? 700 : 440} title={null}>
       <div style={{ padding: 32 }}>
         {error && (
           <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", marginBottom: 16, fontSize: 13, color: "#ef4444" }}>
             {error}
           </div>
         )}
+
+        {step === "plan" && <>
+          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Kies je plan</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Je kunt op elk moment upgraden of downgraden.</p>
+          {/* Billing toggle */}
+          <div style={{ display: "flex", background: "var(--s2)", borderRadius: "var(--rd)", padding: 3, border: "1px solid var(--b1)", width: "fit-content", marginBottom: 20, gap: 3 }}>
+            {[["monthly", "Maandelijks"], ["annual", `Jaarlijks (-${ANNUAL_DISCOUNT}%)`]].map(([v, label]) => (
+              <button key={v} onClick={() => setForm(f => ({ ...f, billingPeriod: v }))} style={{ padding: "5px 16px", borderRadius: "var(--rd)", border: "none", cursor: "pointer", fontSize: 12, fontWeight: form.billingPeriod === v ? 700 : 400, background: form.billingPeriod === v ? "var(--pr)" : "transparent", color: form.billingPeriod === v ? "#fff" : "var(--mx)", transition: "all 0.15s" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
+            {PLAN_LIST.map(plan => {
+              const price = form.billingPeriod === "annual" ? plan.annual_mo : plan.monthly;
+              const selected = form.plan === plan.id;
+              return (
+                <div key={plan.id} onClick={() => setForm(f => ({ ...f, plan: plan.id }))}
+                  style={{ padding: 16, background: selected ? "var(--pr-l)" : "var(--s2)", border: `2px solid ${selected ? "var(--pr)" : "var(--b1)"}`, borderRadius: "var(--rd-lg)", cursor: "pointer", transition: "all 0.15s" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>{plan.name}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 2 }}>€{price.toFixed(2).replace(".", ",")}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--mx)" }}>/mo</span></div>
+                  <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10 }}>excl. BTW</div>
+                  <div style={{ fontSize: 12, color: "var(--mx)" }}>🏪 {plan.sites} shops</div>
+                  <div style={{ fontSize: 12, color: "var(--mx)" }}>🔗 {plan.connected_products.toLocaleString("nl-NL")} producten</div>
+                  {selected && <div style={{ marginTop: 8, fontSize: 11, color: "var(--pr-h)", fontWeight: 700 }}>✓ Geselecteerd</div>}
+                </div>
+              );
+            })}
+          </div>
+          <Btn variant="primary" size="lg" onClick={() => { setStep("form"); setError(null); }} style={{ width: "100%" }}>
+            Doorgaan met {PLANS[form.plan]?.name} →
+          </Btn>
+          <div style={{ textAlign: "center", marginTop: 12, fontSize: 12, color: "var(--dm)" }}>
+            Al een account? <span onClick={() => { setStep("login"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>Inloggen</span>
+          </div>
+        </>}
 
         {step === "login" && <>
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Welkom terug</h2>
@@ -4052,7 +4136,12 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
         </>}
 
         {step === "form" && <>
-          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Account aanmaken</h2>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 800 }}>Account aanmaken</h2>
+            <div onClick={() => setStep("plan")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--pr-l)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--rd)", cursor: "pointer", fontSize: 12, color: "var(--pr-h)", fontWeight: 600 }}>
+              {PLANS[form.plan]?.name} · €{getPlanPrice(form.plan, form.billingPeriod).toFixed(2).replace(".", ",")} <span style={{ fontSize: 10, opacity: 0.7 }}>✎</span>
+            </div>
+          </div>
           <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Start met het beheren van al jouw webshops</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
             <div className="settings-2col">
@@ -4166,6 +4255,106 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
 };
 
 // ─── Landing Page ─────────────────────────────────────────────────────────────
+// ─── Landing Pricing Component ────────────────────────────────────────────────
+const LandingPricing = ({ onSignup }) => {
+  const [billing, setBilling] = useState("monthly");
+
+  const FEATURES = [
+    ["AI product matching",       [true, true, true]],
+    ["AI taxonomy vertaling",     [true, true, true]],
+    ["Hreflang manager",          [true, true, true]],
+    ["Realtime voorraad sync",    [true, true, true]],
+    ["Marketing & coupons",       [true, true, true]],
+    ["AI image optimalisatie",    [false, true, true]],
+    ["Prioriteit support",        [false, false, true]],
+  ];
+
+  return (
+    <div style={{ padding: "80px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ textAlign: "center", marginBottom: 48 }}>
+        <h2 style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 12 }}>Eerlijke, schaalbare prijzen</h2>
+        <p style={{ fontSize: 16, color: "var(--mx)", marginBottom: 28 }}>Kies het plan dat bij jouw aantal shops past. Geen verborgen kosten.</p>
+        {/* Billing toggle */}
+        <div style={{ display: "inline-flex", background: "var(--s2)", borderRadius: "var(--rd-lg)", padding: 4, border: "1px solid var(--b1)", gap: 4 }}>
+          {[["monthly", "Maandelijks"], ["annual", `Jaarlijks · ${ANNUAL_DISCOUNT}% korting`]].map(([v, label]) => (
+            <button key={v} onClick={() => setBilling(v)} style={{ padding: "7px 20px", borderRadius: "var(--rd)", border: "none", cursor: "pointer", fontSize: 13, fontWeight: billing === v ? 700 : 400, background: billing === v ? "var(--pr)" : "transparent", color: billing === v ? "#fff" : "var(--mx)", transition: "all 0.15s" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20, alignItems: "start" }}>
+        {PLAN_LIST.map((plan, i) => {
+          const price   = billing === "annual" ? plan.annual_mo : plan.monthly;
+          const popular = plan.id === "growth";
+          return (
+            <div key={plan.id} style={{ background: "var(--s1)", border: `2px solid ${popular ? "var(--pr)" : "var(--b1)"}`, borderRadius: "var(--rd-xl)", padding: 28, position: "relative", overflow: "hidden", transition: "transform 0.15s, border-color 0.15s" }}
+              onMouseEnter={e => { if (!popular) e.currentTarget.style.borderColor = "var(--b3)"; e.currentTarget.style.transform = "translateY(-3px)"; }}
+              onMouseLeave={e => { if (!popular) e.currentTarget.style.borderColor = "var(--b1)"; e.currentTarget.style.transform = "none"; }}>
+              {popular && (
+                <>
+                  <div style={{ position: "absolute", top: -40, right: -40, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(91,91,214,0.25) 0%, transparent 70%)", pointerEvents: "none" }} />
+                  <div style={{ position: "absolute", top: 14, right: 14, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "var(--pr)", color: "#fff" }}>POPULAIR</div>
+                </>
+              )}
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{plan.name}</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4, marginBottom: 4 }}>
+                <span style={{ fontSize: 42, fontWeight: 800, fontFamily: "var(--font-h)", letterSpacing: "-0.03em", lineHeight: 1 }}>€{price.toFixed(2).replace(".", ",")}</span>
+                <span style={{ fontSize: 13, color: "var(--mx)", paddingBottom: 6 }}>/mo</span>
+              </div>
+              {billing === "annual" && (
+                <div style={{ fontSize: 12, color: "var(--gr)", marginBottom: 4 }}>✓ Bespaar €{((plan.monthly - plan.annual_mo) * 12).toFixed(2).replace(".", ",")} per jaar</div>
+              )}
+              <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 20 }}>excl. BTW · {billing === "annual" ? "jaarlijks gefactureerd" : "maandelijks gefactureerd"}</div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, fontWeight: 600, color: "var(--tx)" }}>
+                  <span style={{ color: "var(--pr-h)" }}>🏪</span> Tot {plan.sites} shops
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, fontWeight: 600, color: "var(--tx)" }}>
+                  <span style={{ color: "var(--pr-h)" }}>🔗</span> {plan.connected_products.toLocaleString("nl-NL")} verbonden producten
+                </div>
+                {FEATURES.map(([feat, avail]) => (
+                  <div key={feat} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: avail[i] ? "var(--mx)" : "var(--b3)" }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{avail[i] ? "✓" : "–"}</span>
+                    {feat}
+                  </div>
+                ))}
+              </div>
+
+              <Btn variant={popular ? "primary" : "secondary"} size="lg" onClick={() => onSignup(plan.id, billing)} style={{ width: "100%", fontSize: 14 }}>
+                Aan de slag →
+              </Btn>
+            </div>
+          );
+        })}
+
+        {/* Custom plan */}
+        <div style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", padding: 28 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Custom</div>
+          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 4, letterSpacing: "-0.02em" }}>Op maat</div>
+          <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 20 }}>Meer dan 10 shops of enterprise wensen?</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
+            {["Onbeperkt shops", "Onbeperkt producten", "SLA + uptime garantie", "Dedicated support", "Custom integraties"].map(f => (
+              <div key={f} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--mx)" }}>
+                <span style={{ fontWeight: 700, color: "var(--pr-h)" }}>✓</span> {f}
+              </div>
+            ))}
+          </div>
+          <a href="https://calendly.com/woosyncshop/demo" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+            <Btn variant="secondary" size="lg" style={{ width: "100%", fontSize: 14 }}>Inplannen →</Btn>
+          </a>
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 28, fontSize: 12, color: "var(--dm)" }}>
+        Heb je een kortingscode? Die voer je in bij registratie. · Alle prijzen excl. BTW.
+      </div>
+    </div>
+  );
+};
+
 const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
   const FEATURES = [
     { icon: "🏪", title: "Multi-shop dashboard", desc: "Beheer al jouw WooCommerce shops vanuit één overzichtelijk dashboard. Schakel moeiteloos tussen shops." },
@@ -4248,25 +4437,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
       </div>
 
       {/* Pricing */}
-      <div style={{ padding: "80px 32px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
-        <h2 style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 12 }}>Simpele, eerlijke prijs</h2>
-        <p style={{ fontSize: 16, color: "var(--mx)", marginBottom: 40 }}>Één plan, geen verborgen kosten</p>
-        <div style={{ background: "var(--s1)", border: "1px solid var(--b2)", borderRadius: "var(--rd-xl)", padding: 36, position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", top: -60, right: -60, width: 180, height: 180, borderRadius: "50%", background: "radial-gradient(circle, rgba(91,91,214,0.25) 0%, transparent 70%)" }} />
-          <Badge color="blue" style={{ marginBottom: 20, display: "inline-flex" }}>Meest populair</Badge>
-          <div style={{ fontSize: 48, fontWeight: 800, fontFamily: "var(--font-h)", letterSpacing: "-0.03em" }}>€19,99 <span style={{ fontSize: 18, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
-          <div style={{ margin: "20px 0", display: "flex", flexDirection: "column", gap: 10, textAlign: "left" }}>
-            {["Tot 10 WordPress installaties", "Onbeperkte producten", "AI image optimalisatie", "Hreflang manager inbegrepen", "Realtime voorraadsynchronisatie", "Transactionele e-mails"].map(f => (
-              <div key={f} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 14 }}>
-                <span style={{ color: "var(--gr)", fontWeight: 700, fontSize: 15 }}>✓</span>
-                <span style={{ color: "var(--mx)" }}>{f}</span>
-              </div>
-            ))}
-          </div>
-          <Btn variant="primary" size="lg" onClick={onSignup} style={{ width: "100%", marginTop: 8, fontSize: 15 }}>Nu starten →</Btn>
-          <div style={{ marginTop: 14, fontSize: 12, color: "var(--dm)" }}>Heb je een kortingscode? Die voer je in bij registratie.</div>
-        </div>
-      </div>
+      <LandingPricing onSignup={onSignup} />
 
       {/* Footer */}
       <div className="landing-footer">
@@ -4579,29 +4750,73 @@ const TrackingSettings = () => {
     gtm_id: "", ga4_id: "",
     gads_conversion_id: "", gads_conversion_label: "",
     fb_pixel_id: "", tt_pixel_id: "",
+    google_connected: false, google_connected_email: null,
   });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [saved, setSaved]       = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [googleData, setGoogleData] = useState(null); // { gtm:[], ga4:[], gads:[], gads_note }
+  const [fetchError, setFetchError] = useState(null);
+
+  // Load current settings
+  const load = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/platform-settings", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+      const d = await res.json();
+      setTs({
+        gtm_id: d.gtm_id || "",
+        ga4_id: d.ga4_id || "",
+        gads_conversion_id: d.gads_conversion_id || "",
+        gads_conversion_label: d.gads_conversion_label || "",
+        fb_pixel_id: d.fb_pixel_id || "",
+        tt_pixel_id: d.tt_pixel_id || "",
+        google_connected: !!d.google_connected,
+        google_connected_email: d.google_connected_email || null,
+      });
+    } catch {} finally { setLoading(false); }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const res = await fetch("/api/platform-settings", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
-        const d = await res.json();
-        setTs({
-          gtm_id: d.gtm_id || "",
-          ga4_id: d.ga4_id || "",
-          gads_conversion_id: d.gads_conversion_id || "",
-          gads_conversion_label: d.gads_conversion_label || "",
-          fb_pixel_id: d.fb_pixel_id || "",
-          tt_pixel_id: d.tt_pixel_id || "",
-        });
-      } catch {} finally { setLoading(false); }
-    };
     load();
+    // Handle OAuth redirect back with ?google_oauth=success/error
+    const params = new URLSearchParams(window.location.search);
+    const oauthResult = params.get("google_oauth");
+    if (oauthResult === "success") {
+      window.history.replaceState({}, "", window.location.pathname);
+      load(); // reload to get connected email
+    } else if (oauthResult === "error") {
+      const reason = params.get("reason") || "Onbekende fout";
+      setFetchError(`Google koppeling mislukt: ${reason}`);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
+
+  // After connecting, fetch GTM/GA4/Ads data from Google APIs
+  const fetchGoogleData = async () => {
+    setFetching(true);
+    setFetchError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/google-tracking-fetch", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+      const d = await res.json();
+      if (d.error === "not_connected") { setFetchError("Nog niet gekoppeld met Google."); return; }
+      if (d.error) throw new Error(d.error);
+      setGoogleData(d);
+    } catch (e) { setFetchError(e.message); }
+    finally { setFetching(false); }
+  };
+
+  const disconnect = async () => {
+    if (!confirm("Google koppeling verwijderen?")) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch("/api/google-tracking-disconnect", { method: "POST", headers: { "Authorization": `Bearer ${session?.access_token}` } });
+      setTs(s => ({ ...s, google_connected: false, google_connected_email: null }));
+      setGoogleData(null);
+    } catch (e) { alert(e.message); }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -4618,16 +4833,14 @@ const TrackingSettings = () => {
     finally { setSaving(false); }
   };
 
-  const TrackCard = ({ icon, title, hint, active, children }) => (
-    <div style={{ border: `1px solid ${active ? "rgba(99,102,241,0.35)" : "var(--b1)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: active ? "rgba(99,102,241,0.03)" : "var(--s1)" }}>
+  const TrackCard = ({ icon, title, hint, active, children, noBadge }) => (
+    <div style={{ border: `1px solid ${active ? "rgba(99,102,241,0.35)" : "var(--b1)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
       <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
-          <span>{icon}</span>{title}
-        </div>
-        {active
+        <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}><span>{icon}</span>{title}</div>
+        {!noBadge && (active
           ? <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(34,197,94,0.15)", color: "#22c55e", fontWeight: 700 }}>● ACTIEF</span>
           : <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "var(--s3)", color: "var(--dm)", fontWeight: 600 }}>NIET INGESTELD</span>
-        }
+        )}
       </div>
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         {hint && <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)" }}>{hint}</div>}
@@ -4636,64 +4849,161 @@ const TrackingSettings = () => {
     </div>
   );
 
+  const DropdownSelect = ({ label, hint, value, onChange, options, placeholder }) => (
+    <Field label={label} hint={hint}>
+      <Sel
+        value={value}
+        onChange={onChange}
+        options={[
+          { value: "", label: placeholder || "— Selecteer —" },
+          ...options.map(o => ({ value: o.id, label: o.label })),
+        ]}
+      />
+    </Field>
+  );
+
   if (loading) return <div style={{ padding: 20, color: "var(--mx)", fontSize: 13 }}>Laden...</div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 700 }}>
 
-      {/* ── Google Tag Manager ── */}
+      {/* ── Google OAuth Connect ── */}
+      <div style={{ padding: 16, borderRadius: "var(--rd-lg)", border: `2px solid ${ts.google_connected ? "rgba(34,197,94,0.4)" : "rgba(99,102,241,0.3)"}`, background: ts.google_connected ? "rgba(34,197,94,0.04)" : "rgba(99,102,241,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>
+                {ts.google_connected ? "✓ Gekoppeld met Google" : "Koppel met Google"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 2 }}>
+                {ts.google_connected
+                  ? <>Account: <strong style={{ color: "var(--tx)" }}>{ts.google_connected_email}</strong> · GTM, GA4 en Google Ads worden opgehaald</>
+                  : "Eenmalig inloggen → automatisch GTM containers, GA4 properties en Google Ads accounts ophalen"
+                }
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            {ts.google_connected ? (
+              <>
+                <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching}>
+                  {fetching ? "↻ Ophalen..." : "↻ Vernieuwen"}
+                </Btn>
+                <Btn variant="ghost" size="sm" onClick={disconnect} style={{ color: "var(--re)" }}>
+                  Ontkoppelen
+                </Btn>
+              </>
+            ) : (
+              <a href="/api/google-oauth-init" style={{ textDecoration: "none" }}>
+                <Btn variant="primary" size="sm" icon={
+                  <svg width="14" height="14" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/></svg>
+                }>
+                  Koppelen met Google
+                </Btn>
+              </a>
+            )}
+          </div>
+        </div>
+        {fetchError && <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>⚠ {fetchError}</div>}
+        {!ts.google_connected && (
+          <div style={{ marginTop: 10, fontSize: 11, color: "var(--dm)", lineHeight: 1.6 }}>
+            Vereist: <strong>GOOGLE_CLIENT_ID</strong> en <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify environment variables (Settings → Environment variables). Stel de OAuth Redirect URI in op <code style={{ background: "var(--s3)", padding: "1px 5px", borderRadius: 3 }}>https://woosyncshop.com/api/google-oauth-callback</code> in Google Cloud Console → APIs & Services → Credentials.
+          </div>
+        )}
+      </div>
+
+      {/* ── GTM ── */}
       <TrackCard icon="📊" title="Google Tag Manager" active={!!ts.gtm_id}
-        hint="GTM is de aanbevolen methode. Voeg via GTM GA4, Google Ads en andere tags toe zonder code-aanpassingen. GTM laadt automatisch voor bezoekers die cookies accepteren.">
-        <Field label="GTM Container ID" hint="Bijv. GTM-XXXXXXX">
-          <Inp value={ts.gtm_id} onChange={e => setTs(s => ({ ...s, gtm_id: e.target.value }))} placeholder="GTM-XXXXXXX" />
-        </Field>
+        hint="GTM is de aanbevolen aanpak. Alle andere Google tags (GA4, Ads) kun je dan via GTM beheren zonder code-aanpassingen.">
+        {googleData?.gtm?.length > 0 ? (
+          <DropdownSelect
+            label="GTM Container" hint="Geselecteerde container wordt automatisch geladen"
+            value={ts.gtm_id} onChange={v => setTs(s => ({ ...s, gtm_id: v }))}
+            options={googleData.gtm} placeholder="— Selecteer container —"
+          />
+        ) : (
+          <Field label="GTM Container ID" hint="Bijv. GTM-XXXXXXX — of koppel Google hierboven om containers op te halen">
+            <Inp value={ts.gtm_id} onChange={e => setTs(s => ({ ...s, gtm_id: e.target.value }))} placeholder="GTM-XXXXXXX" />
+          </Field>
+        )}
+        {googleData?.gtm_error && <div style={{ fontSize: 11, color: "var(--am)" }}>⚠ GTM ophalen mislukt: {googleData.gtm_error}</div>}
       </TrackCard>
 
       {/* ── GA4 ── */}
       <TrackCard icon="📈" title="Google Analytics 4" active={!!ts.ga4_id}
-        hint="Directe GA4 integratie (zonder GTM). Gebruikt gtag.js — pageviews en events worden automatisch doorgestuurd. Gebruik dit alleen als je geen GTM gebruikt.">
-        <Field label="GA4 Measurement ID" hint="Bijv. G-XXXXXXXXXX">
-          <Inp value={ts.ga4_id} onChange={e => setTs(s => ({ ...s, ga4_id: e.target.value }))} placeholder="G-XXXXXXXXXX" />
-        </Field>
+        hint="Directe GA4 integratie via gtag.js. Gebruik dit als je geen GTM gebruikt.">
+        {googleData?.ga4?.length > 0 ? (
+          <DropdownSelect
+            label="GA4 Property" hint="Measurement ID wordt automatisch ingevuld"
+            value={ts.ga4_id} onChange={v => setTs(s => ({ ...s, ga4_id: v }))}
+            options={googleData.ga4} placeholder="— Selecteer property —"
+          />
+        ) : (
+          <Field label="GA4 Measurement ID" hint="Bijv. G-XXXXXXXXXX — of koppel Google hierboven om properties op te halen">
+            <Inp value={ts.ga4_id} onChange={e => setTs(s => ({ ...s, ga4_id: e.target.value }))} placeholder="G-XXXXXXXXXX" />
+          </Field>
+        )}
+        {googleData?.ga4_error && <div style={{ fontSize: 11, color: "var(--am)" }}>⚠ GA4 ophalen mislukt: {googleData.ga4_error}</div>}
       </TrackCard>
 
       {/* ── Google Ads ── */}
       <TrackCard icon="🎯" title="Google Ads Conversies" active={!!(ts.gads_conversion_id && ts.gads_conversion_label)}
-        hint="Conversie-event 'signup_complete' wordt gefired bij elke nieuwe registratie via de aanmeldflow. Zorg dat de GA4 ID of GTM ID ook ingevuld is zodat gtag beschikbaar is.">
-        <div className="settings-2col">
-          <Field label="Conversion ID" hint="Bijv. AW-123456789">
-            <Inp value={ts.gads_conversion_id} onChange={e => setTs(s => ({ ...s, gads_conversion_id: e.target.value }))} placeholder="AW-123456789" />
-          </Field>
-          <Field label="Conversion Label" hint="Bijv. AbCdEfGhIjKlMnOp">
-            <Inp value={ts.gads_conversion_label} onChange={e => setTs(s => ({ ...s, gads_conversion_label: e.target.value }))} placeholder="AbCdEfGhIjKlMnOp" />
-          </Field>
-        </div>
-      </TrackCard>
-
-      {/* ── Meta (Facebook + Instagram) ── */}
-      <TrackCard icon="🟦" title="Meta Pixel — Facebook & Instagram" active={!!ts.fb_pixel_id}
-        hint="Één Meta Pixel dekt zowel Facebook als Instagram Ads. PageView wordt automatisch gefired. Het 'CompleteRegistration' event wordt getriggerd bij nieuwe aanmeldingen. Gebruik dezelfde pixel ID in Facebook Business Manager en Instagram Ads Manager.">
-        <Field label="Meta Pixel ID" hint="Te vinden in Events Manager → Pixels — bijv. 1234567890123">
-          <Inp value={ts.fb_pixel_id} onChange={e => setTs(s => ({ ...s, fb_pixel_id: e.target.value }))} placeholder="1234567890123456" />
-        </Field>
-        {ts.fb_pixel_id && (
-          <div style={{ fontSize: 12, color: "var(--mx)", padding: "8px 12px", background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: "var(--rd)" }}>
-            ✓ Dekt <strong>Facebook Ads</strong> en <strong>Instagram Ads</strong> via dezelfde pixel — geen aparte code nodig voor Instagram.
+        hint="Conversie-event wordt gefired bij elke nieuwe registratie. Zorg dat GTM of GA4 ook ingesteld is.">
+        {googleData?.gads?.length > 0 ? (
+          <DropdownSelect
+            label="Conversie actie" hint="Conversion ID en label worden automatisch ingevuld"
+            value={ts.gads_conversion_id}
+            onChange={v => {
+              const match = googleData.gads.find(g => g.conversion_id === v);
+              setTs(s => ({ ...s, gads_conversion_id: match?.conversion_id || v, gads_conversion_label: match?.conversion_label || "" }));
+            }}
+            options={googleData.gads.map(g => ({ id: g.conversion_id, label: g.label }))}
+            placeholder="— Selecteer conversie actie —"
+          />
+        ) : (
+          <div className="settings-2col">
+            <Field label="Conversion ID" hint="Bijv. AW-123456789">
+              <Inp value={ts.gads_conversion_id} onChange={e => setTs(s => ({ ...s, gads_conversion_id: e.target.value }))} placeholder="AW-123456789" />
+            </Field>
+            <Field label="Conversion Label" hint="Bijv. AbCdEfGhIjKlMnOp">
+              <Inp value={ts.gads_conversion_label} onChange={e => setTs(s => ({ ...s, gads_conversion_label: e.target.value }))} placeholder="AbCdEfGhIjKlMnOp" />
+            </Field>
+          </div>
+        )}
+        {googleData?.gads_note && (
+          <div style={{ fontSize: 12, color: "var(--mx)", padding: "8px 12px", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: "var(--rd)" }}>
+            ⚠ {googleData.gads_note}
+          </div>
+        )}
+        {googleData?.gads_error && <div style={{ fontSize: 11, color: "var(--am)" }}>⚠ Google Ads ophalen mislukt: {googleData.gads_error}</div>}
+        {(ts.gads_conversion_id || ts.gads_conversion_label) && (
+          <div style={{ fontSize: 11, color: "var(--dm)", padding: "6px 10px", background: "var(--s3)", borderRadius: "var(--rd)" }}>
+            Ingesteld: <code>{ts.gads_conversion_id}/{ts.gads_conversion_label}</code>
           </div>
         )}
       </TrackCard>
 
+      {/* ── Meta Pixel ── */}
+      <TrackCard icon="🟦" title="Meta Pixel — Facebook & Instagram" active={!!ts.fb_pixel_id}
+        hint="Één pixel dekt Facebook én Instagram Ads. PageView wordt automatisch gefired. CompleteRegistration bij nieuwe aanmeldingen.">
+        <Field label="Meta Pixel ID" hint="Events Manager → Pixels in Facebook Business Manager">
+          <Inp value={ts.fb_pixel_id} onChange={e => setTs(s => ({ ...s, fb_pixel_id: e.target.value }))} placeholder="1234567890123456" />
+        </Field>
+      </TrackCard>
+
       {/* ── TikTok ── */}
       <TrackCard icon="🎵" title="TikTok Pixel" active={!!ts.tt_pixel_id}
-        hint="TikTok Pixel voor conversion tracking vanuit TikTok Ads. PageView en 'CompleteRegistration' events worden automatisch gefired. Te vinden in TikTok Ads Manager → Assets → Events → Web Events.">
+        hint="TikTok Ads Manager → Assets → Events → Web Events. PageView + CompleteRegistration worden automatisch gefired.">
         <Field label="TikTok Pixel ID" hint="Bijv. CXXXXXXXXXXXXXXX">
           <Inp value={ts.tt_pixel_id} onChange={e => setTs(s => ({ ...s, tt_pixel_id: e.target.value }))} placeholder="CXXXXXXXXXXXXXXX" />
         </Field>
       </TrackCard>
 
       {/* ── Search Console ── */}
-      <TrackCard icon="🔍" title="Google Search Console" active={false}
-        hint="Verifieer eigenaarschap via DNS-record of HTML-tag in Search Console. Voeg na verificatie de sitemap toe.">
+      <TrackCard icon="🔍" title="Google Search Console" noBadge hint="Verifieer eigenaarschap via DNS-record of HTML-tag. Voeg na verificatie de sitemap toe.">
         <div style={{ fontFamily: "monospace", fontSize: 13, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)", color: "var(--gr)", userSelect: "all" }}>
           https://woosyncshop.com/sitemap.xml
         </div>
@@ -4708,6 +5018,7 @@ const TrackingSettings = () => {
         </Btn>
         {saved && <span style={{ fontSize: 13, color: "#22c55e" }}>✓ Opgeslagen</span>}
       </div>
+
     </div>
   );
 };
@@ -5153,7 +5464,7 @@ export default function App() {
         });
         const data = await res.json();
         const mollieStatus = data.status; // paid | open | canceled | expired | failed | pending
-        if (mollieStatus === "paid" || data.plan === "pro" || data.plan === "free_forever") {
+        if (mollieStatus === "paid" || data.plan === "free_forever" || (data.plan && PLANS[data.plan])) {
           setPaymentReturnStatus("paid");
           sessionStorage.removeItem("wss_pending_payment_id");
           // Auto-dismiss after 5s
@@ -5217,8 +5528,8 @@ export default function App() {
       <TrackingInjector consent={cookieConsent} />
       {view === "landing" && (
         <LandingPage
-          onLogin={() => setAuthModal("login")}
-          onSignup={() => setAuthModal("signup")}
+          onLogin={() => setAuthModal({ mode: "login" })}
+          onSignup={(plan, billingPeriod) => setAuthModal({ mode: "signup", plan: plan || "growth", billingPeriod: billingPeriod || "monthly" })}
           onPage={goPage}
         />
       )}
@@ -5239,14 +5550,16 @@ export default function App() {
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
               <Btn variant="secondary" onClick={handleLogout}>Uitloggen</Btn>
-              <Btn variant="primary" onClick={() => { setPendingPaymentWall(false); setAuthModal("payment"); }}>Betaling voltooien →</Btn>
+              <Btn variant="primary" onClick={() => { setPendingPaymentWall(false); setAuthModal({ mode: "payment" }); }}>Betaling voltooien →</Btn>
             </div>
           </div>
         </div>
       )}
       {authModal && (
         <AuthModal
-          mode={authModal}
+          mode={typeof authModal === "string" ? authModal : authModal?.mode}
+          initialPlan={authModal?.plan}
+          initialBillingPeriod={authModal?.billingPeriod}
           onClose={() => setAuthModal(null)}
           onSuccess={handleSuccess}
         />
@@ -5286,7 +5599,7 @@ export default function App() {
               </p>
               <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
                 <Btn variant="secondary" onClick={() => { setPaymentReturn(false); }}>Sluiten</Btn>
-                <Btn variant="primary" onClick={() => { setPaymentReturn(false); setAuthModal("payment"); }}>Opnieuw betalen →</Btn>
+                <Btn variant="primary" onClick={() => { setPaymentReturn(false); setAuthModal({ mode: "payment" }); }}>Opnieuw betalen →</Btn>
               </div>
             </>}
           </div>
