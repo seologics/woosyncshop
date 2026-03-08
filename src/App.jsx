@@ -4650,22 +4650,54 @@ const SystemLogsPanel = () => {
 };
 
 // ─── Platform Settings Component ──────────────────────────────────────────────
+// Use-cases that actually make AI calls (normalization is pure JS, excluded)
 const AI_USE_CASES = [
-  { id: "matching",     label: "🔍 Product matching",         hint: "AI scan to find equivalent products across shops" },
-  { id: "translation",  label: "🌐 Taxonomy vertaling",       hint: "Categories & attributes vertalen bij sync" },
-  { id: "image",        label: "🖼 Afbeelding optimalisatie", hint: "Gemini resize voor TinyPNG compressie" },
-  { id: "normalization",label: "📐 Eenheid normalisatie",     hint: "Eenheden normaliseren bij matching (125cm = 1.25m)" },
+  { id: "matching",    label: "🔍 Product matching",         hint: "AI scan to find equivalent products across shops" },
+  { id: "translation", label: "🌐 Taxonomy vertaling",       hint: "Categories & attributes vertalen bij sync" },
+  { id: "image",       label: "🖼 Afbeelding optimalisatie", hint: "Gemini resize voor TinyPNG compressie", geminiOnly: true },
 ];
 
-const ProviderToggle = ({ value, onChange }) => (
+const GEMINI_MODELS = [
+  { value: "gemini-2.0-flash",      label: "gemini-2.0-flash (standaard)" },
+  { value: "gemini-2.0-flash-lite", label: "gemini-2.0-flash-lite (snel/goedkoop)" },
+  { value: "gemini-1.5-pro",        label: "gemini-1.5-pro (krachtig)" },
+  { value: "gemini-1.5-flash",      label: "gemini-1.5-flash" },
+];
+const OPENAI_MODELS = [
+  { value: "gpt-4o-mini",   label: "gpt-4o-mini (standaard)" },
+  { value: "gpt-4o",        label: "gpt-4o (krachtig)" },
+  { value: "gpt-4-turbo",   label: "gpt-4-turbo" },
+  { value: "gpt-3.5-turbo", label: "gpt-3.5-turbo (snel/goedkoop)" },
+];
+
+const ProviderToggle = ({ value, onChange, geminiOnly = false }) => (
   <div style={{ display: "flex", borderRadius: "var(--rd)", overflow: "hidden", border: "1px solid var(--b2)", width: "fit-content" }}>
-    {["gemini", "openai"].map(opt => (
-      <button key={opt} onClick={() => onChange(opt)} style={{ padding: "5px 14px", fontSize: 12, fontWeight: value === opt ? 700 : 400, background: value === opt ? "var(--pr)" : "transparent", color: value === opt ? "#fff" : "var(--mx)", border: "none", cursor: "pointer", transition: "all 0.15s" }}>
-        {opt === "gemini" ? "✦ Gemini" : "⬡ OpenAI"}
-      </button>
-    ))}
+    {["gemini", "openai"].map(opt => {
+      const disabled = geminiOnly && opt === "openai";
+      return (
+        <button key={opt} onClick={() => !disabled && onChange(opt)} style={{ padding: "5px 14px", fontSize: 12, fontWeight: value === opt ? 700 : 400, background: value === opt ? "var(--pr)" : "transparent", color: value === opt ? "#fff" : disabled ? "var(--b3)" : "var(--mx)", border: "none", cursor: disabled ? "not-allowed" : "pointer", transition: "all 0.15s" }} title={disabled ? "Image pipeline gebruikt altijd Gemini" : undefined}>
+          {opt === "gemini" ? "✦ Gemini" : "⬡ OpenAI"}
+        </button>
+      );
+    })}
   </div>
 );
+
+const ModelSelect = ({ provider, value, onChange, label, hint }) => {
+  const models = provider === "openai" ? OPENAI_MODELS : GEMINI_MODELS;
+  return (
+    <Field label={label} hint={hint}>
+      <Sel
+        value={value || ""}
+        onChange={v => onChange(v)}
+        options={[
+          { value: "", label: `— Standaard (${provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash"}) —` },
+          ...models.map(m => ({ value: m.value, label: m.label })),
+        ]}
+      />
+    </Field>
+  );
+};
 
 const PlatformSettings = () => {
   const [ps, setPs] = useState({
@@ -4750,6 +4782,9 @@ const PlatformSettings = () => {
           <Field label="OpenAI API Key" hint={hasOpenAI ? "✓ Ingesteld" : "Geen key → OpenAI use-cases uitgeschakeld"}>
             <Inp value={ps.openai_api_key} onChange={e => setPs(p => ({ ...p, openai_api_key: e.target.value }))} type="password" placeholder="sk-..." />
           </Field>
+          <Field label="TinyPNG API Key" hint="Gebruikt voor afbeelding compressie na Gemini resize">
+            <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="password" placeholder="abcdef..." />
+          </Field>
         </div>
       </div>
 
@@ -4774,7 +4809,7 @@ const PlatformSettings = () => {
                   {current === "openai" && !hasOpenAI && (
                     <span style={{ fontSize: 11, color: "var(--am)", background: "rgba(234,179,8,0.1)", padding: "2px 7px", borderRadius: 10 }}>⚠ key ontbreekt</span>
                   )}
-                  <ProviderToggle value={current} onChange={v => setPs(p => ({ ...p, [provKey]: v }))} />
+                  <ProviderToggle value={current} onChange={v => setPs(p => ({ ...p, [provKey]: v }))} geminiOnly={uc.geminiOnly} />
                 </div>
               </div>
             );
@@ -4783,30 +4818,27 @@ const PlatformSettings = () => {
 
         {/* Model overrides */}
         <div style={{ marginTop: 14, padding: "12px 14px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "var(--mx)" }}>Model overrides <span style={{ fontWeight: 400 }}>(optioneel — leeg = standaard model per provider)</span></div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "var(--mx)" }}>Model selectie <span style={{ fontWeight: 400 }}>(optioneel — standaard = snelste model per provider)</span></div>
           <div className="settings-2col">
-            <Field label="Matching model" hint={ps.ai_provider_matching === "openai" ? "Bijv. gpt-4o, gpt-4o-mini" : "Bijv. gemini-2.0-flash, gemini-1.5-pro"}>
-              <Inp value={ps.ai_model_matching} onChange={e => setPs(p => ({ ...p, ai_model_matching: e.target.value }))} placeholder={ps.ai_provider_matching === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash"} />
-            </Field>
-            <Field label="Vertaling model" hint={ps.ai_provider_translation === "openai" ? "Bijv. gpt-4o-mini" : "Bijv. gemini-2.0-flash"}>
-              <Inp value={ps.ai_model_translation} onChange={e => setPs(p => ({ ...p, ai_model_translation: e.target.value }))} placeholder={ps.ai_provider_translation === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash"} />
-            </Field>
+            <ModelSelect
+              provider={ps.ai_provider_matching}
+              value={ps.ai_model_matching}
+              onChange={v => setPs(p => ({ ...p, ai_model_matching: v }))}
+              label="Matching model"
+              hint={`Provider: ${ps.ai_provider_matching}`}
+            />
+            <ModelSelect
+              provider={ps.ai_provider_translation}
+              value={ps.ai_model_translation}
+              onChange={v => setPs(p => ({ ...p, ai_model_translation: v }))}
+              label="Vertaling model"
+              hint={`Provider: ${ps.ai_provider_translation}`}
+            />
           </div>
         </div>
       </div>
 
-      {/* ── Other platform keys ── */}
-      <div style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>🌐 Platform API keys</div>
-        <div className="settings-2col">
-          <Field label="Platform Gemini API Key" hint="Fallback wanneer gebruiker geen eigen key heeft">
-            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder="AIzaSy..." />
-          </Field>
-          <Field label="Platform TinyPNG API Key">
-            <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="password" placeholder="abcdef..." />
-          </Field>
-        </div>
-      </div>
+
 
       {/* ── Mollie ── */}
       <div style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
