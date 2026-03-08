@@ -4856,6 +4856,12 @@ const PlatformSettings = () => {
 };
 
 
+const STATIC_PAGES = ["privacy", "voorwaarden", "contact"];
+const getPageFromPath = () => {
+  const p = window.location.pathname.replace(/^\//, "");
+  return STATIC_PAGES.includes(p) ? p : null;
+};
+
 export default function App() {
   const initPage = getPageFromPath();
   const [view, setView] = useState(initPage || "loading"); // loading | landing | app | privacy | voorwaarden | contact
