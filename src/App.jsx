@@ -6533,7 +6533,7 @@ const PlatformSettings = () => {
                       <Btn variant="secondary" size="sm" onClick={saveEanThreshold} disabled={eanThresholdSaving}>
                         {eanThresholdSaving ? "Opslaan..." : "Instellingen opslaan"}
                       </Btn>
-                      <span style={{ fontSize: 11, color: "var(--dm)" }}>Vereist <code style={{ background: "var(--s2)", padding: "1px 4px", borderRadius: 3 }}>SENDGRID_API_KEY</code> Netlify env var</span>
+                      <span style={{ fontSize: 11, color: "var(--dm)" }}>Gebruikt <code style={{ background: "var(--s2)", padding: "1px 4px", borderRadius: 3 }}>AWS_SES_ACCESS_KEY_ID</code> + <code style={{ background: "var(--s2)", padding: "1px 4px", borderRadius: 3 }}>AWS_SES_SMTP_PASSWORD</code></span>
                     </div>
                   </div>
                 </div>

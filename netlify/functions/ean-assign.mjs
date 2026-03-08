@@ -170,27 +170,27 @@ async function checkAndAlert(sb) {
   const lastAlert = ps.ean_last_alert_at ? new Date(ps.ean_last_alert_at) : null;
   if (lastAlert && (Date.now() - lastAlert.getTime()) < 86400000) return;
 
-  // Send email via Netlify's built-in email (or just log — user can add SES later)
-  const sendgridKey = Netlify.env.get("SENDGRID_API_KEY");
-  const fromEmail   = Netlify.env.get("FROM_EMAIL") || "info@woosyncshop.com";
-  if (sendgridKey) {
-    await fetch("https://api.sendgrid.com/v3/mail/send", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${sendgridKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: ps.ean_alert_email }] }],
-        from: { email: fromEmail, name: "WooSyncShop" },
-        subject: `⚠️ EAN Pool bijna leeg — nog ${available} codes beschikbaar`,
-        content: [{
-          type: "text/html",
-          value: `<p>Hallo,</p>
+  // Send low-stock alert via Amazon SES SMTP (same as send-invoice.mjs)
+  const smtpUser = Netlify.env.get("AWS_SES_ACCESS_KEY_ID");
+  const smtpPass = Netlify.env.get("AWS_SES_SMTP_PASSWORD");
+  const smtpHost = `email-smtp.${Netlify.env.get("AWS_SES_REGION") || "eu-west-1"}.amazonaws.com`;
+  const fromEmail = Netlify.env.get("FROM_EMAIL") || "info@woosyncshop.com";
+
+  if (smtpUser && smtpPass) {
+    const { createTransport } = await import("nodemailer");
+    const transporter = createTransport({
+      host: smtpHost, port: 465, secure: true,
+      auth: { user: smtpUser, pass: smtpPass },
+    });
+    await transporter.sendMail({
+      from: `"WooSyncShop" <${fromEmail}>`,
+      to: ps.ean_alert_email,
+      subject: `⚠️ EAN Pool bijna leeg — nog ${available} codes beschikbaar`,
+      html: `<p>Hallo,</p>
 <p>De EAN-codepoel van WooSyncShop bevat nog slechts <strong>${available} beschikbare codes</strong> (drempelwaarde: ${ps.ean_alert_threshold}).</p>
 <p>Importeer nieuwe EAN-codes via <strong>Admin → Platform → EAN Pool</strong> om te voorkomen dat productduplicatie stopt.</p>
 <p>Bestel nieuwe codes op <a href="https://www.eankoning.com">eankoning.com</a> en upload het .xlsx-bestand in het beheerdersdashboard.</p>
-<hr>
-<p style="font-size:12px;color:#666">WooSyncShop · automatische melding</p>`
-        }],
-      }),
+<hr><p style="font-size:12px;color:#666">WooSyncShop · automatische melding</p>`,
     });
   }
 
