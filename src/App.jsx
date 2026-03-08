@@ -3434,7 +3434,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
 };
 
 // ─── Top Nav ──────────────────────────────────────────────────────────────────
-const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user, onGoToSettings }) => {
+const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user, onGoToSettings, onHowItWorks }) => {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [siteOpen, setSiteOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -3527,6 +3527,9 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
 
         <div className="topnav-actions">
           {pendingCount > 0 && <Badge color="amber" style={{ display: "none" }}>{pendingCount}</Badge>}
+          <Btn variant="ghost" size="sm" onClick={onHowItWorks} title="Hoe werkt het?" style={{ gap: 4 }}>
+            <span>💡</span><span className="topnav-sync-label">Help</span>
+          </Btn>
           <Btn variant="secondary" size="sm" onClick={handleSync} disabled={syncing} icon={syncing ? <span className="spin">↻</span> : "↔"}>
             <span className="topnav-sync-label">{syncing ? "Bezig..." : "Sync"}</span>
           </Btn>
@@ -3681,7 +3684,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 // ─── User Dashboard ────────────────────────────────────────────────────────────
 const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "settings"];
 
-const Dashboard = ({ user, onLogout, onPaymentWall }) => {
+const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks }) => {
   const [shops, setShops] = useState([]);
   const [shopsLoading, setShopsLoading] = useState(true);
   const [activeSite, setActiveSite] = useState(null);
@@ -3848,6 +3851,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
         sites={shops} activeView={activeView} setActiveView={setActiveView}
         pendingCount={pendingCount} isAdmin={false}
         onLogout={onLogout} user={user}
+        onHowItWorks={onHowItWorks}
         onGoToSettings={() => setActiveView("settings")}
         onSync={async () => {
           // Re-fetch products from WooCommerce for the active shop
@@ -6142,7 +6146,7 @@ export default function App() {
     onAddShop={() => { window.location.hash = "settings"; setView("app"); }}
     onHowItWorks={() => setView("how-it-works")} /></>;
   if (view === "how-it-works") return <><G /><HowItWorksView
-    onBack={() => setView("welcome")}
+    onBack={() => setView(user ? "app" : "welcome")}
     onAddShop={() => { window.location.hash = "settings"; setView("app"); }} /></>;
   if (view === "privacy") return <><G /><PrivacyPage onBack={() => goBack()} /></>;
   if (view === "voorwaarden") return <><G /><VoorwaardenPage onBack={() => goBack()} /></>;
@@ -6162,7 +6166,7 @@ export default function App() {
       {view === "app" && user && (
         user.email === SUPERADMIN_EMAIL
           ? <SuperAdminDashboard user={user} onLogout={handleLogout} />
-          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={setPendingPaymentWall} />
+          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={setPendingPaymentWall} onHowItWorks={() => setView("how-it-works")} />
       )}
 
       {/* Payment wall — shown when user is logged in but hasn't paid yet */}
@@ -6204,18 +6208,29 @@ export default function App() {
             {paymentReturnStatus === "paid" && <>
               <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
               <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling geslaagd!</h2>
-              <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
+              <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 8, lineHeight: 1.6 }}>
                 Je account is actief. Factuur is per e-mail verstuurd.
               </p>
-              <Btn variant="primary" onClick={async () => {
-                setPaymentReturn(false); setPendingPaymentWall(false);
-                // Fire GTM conversion event
-                try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
-                // Load user profile to get plan, then show welcome page
-                const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
-                setWelcomePlan(profile?.plan || "growth");
-                setView("welcome");
-              }}>Aan de slag →</Btn>
+              <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 24, lineHeight: 1.6 }}>
+                Voeg je eerste shop toe om te beginnen, of bekijk eerst hoe WooSyncShop werkt.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <Btn variant="primary" size="lg" style={{ width: "100%" }} onClick={async () => {
+                  setPaymentReturn(false); setPendingPaymentWall(false);
+                  try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
+                  const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
+                  setWelcomePlan(profile?.plan || "growth");
+                  window.location.hash = "settings";
+                  setView("app");
+                }}>🏪 Eerste shop toevoegen →</Btn>
+                <Btn variant="secondary" size="lg" style={{ width: "100%" }} onClick={async () => {
+                  setPaymentReturn(false); setPendingPaymentWall(false);
+                  try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
+                  const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
+                  setWelcomePlan(profile?.plan || "growth");
+                  setView("how-it-works");
+                }}>💡 Hoe werkt het?</Btn>
+              </div>
             </>}
             {paymentReturnStatus === "pending" && <>
               <div style={{ fontSize: 44, marginBottom: 16 }}>🕐</div>
