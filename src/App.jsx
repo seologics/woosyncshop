@@ -420,7 +420,7 @@ const Field = ({ label, hint, required, children, style }) => (
 );
 
 const Inp = ({ value, onChange, placeholder, type = "text", multiline, rows = 3, style: extStyle, prefix, suffix, ...p }) => {
-  const [showPw, setShowPw] = React.useState(false);
+  const [showPw, setShowPw] = useState(false);
   const resolvedType = type === "password" ? (showPw ? "text" : "password") : type;
   const base = { background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 13, padding: "7px 10px", width: "100%", transition: "border 0.15s", ...extStyle };
   if (multiline) return <textarea value={value} onChange={onChange} placeholder={placeholder} rows={rows} style={{ ...base, resize: "vertical", lineHeight: 1.6 }} {...p} />;
