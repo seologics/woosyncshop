@@ -6640,7 +6640,7 @@ const PlatformSettings = () => {
               )}
 
             </div>
-          </div>  {/* ── end outer card ── */}
+          </div>
         );
       })()}
 
