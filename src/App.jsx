@@ -6513,7 +6513,6 @@ const PlatformSettings = () => {
                 ❌ Fout bij ophalen EAN pool: {eanPoolError}
               </div>
             )}
-            </div>
 
             <div style={{ padding: 20 }}>
 
@@ -6570,6 +6569,7 @@ const PlatformSettings = () => {
                     </div>
                   </div>
                 </div>
+              </div>
               )}
 
               {/* ── TAB: Import ── */}
@@ -6616,6 +6616,7 @@ const PlatformSettings = () => {
                     )
                   )}
                 </div>
+              </div>
               )}
 
               {/* ── TAB: Export ── */}
@@ -6641,7 +6642,7 @@ const PlatformSettings = () => {
               )}
 
             </div>
-          </div>
+          </div>  {/* ── end outer card ── */}
         );
       })()}
 
