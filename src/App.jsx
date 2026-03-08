@@ -5242,6 +5242,7 @@ const TrackingSettings = () => {
   const [fetching, setFetching] = useState(false);
   const [googleData, setGoogleData] = useState(null); // { gtm:[], ga4:[], gads:[], gads_note }
   const [fetchError, setFetchError] = useState(null);
+  const [gtmSetup, setGtmSetup] = useState({ running: false, result: null, error: null });
 
   // Load current settings
   const load = async () => {
@@ -5300,6 +5301,31 @@ const TrackingSettings = () => {
       setTs(s => ({ ...s, google_connected: false, google_connected_email: null }));
       setGoogleData(null);
     } catch (e) { alert(e.message); }
+  };
+
+  const runGtmSetup = async () => {
+    const containerObj = googleData?.gtm?.find(g => g.id === ts.gtm_id);
+    if (!containerObj?.path) { alert("Selecteer eerst een GTM container via Google koppeling."); return; }
+    if (!confirm("WooSyncShop maakt automatisch GA4 en Google Ads tags aan in jouw GTM container en publiceert de container. Doorgaan?")) return;
+    setGtmSetup({ running: true, result: null, error: null });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/google-gtm-setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({
+          container_path:      containerObj.path,
+          ga4_measurement_id:  ts.ga4_id || null,
+          gads_conversion_id:  ts.gads_conversion_id || null,
+          gads_conversion_label: ts.gads_conversion_label || null,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error || "Setup mislukt");
+      setGtmSetup({ running: false, result: d, error: null });
+    } catch (e) {
+      setGtmSetup({ running: false, result: null, error: e.message });
+    }
   };
 
   const save = async () => {
@@ -5469,6 +5495,95 @@ const TrackingSettings = () => {
           </div>
         )}
       </TrackCard>
+
+      {/* ── Zero-knowledge GTM Auto-setup ── */}
+      {ts.google_connected && ts.gtm_id && googleData?.gtm?.find(g => g.id === ts.gtm_id)?.path && (ts.ga4_id || ts.gads_conversion_id) && (
+        <div style={{ border: "1px solid rgba(99,102,241,0.35)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)", borderBottom: "1px solid rgba(99,102,241,0.2)", display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>🚀</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Zero-knowledge GTM inrichten</div>
+              <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 1 }}>WooSyncShop maakt automatisch de juiste tags aan in jouw GTM container</div>
+            </div>
+          </div>
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* What will be created */}
+            {!gtmSetup.result && (
+              <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.8 }}>
+                <div style={{ fontWeight: 600, color: "var(--tx)", marginBottom: 6 }}>Dit wordt automatisch aangemaakt in GTM container <strong style={{ color: "var(--pr-h)" }}>{ts.gtm_id}</strong>:</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 4 }}>
+                  <div>✓ <strong>GTM Workspace</strong> — "WooSyncShop Auto-setup"</div>
+                  <div>✓ <strong>Trigger</strong> — All Pages (pageview)</div>
+                  {ts.ga4_id && <div>✓ <strong>GA4 Configuration tag</strong> — Measurement ID: <code style={{ background: "var(--s3)", padding: "0 4px", borderRadius: 3 }}>{ts.ga4_id}</code></div>}
+                  {ts.gads_conversion_id && (
+                    <>
+                      <div>✓ <strong>Conversion Linker tag</strong> — Google Ads koppeling</div>
+                      <div>✓ <strong>Trigger</strong> — <code style={{ background: "var(--s3)", padding: "0 4px", borderRadius: 3 }}>registration_complete</code> (custom event)</div>
+                      <div>✓ <strong>Google Ads Conversie tag</strong> — <code style={{ background: "var(--s3)", padding: "0 4px", borderRadius: 3 }}>{ts.gads_conversion_id}/{ts.gads_conversion_label}</code></div>
+                    </>
+                  )}
+                  <div>✓ <strong>Container versie aanmaken + publiceren</strong></div>
+                </div>
+                <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: "var(--rd)", fontSize: 11 }}>
+                  💡 De Google Ads conversie tag vuurde op het <code>registration_complete</code> event. Zorg dat jouw frontend dit event aanroept bij nieuwe registraties: <code>dataLayer.push(&#123;event: 'registration_complete'&#125;)</code>
+                </div>
+              </div>
+            )}
+
+            {/* Running state */}
+            {gtmSetup.running && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "rgba(99,102,241,0.06)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--mx)" }}>
+                <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span>
+                GTM instellen... tags aanmaken en publiceren
+              </div>
+            )}
+
+            {/* Success result */}
+            {gtmSetup.result && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ padding: "10px 14px", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "var(--rd)" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#22c55e", marginBottom: 6 }}>
+                    {gtmSetup.result.published ? "✓ GTM ingericht en gepubliceerd!" : "✓ GTM ingericht (handmatig publiceren vereist)"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--mx)", display: "flex", flexDirection: "column", gap: 2 }}>
+                    {gtmSetup.result.created.map((item, i) => (
+                      <div key={i}>✓ {item}</div>
+                    ))}
+                  </div>
+                </div>
+                {gtmSetup.result.warnings?.length > 0 && (
+                  <div style={{ padding: "8px 12px", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: "var(--rd)", fontSize: 11, color: "var(--am)" }}>
+                    {gtmSetup.result.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
+                  </div>
+                )}
+                {!gtmSetup.result.published && gtmSetup.result.publish_error && (
+                  <div style={{ fontSize: 12, color: "var(--mx)" }}>
+                    Ga naar <a href="https://tagmanager.google.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)" }}>tagmanager.google.com ↗</a> om de workspace "{gtmSetup.result.workspace_name}" handmatig te publiceren.
+                  </div>
+                )}
+                <Btn variant="ghost" size="sm" onClick={() => setGtmSetup({ running: false, result: null, error: null })} style={{ alignSelf: "flex-start", fontSize: 11 }}>
+                  ↺ Opnieuw instellen
+                </Btn>
+              </div>
+            )}
+
+            {/* Error state */}
+            {gtmSetup.error && (
+              <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>
+                ⚠ {gtmSetup.error}
+                <button onClick={() => setGtmSetup({ running: false, result: null, error: null })} style={{ marginLeft: 12, fontSize: 11, color: "var(--mx)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Opnieuw proberen</button>
+              </div>
+            )}
+
+            {/* Action button */}
+            {!gtmSetup.result && (
+              <Btn variant="primary" onClick={runGtmSetup} disabled={gtmSetup.running} style={{ alignSelf: "flex-start" }}>
+                {gtmSetup.running ? "↻ Bezig met instellen..." : "🚀 Automatisch instellen in GTM"}
+              </Btn>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Meta Pixel ── */}
       <TrackCard icon="🟦" title="Meta Pixel — Facebook & Instagram" active={!!ts.fb_pixel_id}
