@@ -3335,7 +3335,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
           <Btn variant="accent" size="sm" onClick={handlePush} disabled={pushing} icon={pushing ? <span className="spin">↻</span> : "↑"}>
             <span className="topnav-push-label">{pushing ? "..." : "Push"}</span>
           </Btn>
-        <div style={{ position: "relative" }}>
+          <div style={{ position: "relative" }}>
           <div
             onClick={() => setAvatarOpen(o => !o)}
             title="Account"
@@ -3366,6 +3366,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
               </div>
             </>
           )}
+        </div>
         </div>
       </div>
 
