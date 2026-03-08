@@ -6091,6 +6091,9 @@ export default function App() {
     try {
       if (window.gtag) window.gtag("event", "signup_complete", { event_category: "conversion" });
       if (window.dataLayer) window.dataLayer.push({ event: "signup_complete" });
+      // GTM conversion tag fires on registration_complete
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({ event: "registration_complete" });
     } catch {}
   };
 
@@ -6190,6 +6193,8 @@ export default function App() {
               </p>
               <Btn variant="primary" onClick={async () => {
                 setPaymentReturn(false); setPendingPaymentWall(false);
+                // Fire GTM conversion event
+                try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
                 // Load user profile to get plan, then show welcome page
                 const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
                 setWelcomePlan(profile?.plan || "growth");
