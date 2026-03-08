@@ -43,16 +43,14 @@ export default async (req) => {
 
   // ── GET: pool status ──────────────────────────────────────────────────────
   if (req.method === "GET") {
-    const { data, error } = await supabase
-      .from("ean_pool")
-      .select("ean, assigned_sku");
-    if (error) return json({ error: error.message }, 500);
+    // Use server-side counts to avoid Supabase's 1000-row default limit
+    const [{ count: total, error: e1 }, { count: used, error: e2 }] = await Promise.all([
+      supabase.from("ean_pool").select("*", { count: "exact", head: true }),
+      supabase.from("ean_pool").select("*", { count: "exact", head: true }).not("assigned_sku", "is", null),
+    ]);
+    if (e1 || e2) return json({ error: (e1 || e2).message }, 500);
+    const available = (total ?? 0) - (used ?? 0);
 
-    const total     = data.length;
-    const used      = data.filter(r => r.assigned_sku).length;
-    const available = total - used;
-
-    // Load alert threshold from platform_settings
     const { data: ps } = await supabase
       .from("platform_settings")
       .select("ean_alert_threshold, ean_alert_email")
@@ -60,7 +58,9 @@ export default async (req) => {
       .single();
 
     return json({
-      total, used, available,
+      total: total ?? 0,
+      used: used ?? 0,
+      available,
       alert_threshold: ps?.ean_alert_threshold ?? 200,
       alert_email:     ps?.ean_alert_email     ?? "",
     });
