@@ -34,14 +34,29 @@ async function buildInvoicePDF({ invoiceNumber, date, user, amount, amountExcl, 
 
     let y = 145
 
-    // Meta row
+    // Company details (top-right below header)
+    const companyX = 350
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1a1a2e').text('Webs Media', companyX, y, { width: pageW - (companyX - 50), align: 'right' })
+    y += 14
+    doc.font('Helvetica').fontSize(9).fillColor('#555555')
+    ;['De Wittenkade 152H', '1051 AN Amsterdam'].forEach(line => {
+      doc.text(line, companyX, y, { width: pageW - (companyX - 50), align: 'right' }); y += 13
+    })
+    doc.fillColor('#888888').fontSize(8)
+    ;['KVK: 59853824', 'BTW: NL001529194B75', 'IBAN: NL29 ABNA 0439 6716 47', 'BIC: ABNANL2A'].forEach(line => {
+      doc.text(line, companyX, y, { width: pageW - (companyX - 50), align: 'right' }); y += 12
+    })
+    y = Math.max(y + 10, 220)
+
+    // Meta row — reset y to a fixed position so it sits below company block
+    y = Math.max(y, 245)
     doc.fontSize(9).fillColor(gray).font('Helvetica')
     doc.text('Factuurnummer:', 50, y)
-    doc.font('Helvetica-Bold').fillColor(dark).text(invoiceNumber, 130, y)
-    doc.font('Helvetica').fillColor(gray).text('Datum:', 350, y)
-    doc.font('Helvetica-Bold').fillColor(dark).text(date, 390, y)
+    doc.font('Helvetica-Bold').fillColor(dark).text(invoiceNumber, 140, y)
+    doc.font('Helvetica').fillColor(gray).text('Datum:', 310, y)
+    doc.font('Helvetica-Bold').fillColor(dark).text(date, 345, y)
 
-    y += 30
+    y += 26
 
     // "Aan" block
     doc.font('Helvetica-Bold').fontSize(10).fillColor(dark).text('Aan:', 50, y)
@@ -69,8 +84,8 @@ async function buildInvoicePDF({ invoiceNumber, date, user, amount, amountExcl, 
     doc.rect(50, y, pageW, 1).fill('#f0f0f0')
     y += 1
     doc.font('Helvetica').fontSize(10).fillColor(dark)
-    doc.text('WooSyncShop Pro – maandabonnement', 62, y + 10)
-    doc.fontSize(9).fillColor(gray).text('Tot 10 WordPress installaties', 62, y + 24)
+    doc.text('WooSyncShop abonnement', 62, y + 10)
+    doc.fontSize(9).fillColor(gray).text(`Factuurnummer: ${invoiceNumber}`, 62, y + 24)
     doc.fontSize(10).fillColor(dark).font('Helvetica').text(`€${amountExcl}`, 50 + pageW - 60, y + 10, { width: 60, align: 'right' })
     y += 50
 

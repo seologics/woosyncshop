@@ -319,13 +319,66 @@ const SUPERADMIN_EMAIL = "leadingvation@gmail.com";
 
 const LOCALE_OPTIONS = [
   { value: "nl_NL", label: "nl_NL – Nederlands (NL)" },
-  { value: "fr_BE", label: "fr_BE – Français (BE)" },
   { value: "nl_BE", label: "nl_BE – Nederlands (BE)" },
+  { value: "fr_BE", label: "fr_BE – Français (BE)" },
+  { value: "fr_FR", label: "fr_FR – Français (FR)" },
+  { value: "fr_LU", label: "fr_LU – Français (LU)" },
   { value: "de_DE", label: "de_DE – Deutsch (DE)" },
+  { value: "de_AT", label: "de_AT – Deutsch (AT)" },
+  { value: "de_CH", label: "de_CH – Deutsch (CH)" },
+  { value: "de_LU", label: "de_LU – Deutsch (LU)" },
   { value: "en_US", label: "en_US – English (US)" },
   { value: "en_GB", label: "en_GB – English (GB)" },
-  { value: "fr_FR", label: "fr_FR – Français (FR)" },
+  { value: "en_IE", label: "en_IE – English (IE)" },
+  { value: "en_MT", label: "en_MT – English (MT)" },
+  { value: "es_ES", label: "es_ES – Español (ES)" },
+  { value: "ca_ES", label: "ca_ES – Català (ES)" },
+  { value: "it_IT", label: "it_IT – Italiano (IT)" },
+  { value: "pt_PT", label: "pt_PT – Português (PT)" },
+  { value: "pt_BR", label: "pt_BR – Português (BR)" },
+  { value: "pl_PL", label: "pl_PL – Polski (PL)" },
+  { value: "cs_CZ", label: "cs_CZ – Čeština (CZ)" },
+  { value: "sk_SK", label: "sk_SK – Slovenčina (SK)" },
+  { value: "hu_HU", label: "hu_HU – Magyar (HU)" },
+  { value: "ro_RO", label: "ro_RO – Română (RO)" },
+  { value: "bg_BG", label: "bg_BG – Български (BG)" },
+  { value: "hr_HR", label: "hr_HR – Hrvatski (HR)" },
+  { value: "sl_SI", label: "sl_SI – Slovenščina (SI)" },
+  { value: "lt_LT", label: "lt_LT – Lietuvių (LT)" },
+  { value: "lv_LV", label: "lv_LV – Latviešu (LV)" },
+  { value: "et_EE", label: "et_EE – Eesti (EE)" },
+  { value: "fi_FI", label: "fi_FI – Suomi (FI)" },
+  { value: "sv_SE", label: "sv_SE – Svenska (SE)" },
+  { value: "da_DK", label: "da_DK – Dansk (DK)" },
+  { value: "nb_NO", label: "nb_NO – Norsk (NO)" },
+  { value: "el_GR", label: "el_GR – Ελληνικά (GR)" },
+  { value: "tr_TR", label: "tr_TR – Türkçe (TR)" },
+  { value: "ar", label: "ar – العربية" },
+  { value: "he_IL", label: "he_IL – עברית (IL)" },
+  { value: "zh_CN", label: "zh_CN – 中文 (简体)" },
+  { value: "zh_TW", label: "zh_TW – 中文 (繁體)" },
+  { value: "ja", label: "ja – 日本語" },
+  { value: "ko_KR", label: "ko_KR – 한국어" },
+  { value: "ru_RU", label: "ru_RU – Русский (RU)" },
+  { value: "uk", label: "uk – Українська" },
 ];
+
+// Common flag emojis by locale prefix
+const LOCALE_FLAG_MAP = {
+  nl_NL:"🇳🇱", nl_BE:"🇧🇪", fr_BE:"🇧🇪", fr_FR:"🇫🇷", fr_LU:"🇱🇺",
+  de_DE:"🇩🇪", de_AT:"🇦🇹", de_CH:"🇨🇭", de_LU:"🇱🇺",
+  en_US:"🇺🇸", en_GB:"🇬🇧", en_IE:"🇮🇪", en_MT:"🇲🇹",
+  es_ES:"🇪🇸", ca_ES:"🇪🇸", it_IT:"🇮🇹",
+  pt_PT:"🇵🇹", pt_BR:"🇧🇷", pl_PL:"🇵🇱",
+  cs_CZ:"🇨🇿", sk_SK:"🇸🇰", hu_HU:"🇭🇺", ro_RO:"🇷🇴",
+  bg_BG:"🇧🇬", hr_HR:"🇭🇷", sl_SI:"🇸🇮", lt_LT:"🇱🇹",
+  lv_LV:"🇱🇻", et_EE:"🇪🇪", fi_FI:"🇫🇮", sv_SE:"🇸🇪",
+  da_DK:"🇩🇰", nb_NO:"🇳🇴", el_GR:"🇬🇷", tr_TR:"🇹🇷",
+  ar:"🇸🇦", he_IL:"🇮🇱", zh_CN:"🇨🇳", zh_TW:"🇹🇼",
+  ja:"🇯🇵", ko_KR:"🇰🇷", ru_RU:"🇷🇺", uk:"🇺🇦",
+};
+
+const FLAG_SHAPES = ["emoji", "rect", "circle"];
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const css = (...a) => a.filter(Boolean).join(" ");
@@ -413,9 +466,15 @@ const Divider = ({ my = 12 }) => <div style={{ height: 1, background: "var(--b1)
 const Overlay = ({ open, onClose, children, width = 860, title }) => {
   useEffect(() => { if (open) document.body.style.overflow = "hidden"; else document.body.style.overflow = ""; return () => { document.body.style.overflow = ""; }; }, [open]);
   if (!open) return null;
+  const backdropRef = useRef(null);
+  const downTargetRef = useRef(null);
   return (
-    <div onClick={onClose} className="overlay-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={e => e.stopPropagation()} className="slide-up overlay-panel" style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", width: "100%", maxWidth: width, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
+    <div
+      ref={backdropRef}
+      onMouseDown={e => { downTargetRef.current = e.target; }}
+      onMouseUp={e => { if (e.target === backdropRef.current && downTargetRef.current === backdropRef.current) onClose?.(); }}
+      className="overlay-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onMouseDown={e => e.stopPropagation()} className="slide-up overlay-panel" style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", width: "100%", maxWidth: width, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
         {title && <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--mx)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px", borderRadius: 4 }}>×</button>
@@ -3228,8 +3287,32 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                 <div className="settings-2col">
                   <Field label="Naam" required><Inp value={newShop.name} onChange={e => setNewShop(s => ({ ...s, name: e.target.value }))} placeholder="bijv. HaagDirect NL" /></Field>
                   <Field label="Site URL" required><Inp value={newShop.site_url} onChange={e => setNewShop(s => ({ ...s, site_url: e.target.value.replace(/\/$/, "") }))} placeholder="https://mijnshop.nl" /></Field>
-                  <Field label="Taal / Locale" required><Sel value={newShop.locale} onChange={v => setNewShop(s => ({ ...s, locale: v }))} options={LOCALE_OPTIONS} /></Field>
-                  <Field label="Vlag emoji"><Inp value={newShop.flag} onChange={e => setNewShop(s => ({ ...s, flag: e.target.value }))} placeholder="🇳🇱" /></Field>
+                  <Field label="Taal / Locale" required>
+                    <Sel value={newShop.locale} onChange={v => {
+                      const autoFlag = LOCALE_FLAG_MAP[v] || "🌐";
+                      setNewShop(s => ({ ...s, locale: v, flag: autoFlag, flagShape: s.flagShape || "emoji" }));
+                    }} options={LOCALE_OPTIONS} />
+                  </Field>
+                  <Field label="Vlag">
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {/* Shape selector */}
+                      {FLAG_SHAPES.map(shape => (
+                        <button key={shape} onClick={() => setNewShop(s => ({ ...s, flagShape: shape }))}
+                          style={{ padding: "4px 10px", borderRadius: "var(--rd)", border: `1px solid ${(newShop.flagShape||"emoji") === shape ? "var(--pr)" : "var(--b1)"}`, background: (newShop.flagShape||"emoji") === shape ? "var(--pr-l)" : "var(--s2)", cursor: "pointer", fontSize: 12, color: (newShop.flagShape||"emoji") === shape ? "var(--pr-h)" : "var(--mx)", fontWeight: (newShop.flagShape||"emoji") === shape ? 700 : 400 }}>
+                          {shape === "emoji" ? "🏳️ Emoji" : shape === "rect" ? "▬ Rechthoek" : "⬤ Cirkel"}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ fontSize: (newShop.flagShape||"emoji") === "emoji" ? 28 : 0, lineHeight: 1 }}>{(newShop.flagShape||"emoji") === "emoji" ? (newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐") : null}</div>
+                      {(newShop.flagShape||"emoji") !== "emoji" && (() => {
+                        const flagEmoji = newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐";
+                        const shape = newShop.flagShape || "emoji";
+                        return <div style={{ width: shape === "rect" ? 32 : 24, height: shape === "rect" ? 20 : 24, borderRadius: shape === "circle" ? "50%" : 4, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: shape === "rect" ? 20 : 18, background: "var(--s3)", border: "1px solid var(--b1)" }}>{flagEmoji}</div>;
+                      })()}
+                      <Inp value={newShop.flag} onChange={e => setNewShop(s => ({ ...s, flag: e.target.value }))} placeholder={LOCALE_FLAG_MAP[newShop.locale] || "🌐"} style={{ maxWidth: 80 }} />
+                    </div>
+                  </Field>
                   <Field label="Consumer Key" required><Inp value={newShop.consumer_key} onChange={e => setNewShop(s => ({ ...s, consumer_key: e.target.value }))} placeholder="ck_..." type="password" /></Field>
                   <Field label="Consumer Secret" required><Inp value={newShop.consumer_secret} onChange={e => setNewShop(s => ({ ...s, consumer_secret: e.target.value }))} placeholder="cs_..." type="password" /></Field>
                 </div>
@@ -3321,18 +3404,21 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
 };
 
 // ─── Top Nav ──────────────────────────────────────────────────────────────────
-const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user }) => {
+const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, pendingCount, onSync, onPush, isAdmin, onLogout, user, onGoToSettings }) => {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [siteOpen, setSiteOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [noShopModal, setNoShopModal] = useState(null); // "sync"|"push"|null
 
   const handleSync = async () => {
+    if (!sites?.length) { setNoShopModal("sync"); return; }
     setSyncing(true);
     try { await onSync?.(); } catch {}
     finally { setSyncing(false); }
   };
   const handlePush = async () => {
+    if (!sites?.length) { setNoShopModal("push"); return; }
     setPushing(true);
     try { await onPush?.(); } catch {}
     finally { setPushing(false); }
@@ -3348,6 +3434,27 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
 
   return (
     <div className="topnav-root">
+      {noShopModal && (
+        <div onClick={() => setNoShopModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--s1)", border: "1px solid var(--b2)", borderRadius: "var(--rd-xl)", padding: 36, maxWidth: 420, textAlign: "center", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>{noShopModal === "sync" ? "🔄" : "🚀"}</div>
+            <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>
+              {noShopModal === "sync" ? "Eerst een shop verbinden" : "Geen shops om naar te pushen"}
+            </h2>
+            <p style={{ fontSize: 14, color: "var(--mx)", lineHeight: 1.6, marginBottom: 24 }}>
+              {noShopModal === "sync"
+                ? "Voeg minimaal één WooCommerce shop toe voordat je kunt synchroniseren. Je hebt een Consumer Key en Consumer Secret nodig."
+                : "Voeg minimaal één WooCommerce shop toe en koppel producten voordat je kunt pushen naar verbonden shops."}
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <Btn variant="secondary" onClick={() => setNoShopModal(null)}>Sluiten</Btn>
+              <Btn variant="primary" onClick={() => { setNoShopModal(null); setActiveView("settings"); onGoToSettings?.(); }}>
+                Shop toevoegen →
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Row 1: logo + site switcher + [desktop: tabs] + actions */}
       <div className="topnav-row1">
         {/* Logo */}
@@ -3711,6 +3818,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
         sites={shops} activeView={activeView} setActiveView={setActiveView}
         pendingCount={pendingCount} isAdmin={false}
         onLogout={onLogout} user={user}
+        onGoToSettings={() => setActiveView("settings")}
         onSync={async () => {
           // Re-fetch products from WooCommerce for the active shop
           if (!activeSite) return;
@@ -4521,7 +4629,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           <Btn variant="ghost" onClick={onLogin}>Inloggen</Btn>
-          <Btn variant="primary" onClick={onSignup}>Gratis proberen</Btn>
+          <Btn variant="primary" onClick={onSignup}>Start vandaag</Btn>
         </div>
       </nav>
 

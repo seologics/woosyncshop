@@ -33,9 +33,11 @@ function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountEx
       <h1>WooSyncShop</h1>
       <p>Factuur</p>
     </div>
-    <div style="text-align:right; font-size:13px; opacity:0.9;">
-      <div>${invoiceNumber}</div>
-      <div style="opacity:0.7; font-size:11px; margin-top:2px;">${date}</div>
+    <div style="text-align:right; font-size:12px; opacity:0.9; line-height:1.6;">
+      <div style="font-weight:700; font-size:13px;">Webs Media</div>
+      <div style="opacity:0.8;">De Wittenkade 152H</div>
+      <div style="opacity:0.8;">1051 AN Amsterdam</div>
+      <div style="opacity:0.7; font-size:11px; margin-top:4px;">${invoiceNumber} · ${date}</div>
     </div>
   </div>
   <div class="body">
@@ -43,8 +45,9 @@ function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountEx
       <span>Factuurnummer: <strong style="color:#1a1a2e">${invoiceNumber}</strong></span>
       <span>Datum: <strong style="color:#1a1a2e">${date}</strong></span>
     </div>
-    <div class="to">
-      <strong>Aan:</strong>
+    <div style="display:flex; justify-content:space-between; margin-bottom:20px; font-size:12px; gap:20px;">
+      <div class="to" style="margin:0; flex:1;">
+        <strong>Aan:</strong>
       ${user.business_name ? `<span>${user.business_name}</span><br>` : ''}
       <span>${user.full_name || user.email}</span><br>
       <span style="color:#666">${user.email}</span>
@@ -52,6 +55,16 @@ function buildInvoiceHTML({ invoiceNumber, date, user, amount, vatRate, amountEx
       ${user.address_zip || user.address_city ? `<br><span>${[user.address_zip, user.address_city].filter(Boolean).join(' ')}</span>` : ''}
       ${user.country ? `<br><span>${user.country}</span>` : ''}
       ${user.vat_number ? `<br><span style="color:#666">BTW: ${user.vat_number}${user.vat_validated ? ' ✓' : ''}</span>` : ''}
+      </div>
+      <div style="text-align:right; color:#555; line-height:1.7;">
+        <strong style="color:#1a1a2e;">Webs Media</strong><br>
+        De Wittenkade 152H<br>
+        1051 AN Amsterdam<br>
+        <span style="color:#888; font-size:11px;">KVK: 59853824</span><br>
+        <span style="color:#888; font-size:11px;">BTW: NL001529194B75</span><br>
+        <span style="color:#888; font-size:11px;">IBAN: NL29 ABNA 0439 6716 47</span><br>
+        <span style="color:#888; font-size:11px;">BIC: ABNANL2A</span>
+      </div>
     </div>
     <table>
       <thead><tr><th>Omschrijving</th><th style="text-align:right">Bedrag</th></tr></thead>
