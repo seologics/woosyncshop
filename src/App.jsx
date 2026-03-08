@@ -6235,7 +6235,6 @@ const PlatformSettings = () => {
       setEanPoolLoading(false);
     }
   };
-  };
 
   const loadMethods = async () => {
     setMethodsLoading(true);
