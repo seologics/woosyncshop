@@ -921,16 +921,33 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite }) => {
 };
 
 // ─── Connected Sites View ─────────────────────────────────────────────────────
+const ALL_SYNC_FIELDS = [
+  { id: "regular_price",     label: "Reguliere prijs" },
+  { id: "sale_price",        label: "Actieprijs" },
+  { id: "stock_quantity",    label: "Voorraad" },
+  { id: "name",              label: "Productnaam" },
+  { id: "short_description", label: "Korte beschrijving" },
+  { id: "description",       label: "Beschrijving" },
+  { id: "categories",        label: "Categorieën" },
+  { id: "attributes",        label: "Attributen" },
+  { id: "status",            label: "Status" },
+];
+const DEFAULT_SYNC_FIELDS = ["regular_price", "sale_price", "stock_quantity"];
+
 const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
-  const [connections, setConnections] = useState([]); // [{id, source_shop_id, source_product_id, target_shop_id, target_product_id, target_sku}]
+  const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState({}); // { connectionKey: true }
-  const [searchModal, setSearchModal] = useState(null); // { product, targetShop }
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
+  const [syncing, setSyncing] = useState({});
+  const [savingFields, setSavingFields] = useState({});
+  const [openFields, setOpenFields] = useState({}); // { connId: true }
+  const [pendingFields, setPendingFields] = useState({}); // { connId: [...fields] }
+
+  // Connect modal state
+  const [connectModal, setConnectModal] = useState(null);
+  // { product, targetShop, step: 'mode'|'find'|'confirm', mode: 'sku'|'attribute'|'manual',
+  //   matchAttribute: '', searchQuery: '', searchResults: [], searching: bool,
+  //   autoMatch: null|product, autoSearching: bool, syncFields: [...] }
   const [saving, setSaving] = useState(false);
-  const SYNC_FIELDS = ["name","description","short_description","regular_price","sale_price","stock_quantity","categories","attributes"];
 
   const getToken = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -957,31 +974,80 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
     connections.find(c => c.source_shop_id === activeSite?.id && c.source_product_id === sourceProductId && c.target_shop_id === targetShopId);
 
   const disconnect = async (conn) => {
+    if (!confirm("Verbinding verwijderen?")) return;
     const token = await getToken();
     await fetch(`/api/connected-products?id=${conn.id}`, { method: "DELETE", headers: { "Authorization": `Bearer ${token}` } });
     setConnections(cs => cs.filter(c => c.id !== conn.id));
+    setOpenFields(o => { const n = {...o}; delete n[conn.id]; return n; });
+    setPendingFields(o => { const n = {...o}; delete n[conn.id]; return n; });
   };
 
-  const openSearch = (product, targetShop) => {
-    setSearchModal({ product, targetShop });
-    setSearchQuery(product.sku || product.name || "");
-    setSearchResults([]);
+  // ── Open connect modal ──────────────────────────────────────────────────────
+  const openConnect = (product, targetShop) => {
+    setConnectModal({
+      product, targetShop,
+      step: "mode",
+      mode: null,
+      matchAttribute: "",
+      searchQuery: product.sku || product.name || "",
+      searchResults: [],
+      searching: false,
+      autoMatch: null,
+      autoSearching: false,
+      syncFields: DEFAULT_SYNC_FIELDS,
+    });
   };
 
+  const updModal = (patch) => setConnectModal(m => m ? { ...m, ...patch } : null);
+
+  // ── SKU auto-match ──────────────────────────────────────────────────────────
+  const runSkuMatch = async () => {
+    const { product, targetShop } = connectModal;
+    if (!product.sku) {
+      updModal({ autoMatch: "no_sku" }); return;
+    }
+    updModal({ autoSearching: true, autoMatch: null });
+    try {
+      const results = await wooCall(targetShop.id, `products?sku=${encodeURIComponent(product.sku)}&per_page=5`);
+      const match = Array.isArray(results) ? results.find(r => r.sku === product.sku) || results[0] : null;
+      updModal({ autoMatch: match || "not_found", autoSearching: false });
+    } catch {
+      updModal({ autoMatch: "error", autoSearching: false });
+    }
+  };
+
+  // ── Attribute auto-match ────────────────────────────────────────────────────
+  const runAttributeMatch = async (attrSlug) => {
+    const { product, targetShop } = connectModal;
+    const attr = product.attributes?.find(a => a.slug === attrSlug || a.name === attrSlug);
+    const attrVal = attr?.options?.[0] || attr?.option || "";
+    if (!attrVal) { updModal({ searchResults: [], autoSearching: false }); return; }
+    updModal({ autoSearching: true, searchResults: [] });
+    try {
+      const results = await wooCall(targetShop.id, `products?search=${encodeURIComponent(attrVal)}&per_page=20`);
+      updModal({ searchResults: Array.isArray(results) ? results : [], autoSearching: false });
+    } catch {
+      updModal({ searchResults: [], autoSearching: false });
+    }
+  };
+
+  // ── Manual search ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!searchModal || !searchQuery.trim()) { setSearchResults([]); return; }
+    if (!connectModal || connectModal.mode !== "manual" || connectModal.step !== "find") return;
+    if (!connectModal.searchQuery?.trim()) { updModal({ searchResults: [] }); return; }
     const timer = setTimeout(async () => {
-      setSearching(true);
+      updModal({ searching: true });
       try {
-        const data = await wooCall(searchModal.targetShop.id, `products?search=${encodeURIComponent(searchQuery)}&per_page=20`);
-        setSearchResults(Array.isArray(data) ? data : []);
-      } catch { setSearchResults([]); }
-      finally { setSearching(false); }
+        const data = await wooCall(connectModal.targetShop.id, `products?search=${encodeURIComponent(connectModal.searchQuery)}&per_page=20`);
+        updModal({ searchResults: Array.isArray(data) ? data : [], searching: false });
+      } catch { updModal({ searchResults: [], searching: false }); }
     }, 400);
     return () => clearTimeout(timer);
-  }, [searchQuery, searchModal?.targetShop?.id]);
+  }, [connectModal?.searchQuery, connectModal?.mode, connectModal?.step]);
 
-  const connect = async (sourceProduct, targetShop, targetProduct) => {
+  // ── Save connection ─────────────────────────────────────────────────────────
+  const connect = async (targetProduct) => {
+    const { product, targetShop, mode, matchAttribute, syncFields } = connectModal;
     setSaving(true);
     try {
       const token = await getToken();
@@ -989,19 +1055,31 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({
-          source_shop_id: activeSite.id, source_product_id: sourceProduct.id,
-          source_sku: sourceProduct.sku, source_product_name: sourceProduct.name,
-          target_shop_id: targetShop.id, target_product_id: targetProduct.id, target_sku: targetProduct.sku,
+          source_shop_id: activeSite.id,
+          source_product_id: product.id,
+          source_sku: product.sku,
+          source_product_name: product.name,
+          target_shop_id: targetShop.id,
+          target_product_id: targetProduct.id,
+          target_sku: targetProduct.sku,
+          match_mode: mode || "manual",
+          match_attribute: matchAttribute || null,
+          sync_fields: syncFields,
         }),
       });
       const data = await res.json();
-      if (res.ok) { setConnections(cs => [...cs, data]); setSearchModal(null); }
-      else alert(data.error || "Verbinden mislukt");
+      if (res.ok) {
+        setConnections(cs => [...cs, data]);
+        setConnectModal(null);
+      } else {
+        alert(data.error || "Verbinden mislukt");
+      }
     } catch (e) { alert(e.message); }
     finally { setSaving(false); }
   };
 
-  const syncProduct = async (sourceProduct, targetShopId, connId) => {
+  // ── Sync product ────────────────────────────────────────────────────────────
+  const syncProduct = async (sourceProduct, targetShopId) => {
     const key = `${sourceProduct.id}_${targetShopId}`;
     setSyncing(s => ({ ...s, [key]: true }));
     try {
@@ -1009,15 +1087,47 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
       const res = await fetch("/api/sync-products", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ source_shop_id: activeSite.id, product_id: sourceProduct.id, fields: SYNC_FIELDS, target_shop_ids: [targetShopId] }),
+        body: JSON.stringify({ source_shop_id: activeSite.id, product_id: sourceProduct.id, target_shop_ids: [targetShopId] }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) alert(data.error || "Sync mislukt");
+      else alert(`✓ Gesynchroniseerd naar ${data.results?.[0]?.shop_name || "shop"}`);
     } catch (e) { alert(e.message); }
     finally { setSyncing(s => { const n = { ...s }; delete n[key]; return n; }); }
   };
 
+  // ── Save sync fields ────────────────────────────────────────────────────────
+  const saveSyncFields = async (connId) => {
+    const fields = pendingFields[connId];
+    if (!fields) return;
+    setSavingFields(s => ({ ...s, [connId]: true }));
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/connected-products?id=${connId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ sync_fields: fields }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setConnections(cs => cs.map(c => c.id === connId ? { ...c, sync_fields: fields } : c));
+        setPendingFields(p => { const n = {...p}; delete n[connId]; return n; });
+        setOpenFields(o => ({ ...o, [connId]: false }));
+      } else {
+        alert(data.error || "Opslaan mislukt");
+      }
+    } catch (e) { alert(e.message); }
+    finally { setSavingFields(s => { const n = {...s}; delete n[connId]; return n; }); }
+  };
+
+  const toggleField = (connId, fieldId) => {
+    const current = pendingFields[connId] ?? (connections.find(c => c.id === connId)?.sync_fields || DEFAULT_SYNC_FIELDS);
+    const next = current.includes(fieldId) ? current.filter(f => f !== fieldId) : [...current, fieldId];
+    setPendingFields(p => ({ ...p, [connId]: next }));
+  };
+
   const otherSites = sites.filter(s => s.id !== activeSite?.id);
+  const matchModeLabel = { sku: "🔑 SKU", attribute: "🏷 Attribuut", manual: "🔍 Handmatig" };
 
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
@@ -1033,7 +1143,7 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
           <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Verbonden producten</h2>
           <p style={{ fontSize: 13, color: "var(--mx)" }}>
             Koppel producten van <strong>{activeSite?.name}</strong> aan dezelfde producten in andere shops.
-            Gebruik daarna "Sync" om velden door te sturen.
+            Kies hoe je wil koppelen en welke velden gesynchroniseerd worden.
           </p>
         </div>
         <Badge color={connections.length > 0 ? "green" : "default"}>{connections.length} verbindingen</Badge>
@@ -1071,31 +1181,74 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
                 }
               </div>
 
-              {/* Per-shop connection rows */}
+              {/* Per-shop rows */}
               <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
                 {otherSites.map(targetShop => {
                   const conn = getConn(p.id, targetShop.id);
                   const syncKey = `${p.id}_${targetShop.id}`;
                   const isSyncing = syncing[syncKey];
+                  const fieldsExpanded = conn && openFields[conn.id];
+                  const currentFields = conn ? (pendingFields[conn.id] ?? conn.sync_fields ?? DEFAULT_SYNC_FIELDS) : DEFAULT_SYNC_FIELDS;
+                  const isDirty = conn && !!pendingFields[conn.id];
+
                   return (
-                    <div key={targetShop.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: "var(--rd)", border: `1px solid ${conn ? "rgba(91,214,141,0.4)" : "var(--b1)"}`, background: conn ? "rgba(91,214,141,0.06)" : "var(--s2)" }}>
-                      <span style={{ fontSize: 16, flexShrink: 0 }}>{targetShop.flag}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>{targetShop.name}</div>
-                        {conn
-                          ? <div style={{ fontSize: 11, color: "var(--mx)" }}>→ product #{conn.target_product_id} {conn.target_sku ? `(SKU: ${conn.target_sku})` : ""}</div>
-                          : <div style={{ fontSize: 11, color: "var(--dm)" }}>Nog niet gekoppeld</div>
-                        }
-                      </div>
-                      {conn ? (
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <Btn variant="primary" size="sm" disabled={isSyncing} onClick={() => syncProduct(p, targetShop.id, conn.id)}>
-                            {isSyncing ? <><span style={{ display: "inline-block", width: 10, height: 10, border: "1.5px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} /> Syncing...</> : "↑ Sync"}
-                          </Btn>
-                          <Btn variant="ghost" size="sm" onClick={() => disconnect(conn)}>✕</Btn>
+                    <div key={targetShop.id} style={{ border: `1px solid ${conn ? "rgba(91,214,141,0.4)" : "var(--b1)"}`, borderRadius: "var(--rd)", background: conn ? "rgba(91,214,141,0.04)" : "var(--s2)", overflow: "hidden" }}>
+                      {/* Connection row */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px" }}>
+                        <span style={{ fontSize: 16, flexShrink: 0 }}>{targetShop.flag}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{targetShop.name}</div>
+                          {conn ? (
+                            <div style={{ fontSize: 11, color: "var(--mx)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span>→ #{conn.target_product_id}{conn.target_sku ? ` (SKU: ${conn.target_sku})` : ""}</span>
+                              <span style={{ padding: "1px 6px", borderRadius: 10, background: "var(--s3)", fontSize: 10 }}>{matchModeLabel[conn.match_mode] || "🔍 Handmatig"}</span>
+                              <span style={{ fontSize: 10, color: "var(--dm)" }}>{(conn.sync_fields || DEFAULT_SYNC_FIELDS).length} velden</span>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: "var(--dm)" }}>Nog niet gekoppeld</div>
+                          )}
                         </div>
-                      ) : (
-                        <Btn variant="secondary" size="sm" onClick={() => openSearch(p, targetShop)}>🔗 Koppelen</Btn>
+                        {conn ? (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <Btn variant="ghost" size="sm" onClick={() => {
+                              setOpenFields(o => ({ ...o, [conn.id]: !o[conn.id] }));
+                              if (!pendingFields[conn.id]) setPendingFields(p => ({ ...p, [conn.id]: conn.sync_fields || DEFAULT_SYNC_FIELDS }));
+                            }} style={{ fontSize: 11 }}>⚙ Velden{isDirty ? " *" : ""}</Btn>
+                            <Btn variant="primary" size="sm" disabled={isSyncing} onClick={() => syncProduct(p, targetShop.id)}>
+                              {isSyncing ? <><span style={{ display: "inline-block", width: 10, height: 10, border: "1.5px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} /> Syncing...</> : "↑ Sync"}
+                            </Btn>
+                            <Btn variant="ghost" size="sm" onClick={() => disconnect(conn)}>✕</Btn>
+                          </div>
+                        ) : (
+                          <Btn variant="secondary" size="sm" onClick={() => openConnect(p, targetShop)}>🔗 Koppelen</Btn>
+                        )}
+                      </div>
+
+                      {/* Sync fields panel */}
+                      {fieldsExpanded && conn && (
+                        <div style={{ borderTop: "1px solid var(--b1)", padding: "10px 12px", background: "var(--s1)" }}>
+                          <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 8, fontWeight: 600 }}>Welke velden synchroniseren?</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                            {ALL_SYNC_FIELDS.map(f => {
+                              const checked = currentFields.includes(f.id);
+                              return (
+                                <label key={f.id} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", borderRadius: "var(--rd)", border: `1px solid ${checked ? "var(--pr)" : "var(--b2)"}`, background: checked ? "rgba(var(--pr-rgb,99,102,241),0.08)" : "var(--s2)", cursor: "pointer", fontSize: 11, userSelect: "none" }}>
+                                  <input type="checkbox" checked={checked} onChange={() => toggleField(conn.id, f.id)} style={{ margin: 0, accentColor: "var(--pr)" }} />
+                                  {f.label}
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <Btn variant="primary" size="sm" disabled={savingFields[conn.id]} onClick={() => saveSyncFields(conn.id)}>
+                              {savingFields[conn.id] ? "Opslaan..." : "Opslaan"}
+                            </Btn>
+                            <Btn variant="ghost" size="sm" onClick={() => {
+                              setPendingFields(p => { const n = {...p}; delete n[conn.id]; return n; });
+                              setOpenFields(o => ({ ...o, [conn.id]: false }));
+                            }}>Annuleren</Btn>
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
@@ -1106,41 +1259,220 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
         })}
       </div>
 
-      {/* Search / Connect modal */}
-      {searchModal && (
-        <Overlay open title={`Koppel aan ${searchModal.targetShop.flag} ${searchModal.targetShop.name}`} onClose={() => setSearchModal(null)} width={520}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: "10px 12px", background: "var(--s2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
-              Zoek het overeenkomende product in <strong>{searchModal.targetShop.name}</strong> en klik op Koppelen.
-            </div>
-            <Inp value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Zoek op naam of SKU..." />
-            {searching && <div style={{ fontSize: 12, color: "var(--dm)", padding: "8px 0" }}>Zoeken...</div>}
-            {!searching && searchResults.length === 0 && searchQuery.trim() && (
-              <div style={{ fontSize: 12, color: "var(--dm)", padding: "8px 0" }}>Geen producten gevonden.</div>
-            )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
-              {searchResults.map(r => {
-                const thumb = r.images?.[0]?.src;
-                return (
-                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--b1)", borderRadius: "var(--rd)", background: "var(--s2)" }}>
-                    {thumb && <img src={thumb} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: "cover", flexShrink: 0 }} />}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
-                      <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {r.sku || "—"} · #{r.id}</div>
-                    </div>
-                    <Btn variant="primary" size="sm" disabled={saving} onClick={() => connect(searchModal.product, searchModal.targetShop, r)}>
-                      {saving ? "..." : "Koppelen"}
-                    </Btn>
+      {/* ── Connect Modal ── */}
+      {connectModal && (() => {
+        const { product, targetShop, step, mode, matchAttribute, searchQuery, searchResults, searching, autoMatch, autoSearching, syncFields } = connectModal;
+
+        return (
+          <Overlay open title={`Koppel aan ${targetShop.flag} ${targetShop.name}`} onClose={() => setConnectModal(null)} width={540}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Product context */}
+              <div style={{ padding: "8px 12px", background: "var(--s2)", borderRadius: "var(--rd)", fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
+                {product.images?.[0]?.src && <img src={product.images[0].src} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: "cover" }} />}
+                <div>
+                  <div style={{ fontWeight: 600 }}>{product.name}</div>
+                  <div style={{ color: "var(--dm)", fontSize: 11 }}>SKU: {product.sku || "—"}</div>
+                </div>
+              </div>
+
+              {/* Step: Mode selection */}
+              {step === "mode" && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "var(--mx)" }}>Hoe wil je koppelen?</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[
+                      { id: "sku", icon: "🔑", title: "Koppelen via SKU", desc: `Zoek automatisch het product met SKU "${product.sku || "—"}" in ${targetShop.name}`, disabled: !product.sku },
+                      { id: "attribute", icon: "🏷", title: "Koppelen via attribuut", desc: "Gebruik een product-attribuut als identifier (bijv. artikelnummer)", disabled: !product.attributes?.length },
+                      { id: "manual", icon: "🔍", title: "Handmatig zoeken", desc: "Zoek en selecteer het product zelf in de doelshop" },
+                    ].map(opt => (
+                      <button key={opt.id} disabled={opt.disabled} onClick={() => {
+                        updModal({ mode: opt.id, step: "find" });
+                        if (opt.id === "sku") setTimeout(runSkuMatch, 50);
+                      }} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 14px", border: `1px solid ${opt.disabled ? "var(--b1)" : "var(--b2)"}`, borderRadius: "var(--rd)", background: opt.disabled ? "var(--s1)" : "var(--s2)", cursor: opt.disabled ? "not-allowed" : "pointer", textAlign: "left", opacity: opt.disabled ? 0.5 : 1, transition: "border-color 0.15s" }}>
+                        <span style={{ fontSize: 20, flexShrink: 0 }}>{opt.icon}</span>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.title}</div>
+                          <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{opt.desc}</div>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              )}
+
+              {/* Step: Find product */}
+              {step === "find" && mode === "sku" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ fontSize: 12, color: "var(--mx)" }}>Zoeken naar SKU <strong>{product.sku}</strong> in {targetShop.name}...</div>
+                  {autoSearching && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--dm)" }}>
+                      <div style={{ width: 14, height: 14, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                      Zoeken...
+                    </div>
+                  )}
+                  {!autoSearching && autoMatch === "no_sku" && (
+                    <div style={{ padding: 12, background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                      ⚠️ Dit product heeft geen SKU. Gebruik handmatig zoeken.
+                      <div style={{ marginTop: 8 }}><Btn variant="secondary" size="sm" onClick={() => updModal({ mode: "manual", searchQuery: product.name || "" })}>Handmatig zoeken</Btn></div>
+                    </div>
+                  )}
+                  {!autoSearching && autoMatch === "not_found" && (
+                    <div style={{ padding: 12, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                      ❌ Geen product gevonden met SKU <strong>{product.sku}</strong> in {targetShop.name}.
+                      <div style={{ marginTop: 8 }}><Btn variant="secondary" size="sm" onClick={() => updModal({ mode: "manual", searchQuery: product.sku || product.name || "" })}>Handmatig zoeken</Btn></div>
+                    </div>
+                  )}
+                  {!autoSearching && autoMatch === "error" && (
+                    <div style={{ padding: 12, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                      ❌ Fout bij zoeken. Probeer handmatig.
+                      <div style={{ marginTop: 8 }}><Btn variant="secondary" size="sm" onClick={() => updModal({ mode: "manual", searchQuery: product.sku || "" })}>Handmatig zoeken</Btn></div>
+                    </div>
+                  )}
+                  {!autoSearching && autoMatch && typeof autoMatch === "object" && (
+                    <div>
+                      <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 6, fontWeight: 600 }}>✅ Match gevonden:</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid rgba(91,214,141,0.4)", borderRadius: "var(--rd)", background: "rgba(91,214,141,0.06)" }}>
+                        {autoMatch.images?.[0]?.src && <img src={autoMatch.images[0].src} alt="" style={{ width: 36, height: 36, borderRadius: 4, objectFit: "cover" }} />}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{autoMatch.name}</div>
+                          <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {autoMatch.sku} · #{autoMatch.id}</div>
+                        </div>
+                      </div>
+                      <SyncFieldsPicker syncFields={syncFields} onChange={f => updModal({ syncFields: f })} />
+                      <div style={{ marginTop: 12 }}>
+                        <Btn variant="primary" disabled={saving} onClick={() => connect(autoMatch)}>
+                          {saving ? "Koppelen..." : "Bevestig koppeling"}
+                        </Btn>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ borderTop: "1px solid var(--b1)", paddingTop: 10 }}>
+                    <Btn variant="ghost" size="sm" onClick={() => updModal({ step: "mode", mode: null, autoMatch: null })}>← Terug</Btn>
+                  </div>
+                </div>
+              )}
+
+              {step === "find" && mode === "attribute" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 6 }}>Kies identifier-attribuut</label>
+                    <select value={matchAttribute} onChange={e => {
+                      updModal({ matchAttribute: e.target.value, searchResults: [] });
+                      if (e.target.value) setTimeout(() => runAttributeMatch(e.target.value), 50);
+                    }} style={{ width: "100%", padding: "8px 10px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 13 }}>
+                      <option value="">Selecteer attribuut...</option>
+                      {product.attributes?.map(a => (
+                        <option key={a.id || a.slug} value={a.slug || a.name}>{a.name} ({(a.options || [a.option]).join(", ")})</option>
+                      ))}
+                    </select>
+                  </div>
+                  {autoSearching && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--dm)" }}>
+                      <div style={{ width: 14, height: 14, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                      Zoeken...
+                    </div>
+                  )}
+                  {!autoSearching && searchResults.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 6 }}>Selecteer het overeenkomende product:</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 240, overflowY: "auto" }}>
+                        {searchResults.map(r => (
+                          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--b1)", borderRadius: "var(--rd)", background: "var(--s2)" }}>
+                            {r.images?.[0]?.src && <img src={r.images[0].src} alt="" style={{ width: 30, height: 30, borderRadius: 4, objectFit: "cover" }} />}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 500 }}>{r.name}</div>
+                              <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {r.sku || "—"} · #{r.id}</div>
+                            </div>
+                            <Btn variant="primary" size="sm" disabled={saving} onClick={() => {
+                              updModal({ autoMatch: r });
+                            }}>Selecteer</Btn>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!autoSearching && matchAttribute && searchResults.length === 0 && (
+                    <div style={{ fontSize: 12, color: "var(--dm)" }}>Geen resultaten gevonden.</div>
+                  )}
+                  {autoMatch && typeof autoMatch === "object" && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--mx)", marginBottom: 6 }}>✅ Geselecteerd:</div>
+                      <div style={{ padding: "8px 10px", border: "1px solid rgba(91,214,141,0.4)", borderRadius: "var(--rd)", background: "rgba(91,214,141,0.06)", fontSize: 12, fontWeight: 500 }}>{autoMatch.name} · SKU: {autoMatch.sku || "—"}</div>
+                      <SyncFieldsPicker syncFields={syncFields} onChange={f => updModal({ syncFields: f })} />
+                      <div style={{ marginTop: 12 }}>
+                        <Btn variant="primary" disabled={saving} onClick={() => connect(autoMatch)}>
+                          {saving ? "Koppelen..." : "Bevestig koppeling"}
+                        </Btn>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ borderTop: "1px solid var(--b1)", paddingTop: 10 }}>
+                    <Btn variant="ghost" size="sm" onClick={() => updModal({ step: "mode", mode: null, autoMatch: null, searchResults: [] })}>← Terug</Btn>
+                  </div>
+                </div>
+              )}
+
+              {step === "find" && mode === "manual" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <Inp value={searchQuery} onChange={e => updModal({ searchQuery: e.target.value })} placeholder="Zoek op naam of SKU..." />
+                  {searching && <div style={{ fontSize: 12, color: "var(--dm)" }}>Zoeken...</div>}
+                  {!searching && searchResults.length === 0 && searchQuery.trim() && (
+                    <div style={{ fontSize: 12, color: "var(--dm)" }}>Geen producten gevonden.</div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
+                    {searchResults.map(r => (
+                      <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--b1)", borderRadius: "var(--rd)", background: "var(--s2)" }}>
+                        {r.images?.[0]?.src && <img src={r.images[0].src} alt="" style={{ width: 30, height: 30, borderRadius: 4, objectFit: "cover" }} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+                          <div style={{ fontSize: 11, color: "var(--dm)" }}>SKU: {r.sku || "—"} · #{r.id}</div>
+                        </div>
+                        <Btn variant="primary" size="sm" disabled={saving} onClick={() => updModal({ autoMatch: r })}>Selecteer</Btn>
+                      </div>
+                    ))}
+                  </div>
+                  {autoMatch && typeof autoMatch === "object" && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--mx)", marginBottom: 6 }}>✅ Geselecteerd: {autoMatch.name}</div>
+                      <SyncFieldsPicker syncFields={syncFields} onChange={f => updModal({ syncFields: f })} />
+                      <div style={{ marginTop: 12 }}>
+                        <Btn variant="primary" disabled={saving} onClick={() => connect(autoMatch)}>
+                          {saving ? "Koppelen..." : "Bevestig koppeling"}
+                        </Btn>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ borderTop: "1px solid var(--b1)", paddingTop: 10 }}>
+                    <Btn variant="ghost" size="sm" onClick={() => updModal({ step: "mode", mode: null, autoMatch: null, searchResults: [] })}>← Terug</Btn>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        </Overlay>
-      )}
+          </Overlay>
+        );
+      })()}
     </div>
   );
 };
+
+// ── Sync Fields Picker (inline helper component) ──────────────────────────────
+const SyncFieldsPicker = ({ syncFields, onChange }) => (
+  <div style={{ marginTop: 12, padding: "10px 12px", border: "1px solid var(--b1)", borderRadius: "var(--rd)", background: "var(--s1)" }}>
+    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--mx)", marginBottom: 8 }}>Welke velden synchroniseren?</div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+      {ALL_SYNC_FIELDS.map(f => {
+        const checked = syncFields.includes(f.id);
+        return (
+          <label key={f.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 10, border: `1px solid ${checked ? "var(--pr)" : "var(--b2)"}`, background: checked ? "rgba(var(--pr-rgb,99,102,241),0.08)" : "var(--s2)", cursor: "pointer", fontSize: 11, userSelect: "none" }}>
+            <input type="checkbox" checked={checked} onChange={() => onChange(checked ? syncFields.filter(x => x !== f.id) : [...syncFields, f.id])} style={{ margin: 0, accentColor: "var(--pr)" }} />
+            {f.label}
+          </label>
+        );
+      })}
+    </div>
+  </div>
+);
 
 // ─── Marketing View ───────────────────────────────────────────────────────────
 const EXPIRY_OPTIONS = [

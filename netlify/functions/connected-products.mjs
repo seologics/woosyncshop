@@ -23,7 +23,14 @@ export default async (req) => {
   // POST — create connection
   if (req.method === 'POST') {
     try {
-      const { source_shop_id, source_product_id, source_sku, source_product_name, target_shop_id, target_product_id, target_sku } = await req.json()
+      const body = await req.json()
+      const {
+        source_shop_id, source_product_id, source_sku, source_product_name,
+        target_shop_id, target_product_id, target_sku,
+        match_mode = 'manual', match_attribute = null,
+        sync_fields = ['regular_price', 'sale_price', 'stock_quantity'],
+      } = body
+
       if (!source_shop_id || !source_product_id || !target_shop_id || !target_product_id) {
         return new Response(JSON.stringify({ error: 'source_shop_id, source_product_id, target_shop_id, target_product_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
       }
@@ -35,10 +42,32 @@ export default async (req) => {
       const { data, error } = await supabase.from('connected_products').insert({
         user_id: user.id, source_shop_id, source_product_id, source_sku: source_sku || null,
         source_product_name: source_product_name || null, target_shop_id, target_product_id, target_sku: target_sku || null,
+        match_mode, match_attribute: match_attribute || null,
+        sync_fields: sync_fields || ['regular_price', 'sale_price', 'stock_quantity'],
       }).select().single()
       if (error) throw error
-      await log(supabase, 'info', `Product connected: shop ${source_shop_id} p${source_product_id} → shop ${target_shop_id} p${target_product_id}`, { user_id: user.id })
+      await log(supabase, 'info', `Product connected (${match_mode}): shop ${source_shop_id} p${source_product_id} → shop ${target_shop_id} p${target_product_id}`, { user_id: user.id, match_mode })
       return new Response(JSON.stringify(data), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
+  }
+
+  // PATCH — update sync_fields (and optionally match settings) for a connection
+  if (req.method === 'PATCH') {
+    try {
+      const url = new URL(req.url, 'https://woosyncshop.com')
+      const id = url.searchParams.get('id')
+      if (!id) return new Response(JSON.stringify({ error: 'id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      const body = await req.json()
+      const allowed = {}
+      if (Array.isArray(body.sync_fields)) allowed.sync_fields = body.sync_fields
+      if (body.match_mode) allowed.match_mode = body.match_mode
+      if ('match_attribute' in body) allowed.match_attribute = body.match_attribute || null
+      if (!Object.keys(allowed).length) return new Response(JSON.stringify({ error: 'Nothing to update' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      const { data, error } = await supabase.from('connected_products').update(allowed).eq('id', id).eq('user_id', user.id).select().single()
+      if (error) throw error
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }

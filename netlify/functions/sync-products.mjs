@@ -70,8 +70,8 @@ export default async (req) => {
     // fields: array of field names to sync e.g. ["name","description","stock_quantity","regular_price","categories","attributes"]
     // target_shop_ids: optional array; if not given, sync to all connected shops
 
-    if (!source_shop_id || !product_id || !fields?.length) {
-      return new Response(JSON.stringify({ error: 'source_shop_id, product_id, fields required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    if (!source_shop_id || !product_id) {
+      return new Response(JSON.stringify({ error: 'source_shop_id and product_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     }
 
     // Get source shop
@@ -109,6 +109,9 @@ export default async (req) => {
       // Filter to requested target shops
       if (target_shop_ids && !target_shop_ids.includes(conn.target_shop_id)) continue
 
+      // Use per-connection sync_fields if stored, fall back to request fields
+      const effectiveFields = (conn.sync_fields?.length ? conn.sync_fields : fields)
+
       const { data: targetShop } = await supabase.from('shops').select('*').eq('id', conn.target_shop_id).eq('user_id', user.id).single()
       if (!targetShop) continue
 
@@ -119,7 +122,7 @@ export default async (req) => {
         // Build payload for the target product
         const payload = {}
 
-        for (const field of fields) {
+        for (const field of effectiveFields) {
           if (field === 'name') {
             let name = sourceProduct.name
             if (aiEnabled && targetShop.locale !== sourceShop.locale) {
