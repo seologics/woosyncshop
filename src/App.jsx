@@ -128,6 +128,146 @@ const G = () => {
         .contact-info { order: 1; }
         .contact-form { order: 2; }
       }
+
+      /* ── Dashboard TopNav ─────────────────────────────────────── */
+      .topnav-root {
+        background: var(--s1);
+        border-bottom: 1px solid var(--b1);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        flex-shrink: 0;
+      }
+      .topnav-row1 {
+        height: 52px;
+        display: flex;
+        align-items: center;
+        padding: 0 14px;
+        gap: 10px;
+      }
+      .topnav-tabs {
+        height: 38px;
+        display: none;
+        align-items: center;
+        padding: 0 14px 0;
+        gap: 2px;
+        border-top: 1px solid var(--b1);
+        overflow-x: auto;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      .topnav-tabs::-webkit-scrollbar { display: none; }
+      .topnav-site-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--s2);
+        border: 1px solid var(--b2);
+        border-radius: var(--rd);
+        cursor: pointer;
+        color: var(--tx);
+        font-size: 13px;
+        font-weight: 500;
+        min-width: 0;
+        flex-shrink: 1;
+        overflow: hidden;
+      }
+      .topnav-site-name {
+        flex: 1;
+        text-align: left;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .topnav-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+      .topnav-sync-label { display: inline; }
+      .topnav-push-label { display: inline; }
+
+      /* Desktop: tabs inline in row1 */
+      @media (min-width: 769px) {
+        .topnav-tabs-inline { display: flex; gap: 2px; margin-left: 4px; flex-shrink: 0; }
+        .topnav-tabs-row { display: none; }
+        .topnav-site-btn { min-width: 180px; max-width: 220px; }
+      }
+
+      /* Mobile: tabs move to second row */
+      @media (max-width: 768px) {
+        .topnav-tabs-inline { display: none; }
+        .topnav-tabs-row { display: flex; }
+        .topnav-site-btn { max-width: 160px; }
+        .topnav-sync-label { display: none; }
+        .topnav-push-label { display: none; }
+      }
+
+      /* ── Dashboard main content ───────────────────────────────── */
+      .dashboard-content {
+        flex: 1;
+        overflow: auto;
+        padding: 24px 28px;
+      }
+      @media (max-width: 768px) {
+        .dashboard-content { padding: 16px 14px; }
+      }
+
+      /* ── Product table ────────────────────────────────────────── */
+      .product-table-header {
+        display: grid;
+        grid-template-columns: 2fr 90px 90px 100px 80px;
+        gap: 0;
+        padding: 8px 14px;
+      }
+      @media (max-width: 640px) {
+        .product-table-header { display: none; }
+        .product-table-header-row { display: none !important; }
+      }
+      /* Product table scroll on small screens */
+      .products-table-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* ── Settings grid ────────────────────────────────────────── */
+      .settings-2col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 640px) {
+        .settings-2col { grid-template-columns: 1fr; }
+      }
+
+      /* ── Overlay / modal ─────────────────────────────────────── */
+      @media (max-width: 600px) {
+        .overlay-panel {
+          width: calc(100vw - 24px) !important;
+          max-width: calc(100vw - 24px) !important;
+          max-height: 92vh !important;
+          border-radius: 16px 16px 0 0 !important;
+          margin-bottom: 0 !important;
+          align-self: flex-end !important;
+        }
+        .overlay-backdrop {
+          align-items: flex-end !important;
+        }
+      }
+
+      /* ── Connected sites view ─────────────────────────────────── */
+      @media (max-width: 640px) {
+        .conn-row-actions { flex-wrap: wrap; gap: 4px; }
+      }
+
+      /* ── Tab label hide on very small ─────────────────────────── */
+      @media (max-width: 360px) {
+        .topnav-tab-label { display: none; }
+      }
+
+      /* ── Admin user table ─────────────────────────────────────── */
+      @media (max-width: 900px) {
+        .admin-user-table-header { display: none !important; }
+        .admin-user-row { flex-direction: column !important; align-items: flex-start !important; }
+      }
     `;
     document.head.appendChild(s);
     return () => document.head.removeChild(s);
@@ -235,8 +375,8 @@ const Overlay = ({ open, onClose, children, width = 860, title }) => {
   useEffect(() => { if (open) document.body.style.overflow = "hidden"; else document.body.style.overflow = ""; return () => { document.body.style.overflow = ""; }; }, [open]);
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={e => e.stopPropagation()} className="slide-up" style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", width: "100%", maxWidth: width, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
+    <div onClick={onClose} className="overlay-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} className="slide-up overlay-panel" style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", width: "100%", maxWidth: width, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
         {title && <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--mx)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px", borderRadius: 4 }}>×</button>
@@ -248,7 +388,7 @@ const Overlay = ({ open, onClose, children, width = 860, title }) => {
 };
 
 const Tabs = ({ tabs, active, onChange, size = "md" }) => (
-  <div style={{ display: "flex", gap: 2, background: "var(--s2)", padding: 3, borderRadius: "var(--rd)", flexWrap: "wrap" }}>
+  <div style={{ display: "flex", gap: 2, background: "var(--s2)", padding: 3, borderRadius: "var(--rd)", flexWrap: "wrap", overflowX: "auto" }}>
     {tabs.map(t => (
       <button key={t.id} onClick={() => onChange(t.id)} style={{ padding: size === "sm" ? "4px 10px" : "6px 14px", fontSize: size === "sm" ? 12 : 13, fontWeight: active === t.id ? 600 : 400, background: active === t.id ? "var(--s3)" : "transparent", color: active === t.id ? "var(--tx)" : "var(--mx)", border: active === t.id ? "1px solid var(--b1)" : "1px solid transparent", borderRadius: 6, cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
         {t.icon && <span>{t.icon}</span>}{t.label}
@@ -828,7 +968,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite }) => {
       {/* Table */}
       <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
         {/* Header */}
-        <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 110px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
+        <div className="product-table-header-row" style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 110px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
           {["", "", "Product", "SKU", "Prijs", "Voorraad", "Status", "Acties"].map((h, i) => (
             <span key={i} style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
           ))}
@@ -1665,7 +1805,7 @@ const CouponManager = ({ activeSite, user }) => {
           </Field>
 
           {/* Discount type + amount */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="settings-2col">
             <Field label="Kortingstype">
               <Sel
                 value={form.discount_type}
@@ -1684,7 +1824,7 @@ const CouponManager = ({ activeSite, user }) => {
           </div>
 
           {/* Usage limits */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="settings-2col">
             <Field label="Gebruikslimiet per waardebon" hint="Leeg = onbeperkt">
               <Inp
                 value={form.usage_limit}
@@ -1719,7 +1859,7 @@ const CouponManager = ({ activeSite, user }) => {
               </label>
             </div>
             {form.use_schedule && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="settings-2col">
                 <Field label="Startdatum coupon" hint="Wordt ingesteld op nu (WooCommerce direct geldig)">
                   <Inp value="Nu (direct geldig)" onChange={() => {}} style={{ color: "var(--dm)" }} />
                 </Field>
@@ -2246,7 +2386,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
             </Field>
             <Divider />
             <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="settings-2col">
               <Field label="Gemini model">
                 <Sel value={editUser.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[{ value: "gemini-2.5-flash-image", label: "Nano Banana (snel & zuinig)" }, { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2 (hoge efficiëntie)" }, { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro (professioneel)" }]} />
               </Field>
@@ -2848,7 +2988,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
             {addShopOpen ? (
               <div style={{ border: "1px solid var(--pr-l)", borderRadius: "var(--rd-lg)", padding: 20, background: "var(--s2)" }}>
                 <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Nieuwe shop toevoegen</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="settings-2col">
                   <Field label="Naam" required><Inp value={newShop.name} onChange={e => setNewShop(s => ({ ...s, name: e.target.value }))} placeholder="bijv. HaagDirect NL" /></Field>
                   <Field label="Site URL" required><Inp value={newShop.site_url} onChange={e => setNewShop(s => ({ ...s, site_url: e.target.value.replace(/\/$/, "") }))} placeholder="https://mijnshop.nl" /></Field>
                   <Field label="Taal / Locale" required><Sel value={newShop.locale} onChange={v => setNewShop(s => ({ ...s, locale: v }))} options={LOCALE_OPTIONS} /></Field>
@@ -2874,12 +3014,12 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         )}
         {settingsTab === "profile" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 560 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="settings-2col">
               <Field label="Naam"><Inp value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} /></Field>
               <Field label="Bedrijfsnaam (optioneel)"><Inp value={profileForm.business_name || ""} onChange={e => setProfileForm(f => ({ ...f, business_name: e.target.value }))} placeholder="Jouw bedrijf B.V." /></Field>
             </div>
             <Field label="E-mailadres"><Inp value={user?.email || ""} onChange={() => {}} type="email" readOnly style={{ opacity: 0.6 }} /></Field>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="settings-2col">
               <Field label="Straat + huisnummer"><Inp value={profileForm.address_street || ""} onChange={e => setProfileForm(f => ({ ...f, address_street: e.target.value }))} placeholder="Voorbeeldstraat 1" /></Field>
               <Field label="Postcode + Stad"><Inp value={profileForm.address_city || ""} onChange={e => setProfileForm(f => ({ ...f, address_city: e.target.value }))} placeholder="1234 AB Amsterdam" /></Field>
             </div>
@@ -2933,58 +3073,64 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
     finally { setPushing(false); }
   };
 
+  const tabDefs = [["products", "📦", "Producten"], ["connected", "🔗", "Verbonden"], ["hreflang", "🌐", "Hreflang"], ["marketing", "📣", "Marketing"], ["settings", "⚙", "Instellingen"], ...(isAdmin ? [["admin", "🛡", "Admin"]] : [])];
+
+  const TabBtn = ({ id, icon, label }) => (
+    <button onClick={() => setActiveView(id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", background: activeView === id ? (id === "admin" ? "rgba(239,68,68,0.15)" : "var(--s2)") : "transparent", border: activeView === id ? (id === "admin" ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--b2)") : "1px solid transparent", borderRadius: "var(--rd)", cursor: "pointer", color: activeView === id ? (id === "admin" ? "var(--re)" : "var(--tx)") : id === "admin" ? "rgba(239,68,68,0.7)" : "var(--mx)", fontSize: 12, fontWeight: activeView === id ? 600 : 400, transition: "all 0.15s", whiteSpace: "nowrap", flexShrink: 0 }}>
+      <span>{icon}</span><span className="topnav-tab-label">{label}</span>
+    </button>
+  );
+
   return (
-    <div style={{ height: 56, background: "var(--s1)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", padding: "0 16px", gap: 10, position: "sticky", top: 0, zIndex: 100, flexShrink: 0 }}>
-      {/* Logo */}
-      <div onClick={() => setActiveView("products")} style={{ marginRight: 8, cursor: "pointer", display: "flex", alignItems: "center" }}>
-        <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 22 }} />
-      </div>
+    <div className="topnav-root">
+      {/* Row 1: logo + site switcher + [desktop: tabs] + actions */}
+      <div className="topnav-row1">
+        {/* Logo */}
+        <div onClick={() => setActiveView("products")} style={{ marginRight: 6, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <img src="/woo-sync-shop-logo.png" alt="Woo Sync Shop" style={{ height: 20 }} />
+        </div>
 
-      {/* Site Switcher */}
-      <div style={{ position: "relative" }}>
-        <button onClick={() => setSiteOpen(v => !v)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", cursor: "pointer", color: "var(--tx)", fontSize: 13, fontWeight: 500, minWidth: 200 }}>
-          <span>{activeSite?.flag}</span>
-          <span style={{ flex: 1, textAlign: "left" }}>{activeSite?.name}</span>
-          <span style={{ color: "var(--dm)", fontSize: 11 }}>{siteOpen ? "▲" : "▼"}</span>
-        </button>
-        {siteOpen && (
-          <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 220, background: "var(--s1)", border: "1px solid var(--b2)", borderRadius: "var(--rd-lg)", boxShadow: "var(--sh)", zIndex: 200 }} className="slide-up">
-            {sites.map(s => (
-              <button key={s.id} onClick={() => { setActiveSite(s); setSiteOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", background: s.id === activeSite?.id ? "var(--s2)" : "transparent", border: "none", cursor: "pointer", color: "var(--tx)", fontSize: 13, textAlign: "left" }}>
-                <span>{s.flag}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: s.id === activeSite?.id ? 600 : 400 }}>{s.name}</div>
-                  <div style={{ fontSize: 10, color: "var(--dm)" }}>{s.domain}</div>
-                </div>
-                {s.id === activeSite?.id && <span style={{ color: "var(--pr-h)" }}>✓</span>}
-              </button>
-            ))}
-            <div style={{ borderTop: "1px solid var(--b1)", padding: "6px" }}>
-              <button onClick={() => { setSiteOpen(false); setActiveView("settings"); }} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "7px 10px", background: "transparent", border: "none", cursor: "pointer", color: "var(--pr-h)", fontSize: 12 }}>
-                <span>+</span> Shop toevoegen
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* View Tabs */}
-      <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
-        {[["products", "📦 Producten"], ["connected", "🔗 Verbonden"], ["hreflang", "🌐 Hreflang"], ["marketing", "📣 Marketing"], ["settings", "⚙ Instellingen"], ...(isAdmin ? [["admin", "🛡 Admin"]] : [])].map(([id, label]) => (
-          <button key={id} onClick={() => setActiveView(id)} style={{ padding: "5px 12px", background: activeView === id ? (id === "admin" ? "rgba(239,68,68,0.15)" : "var(--s2)") : "transparent", border: activeView === id ? (id === "admin" ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--b2)") : "1px solid transparent", borderRadius: "var(--rd)", cursor: "pointer", color: activeView === id ? (id === "admin" ? "var(--re)" : "var(--tx)") : id === "admin" ? "rgba(239,68,68,0.7)" : "var(--mx)", fontSize: 12, fontWeight: activeView === id ? 600 : 400, transition: "all 0.15s" }}>
-            {label}
+        {/* Site Switcher */}
+        <div style={{ position: "relative", flexShrink: 1, minWidth: 0 }}>
+          <button onClick={() => setSiteOpen(v => !v)} className="topnav-site-btn">
+            <span style={{ flexShrink: 0 }}>{activeSite?.flag}</span>
+            <span className="topnav-site-name">{activeSite?.name || "Selecteer shop"}</span>
+            <span style={{ color: "var(--dm)", fontSize: 11, flexShrink: 0 }}>{siteOpen ? "▲" : "▼"}</span>
           </button>
-        ))}
-      </div>
+          {siteOpen && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 220, background: "var(--s1)", border: "1px solid var(--b2)", borderRadius: "var(--rd-lg)", boxShadow: "var(--sh)", zIndex: 200 }} className="slide-up">
+              {sites.map(s => (
+                <button key={s.id} onClick={() => { setActiveSite(s); setSiteOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", background: s.id === activeSite?.id ? "var(--s2)" : "transparent", border: "none", cursor: "pointer", color: "var(--tx)", fontSize: 13, textAlign: "left" }}>
+                  <span>{s.flag}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: s.id === activeSite?.id ? 600 : 400 }}>{s.name}</div>
+                    <div style={{ fontSize: 10, color: "var(--dm)" }}>{s.domain}</div>
+                  </div>
+                  {s.id === activeSite?.id && <span style={{ color: "var(--pr-h)" }}>✓</span>}
+                </button>
+              ))}
+              <div style={{ borderTop: "1px solid var(--b1)", padding: "6px" }}>
+                <button onClick={() => { setSiteOpen(false); setActiveView("settings"); }} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "7px 10px", background: "transparent", border: "none", cursor: "pointer", color: "var(--pr-h)", fontSize: 12 }}>
+                  <span>+</span> Shop toevoegen
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-        {pendingCount > 0 && <Badge color="amber">{pendingCount} wijzigingen</Badge>}
-        <Btn variant="secondary" size="sm" onClick={handleSync} disabled={syncing} icon={syncing ? <span className="spin">↻</span> : "↔"}>
-          {syncing ? "Bezig..." : "Sync"}
-        </Btn>
-        <Btn variant="accent" size="sm" onClick={handlePush} disabled={pushing} icon={pushing ? <span className="spin">↻</span> : "↑"}>
-          {pushing ? "Pushen..." : "Push naar shops"}
-        </Btn>
+        {/* Desktop tabs (inline) */}
+        <div className="topnav-tabs-inline">
+          {tabDefs.map(([id, icon, label]) => <TabBtn key={id} id={id} icon={icon} label={label} />)}
+        </div>
+
+        <div className="topnav-actions">
+          {pendingCount > 0 && <Badge color="amber" style={{ display: "none" }}>{pendingCount}</Badge>}
+          <Btn variant="secondary" size="sm" onClick={handleSync} disabled={syncing} icon={syncing ? <span className="spin">↻</span> : "↔"}>
+            <span className="topnav-sync-label">{syncing ? "Bezig..." : "Sync"}</span>
+          </Btn>
+          <Btn variant="accent" size="sm" onClick={handlePush} disabled={pushing} icon={pushing ? <span className="spin">↻</span> : "↑"}>
+            <span className="topnav-push-label">{pushing ? "..." : "Push"}</span>
+          </Btn>
         <div style={{ position: "relative" }}>
           <div
             onClick={() => setAvatarOpen(o => !o)}
@@ -3018,6 +3164,15 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
           )}
         </div>
       </div>
+
+      {/* Mobile tab row (row 2) */}
+      <div className="topnav-tabs topnav-tabs-row">
+        {tabDefs.map(([id, icon, label]) => (
+          <button key={id} onClick={() => setActiveView(id)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", background: activeView === id ? (id === "admin" ? "rgba(239,68,68,0.15)" : "rgba(var(--pr-rgb,99,102,241),0.1)") : "transparent", border: "none", borderBottom: activeView === id ? "2px solid var(--pr-h)" : "2px solid transparent", cursor: "pointer", color: activeView === id ? (id === "admin" ? "var(--re)" : "var(--pr-h)") : "var(--mx)", fontSize: 12, fontWeight: activeView === id ? 600 : 400, transition: "all 0.15s", whiteSpace: "nowrap", flexShrink: 0, borderRadius: 0 }}>
+            <span>{icon}</span><span style={{ marginLeft: 3 }}>{label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 };
@@ -3037,7 +3192,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
           <Btn variant="ghost" size="sm" onClick={onLogout}>Uitloggen</Btn>
         </div>
       </nav>
-      <div style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "clamp(16px, 3vw, 32px)" }}>
         <AdminPanel />
       </div>
     </div>
@@ -3256,7 +3411,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall }) => {
             notify("Push mislukt: " + e.message, "error");
           }
         }} />
-      <div style={{ flex: 1, overflow: "auto", padding: "24px 28px" }}>
+      <div className="dashboard-content">
         {shops.length === 0 && activeView !== "settings" ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 16, textAlign: "center" }}>
             <div style={{ fontSize: 48 }}>🏪</div>
@@ -3619,7 +3774,7 @@ const AuthModal = ({ mode, onClose, onSuccess }) => {
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Account aanmaken</h2>
           <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Start met het beheren van al jouw webshops</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div className="settings-2col">
               <Field label="Naam *"><Inp value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jouw naam" /></Field>
               <Field label="Bedrijfsnaam"><Inp value={form.business_name} onChange={e => setForm(f => ({ ...f, business_name: e.target.value }))} placeholder="Optioneel" /></Field>
             </div>
@@ -4268,7 +4423,7 @@ const PlatformSettings = () => {
       <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>🌐 Platform-brede API keys</div>
         <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 12 }}>Deze keys gelden als fallback wanneer een gebruiker geen eigen keys heeft ingesteld.</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="settings-2col">
           <Field label="Platform Gemini API Key">
             <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder="AIzaSy..." />
           </Field>
@@ -4279,7 +4434,7 @@ const PlatformSettings = () => {
       </div>
       <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>🔌 Mollie configuratie</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="settings-2col">
           <Field label="Mollie API Key (Live)">
             <Inp value={ps.mollie_api_key} onChange={e => setPs(p => ({ ...p, mollie_api_key: e.target.value }))} type="password" placeholder="live_..." />
           </Field>
