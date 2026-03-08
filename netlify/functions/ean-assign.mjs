@@ -1,7 +1,10 @@
 // netlify/functions/ean-assign.mjs
-// Atomically assigns the next available EAN from the pool to a product.
-// POST  { sku, product_id } → { ean }
-// GET   (no body)           → { available, used, total }
+// GET                          → { available, used, total, alert_threshold }
+// POST { sku, product_id }     → { ean }                    — assign next EAN
+// POST { action:"import", eans:[...], filename } → { imported, skipped }  — bulk import
+// POST { action:"export" }     → { rows: [{ean,sku,at,product_id},...] }  — export assigned
+// POST { action:"set_threshold", threshold:N }  → { ok }   — save alert threshold
+// DELETE { ean }               → { ok }                     — release EAN back to pool (admin)
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -16,48 +19,185 @@ const CORS = {
   "Content-Type": "application/json",
 };
 
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: CORS });
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+async function getUser(req) {
+  const token = (req.headers.get("authorization") || "").replace("Bearer ", "");
+  if (!token) return null;
+  const { data: { user } } = await supabase.auth.getUser(token);
+  return user || null;
+}
+
+async function isSuperAdmin(user) {
+  if (!user) return false;
+  return user.email === Netlify.env.get("SUPERADMIN_EMAIL");
+}
+
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
-  // ── Auth: must be logged-in user ──────────────────────────────────────────
-  const token = (req.headers.get("authorization") || "").replace("Bearer ", "");
-  if (!token) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: CORS });
-  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-  if (authErr || !user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: CORS });
+  const user = await getUser(req);
+  if (!user) return json({ error: "Unauthorized" }, 401);
 
   // ── GET: pool status ──────────────────────────────────────────────────────
   if (req.method === "GET") {
     const { data, error } = await supabase
       .from("ean_pool")
-      .select("ean, assigned_sku", { count: "exact" });
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: CORS });
+      .select("ean, assigned_sku");
+    if (error) return json({ error: error.message }, 500);
+
     const total     = data.length;
     const used      = data.filter(r => r.assigned_sku).length;
     const available = total - used;
-    return new Response(JSON.stringify({ total, used, available }), { status: 200, headers: CORS });
+
+    // Load alert threshold from platform_settings
+    const { data: ps } = await supabase
+      .from("platform_settings")
+      .select("ean_alert_threshold, ean_alert_email")
+      .eq("id", 1)
+      .single();
+
+    return json({
+      total, used, available,
+      alert_threshold: ps?.ean_alert_threshold ?? 200,
+      alert_email:     ps?.ean_alert_email     ?? "",
+    });
+  }
+
+  // ── DELETE: release EAN back to pool ─────────────────────────────────────
+  if (req.method === "DELETE") {
+    if (!(await isSuperAdmin(user))) return json({ error: "Forbidden" }, 403);
+    let body = {};
+    try { body = await req.json(); } catch {}
+    if (!body.ean) return json({ error: "Missing ean" }, 400);
+    const { error } = await supabase
+      .from("ean_pool")
+      .update({ assigned_sku: null, assigned_at: null, product_id: null })
+      .eq("ean", body.ean);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  let body = {};
+  try { body = await req.json(); } catch {}
+
+  // ── POST action: set_threshold ────────────────────────────────────────────
+  if (body.action === "set_threshold") {
+    if (!(await isSuperAdmin(user))) return json({ error: "Forbidden" }, 403);
+    const t = parseInt(body.threshold);
+    if (isNaN(t) || t < 0) return json({ error: "Invalid threshold" }, 400);
+    const { error } = await supabase
+      .from("platform_settings")
+      .update({ ean_alert_threshold: t, ean_alert_email: body.alert_email || null })
+      .eq("id", 1);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  // ── POST action: export ───────────────────────────────────────────────────
+  if (body.action === "export") {
+    if (!(await isSuperAdmin(user))) return json({ error: "Forbidden" }, 403);
+    const { data, error } = await supabase
+      .from("ean_pool")
+      .select("ean, assigned_sku, assigned_at, product_id")
+      .order("assigned_at", { ascending: false, nullsFirst: false });
+    if (error) return json({ error: error.message }, 500);
+    return json({ rows: data });
+  }
+
+  // ── POST action: import ───────────────────────────────────────────────────
+  if (body.action === "import") {
+    if (!(await isSuperAdmin(user))) return json({ error: "Forbidden" }, 403);
+    const eans = body.eans;
+    if (!Array.isArray(eans) || eans.length === 0) return json({ error: "No EANs provided" }, 400);
+
+    // Validate all are 13-digit numeric strings
+    const valid = eans.filter(e => /^\d{13}$/.test(String(e)));
+    if (valid.length === 0) return json({ error: "No valid EAN-13 codes found" }, 400);
+
+    // Bulk upsert — ON CONFLICT DO NOTHING skips duplicates
+    const rows = valid.map(e => ({ ean: String(e) }));
+    const CHUNK = 500;
+    let imported = 0;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const { error, count } = await supabase
+        .from("ean_pool")
+        .upsert(chunk, { onConflict: "ean", ignoreDuplicates: true })
+        .select("ean", { count: "exact" });
+      if (error) return json({ error: error.message }, 500);
+      imported += count || chunk.length;
+    }
+    const skipped = valid.length - imported;
+    return json({ imported, skipped, total_valid: valid.length });
   }
 
   // ── POST: assign next available EAN ──────────────────────────────────────
-  if (req.method === "POST") {
-    let body = {};
-    try { body = await req.json(); } catch {}
-    const { sku, product_id } = body;
-    if (!sku) return new Response(JSON.stringify({ error: "Missing sku" }), { status: 400, headers: CORS });
+  const { sku, product_id } = body;
+  if (!sku) return json({ error: "Missing sku" }, 400);
 
-    // Atomic: select first unassigned EAN and immediately lock + update it
-    // We use a Postgres RPC to avoid race conditions between concurrent requests
-    const { data, error } = await supabase.rpc("assign_next_ean", {
-      p_sku: sku,
-      p_product_id: product_id || null,
+  const { data, error } = await supabase.rpc("assign_next_ean", {
+    p_sku: sku,
+    p_product_id: product_id || null,
+  });
+
+  if (error) return json({ error: error.message }, 500);
+  if (!data) return json({ error: "EAN pool leeg — importeer nieuwe EAN-codes via Admin → Platform → EAN Pool." }, 422);
+
+  // Check if we should send a low-stock alert after this assignment
+  // (fire-and-forget, don't block the response)
+  checkAndAlert(supabase).catch(() => {});
+
+  return json({ ean: data });
+};
+
+async function checkAndAlert(sb) {
+  const { data: ps } = await sb.from("platform_settings")
+    .select("ean_alert_threshold, ean_alert_email, ean_last_alert_at")
+    .eq("id", 1).single();
+  if (!ps?.ean_alert_email || !ps?.ean_alert_threshold) return;
+
+  const { data: pool } = await sb.from("ean_pool").select("assigned_sku");
+  if (!pool) return;
+  const available = pool.filter(r => !r.assigned_sku).length;
+  if (available > ps.ean_alert_threshold) return;
+
+  // Throttle: only send once per 24h
+  const lastAlert = ps.ean_last_alert_at ? new Date(ps.ean_last_alert_at) : null;
+  if (lastAlert && (Date.now() - lastAlert.getTime()) < 86400000) return;
+
+  // Send email via Netlify's built-in email (or just log — user can add SES later)
+  const sendgridKey = Netlify.env.get("SENDGRID_API_KEY");
+  const fromEmail   = Netlify.env.get("FROM_EMAIL") || "info@woosyncshop.com";
+  if (sendgridKey) {
+    await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${sendgridKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: ps.ean_alert_email }] }],
+        from: { email: fromEmail, name: "WooSyncShop" },
+        subject: `⚠️ EAN Pool bijna leeg — nog ${available} codes beschikbaar`,
+        content: [{
+          type: "text/html",
+          value: `<p>Hallo,</p>
+<p>De EAN-codepoel van WooSyncShop bevat nog slechts <strong>${available} beschikbare codes</strong> (drempelwaarde: ${ps.ean_alert_threshold}).</p>
+<p>Importeer nieuwe EAN-codes via <strong>Admin → Platform → EAN Pool</strong> om te voorkomen dat productduplicatie stopt.</p>
+<p>Bestel nieuwe codes op <a href="https://www.eankoning.com">eankoning.com</a> en upload het .xlsx-bestand in het beheerdersdashboard.</p>
+<hr>
+<p style="font-size:12px;color:#666">WooSyncShop · automatische melding</p>`
+        }],
+      }),
     });
-
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: CORS });
-    if (!data) return new Response(JSON.stringify({ error: "EAN pool leeg — voeg nieuwe EAN-codes toe." }), { status: 422, headers: CORS });
-
-    return new Response(JSON.stringify({ ean: data }), { status: 200, headers: CORS });
   }
 
-  return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: CORS });
-};
+  // Record that we sent the alert
+  await sb.from("platform_settings")
+    .update({ ean_last_alert_at: new Date().toISOString() })
+    .eq("id", 1);
+}
 
 export const config = { path: "/api/ean-assign" };

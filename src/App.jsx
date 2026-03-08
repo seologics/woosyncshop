@@ -6194,7 +6194,14 @@ const PlatformSettings = () => {
   const [saved, setSaved] = useState(false);
   const [methods, setMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
-  const [eanPool, setEanPool] = useState(null);
+  const [eanPool, setEanPool]           = useState(null);
+  const [eanImporting, setEanImporting] = useState(false);
+  const [eanImportResult, setEanImportResult] = useState(null); // {imported,skipped} | {error}
+  const [eanExporting, setEanExporting] = useState(false);
+  const [eanThreshold, setEanThreshold] = useState(200);
+  const [eanAlertEmail, setEanAlertEmail] = useState("");
+  const [eanThresholdSaving, setEanThresholdSaving] = useState(false);
+  const [eanTab, setEanTab]             = useState("status"); // status | import | export
 
   const loadEanPool = async () => {
     try {
@@ -6202,6 +6209,8 @@ const PlatformSettings = () => {
       const res = await fetch("/api/ean-assign", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const d = await res.json();
       setEanPool(d);
+      if (d.alert_threshold !== undefined) setEanThreshold(d.alert_threshold);
+      if (d.alert_email !== undefined) setEanAlertEmail(d.alert_email || "");
     } catch {}
   };
 
@@ -6241,6 +6250,9 @@ const PlatformSettings = () => {
     load();
     loadEanPool();
   }, []);
+
+  const save = async () => {
+    setSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       await fetch("/api/platform-settings", {
@@ -6254,6 +6266,79 @@ const PlatformSettings = () => {
   };
 
   if (loading) return <div style={{ padding: 20, color: "var(--mx)", fontSize: 13 }}>Laden...</div>;
+
+  const handleEanImport = async (file) => {
+    if (!file) return;
+    setEanImporting(true);
+    setEanImportResult(null);
+    try {
+      const buf = await file.arrayBuffer();
+      let eans = [];
+      if (!window.XLSX) {
+        await new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+          s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+      }
+      const wb = window.XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
+      eans = rows.flat().map(v => String(v || "").trim().replace(/\D/g, "")).filter(v => v.length === 13);
+      if (eans.length === 0) { setEanImportResult({ error: "Geen geldige EAN-13 codes gevonden in dit bestand." }); return; }
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/ean-assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ action: "import", eans, filename: file.name }),
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) { setEanImportResult({ error: result.error }); return; }
+      setEanImportResult(result);
+      await loadEanPool();
+    } catch (e) {
+      setEanImportResult({ error: e.message });
+    } finally {
+      setEanImporting(false);
+    }
+  };
+
+  const handleEanExport = async () => {
+    setEanExporting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/ean-assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ action: "export" }),
+      });
+      const { rows } = await res.json();
+      const header = "EAN,SKU,Toegewezen op,Product ID";
+      const lines = (rows || []).filter(r => r.assigned_sku).map(r =>
+        `${r.ean},${r.assigned_sku || ""},${r.assigned_at ? new Date(r.assigned_at).toLocaleDateString("nl-NL") : ""},${r.product_id || ""}`
+      );
+      const csv = [header, ...lines].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `ean-gebruikt-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e) { alert("Export mislukt: " + e.message); }
+    finally { setEanExporting(false); }
+  };
+
+  const saveEanThreshold = async () => {
+    setEanThresholdSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch("/api/ean-assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ action: "set_threshold", threshold: parseInt(eanThreshold) || 200, alert_email: eanAlertEmail }),
+      });
+    } finally { setEanThresholdSaving(false); }
+  };
 
   const hasGemini = !!ps.gemini_api_key;
   const hasOpenAI = !!ps.openai_api_key;
@@ -6370,39 +6455,162 @@ const PlatformSettings = () => {
         </div>
       </div>
 
-      {/* ── EAN Pool Status ── */}
-      <div style={{ padding: 20, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>🏷 EAN Pool (EAN_Codes_201709777)</div>
-          <Btn variant="ghost" size="sm" onClick={loadEanPool}>↻ Vernieuwen</Btn>
-        </div>
-        {!eanPool ? (
-          <div style={{ fontSize: 13, color: "var(--dm)" }}>Laden...</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-              {[
-                { label: "Totaal", value: eanPool.total, color: "var(--tx)" },
-                { label: "Gebruikt", value: eanPool.used, color: "var(--ac)" },
-                { label: "Beschikbaar", value: eanPool.available, color: eanPool.available < 100 ? "var(--re)" : "var(--gr)" },
-              ].map(({ label, value, color }) => (
-                <div key={label} style={{ padding: "12px 14px", background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
-                  <div style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontWeight: 800, fontSize: 22, color }}>{value?.toLocaleString("nl-NL")}</div>
+      {/* ── EAN Pool Management ── */}
+      {(() => {
+        const pct = eanPool ? ((eanPool.used / Math.max(eanPool.total, 1)) * 100) : 0;
+        const low = eanPool && eanPool.available <= eanThreshold;
+        return (
+          <div style={{ border: `2px solid ${low ? "rgba(239,68,68,0.4)" : "var(--b1)"}`, borderRadius: "var(--rd-xl)", overflow: "hidden", background: "var(--s2)" }}>
+            {/* Header */}
+            <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 14, borderBottom: "1px solid var(--b1)", flexWrap: "wrap" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                  🏷 EAN Pool
+                  {low && <Badge color="red">⚠ Bijna leeg</Badge>}
                 </div>
-              ))}
+                <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 2 }}>
+                  {eanPool ? `${eanPool.available.toLocaleString("nl-NL")} beschikbaar van ${eanPool.total.toLocaleString("nl-NL")} totaal` : "Laden..."}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["status","import","export"].map(t => (
+                  <Btn key={t} variant={eanTab === t ? "primary" : "ghost"} size="sm" onClick={() => setEanTab(t)}>
+                    {{ status: "📊 Status", import: "📥 Importeer", export: "📤 Exporteer" }[t]}
+                  </Btn>
+                ))}
+                <Btn variant="ghost" size="sm" onClick={loadEanPool} title="Vernieuwen">↻</Btn>
+              </div>
             </div>
-            {/* Progress bar */}
-            <div style={{ height: 6, background: "var(--s3)", borderRadius: 99, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${((eanPool.used / eanPool.total) * 100).toFixed(1)}%`, background: eanPool.available < 100 ? "var(--re)" : "var(--pr)", borderRadius: 99, transition: "width 0.4s" }} />
-            </div>
-            <div style={{ fontSize: 12, color: "var(--dm)" }}>
-              {((eanPool.used / eanPool.total) * 100).toFixed(1)}% gebruikt · EAN codes worden automatisch toegewezen bij product duplicatie
-              {eanPool.available < 100 && <span style={{ color: "var(--re)", fontWeight: 600 }}> — ⚠ Minder dan 100 EAN codes beschikbaar!</span>}
+
+            <div style={{ padding: 20 }}>
+
+              {/* ── TAB: Status ── */}
+              {eanTab === "status" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {/* Stat tiles */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    {[
+                      { label: "Totaal", value: eanPool?.total, color: "var(--tx)" },
+                      { label: "Gebruikt", value: eanPool?.used, color: "var(--ac)" },
+                      { label: "Beschikbaar", value: eanPool?.available, color: low ? "var(--re)" : "var(--gr)" },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} style={{ padding: "12px 14px", background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
+                        <div style={{ fontSize: 11, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
+                        <div style={{ fontWeight: 800, fontSize: 22, color }}>{value != null ? value.toLocaleString("nl-NL") : "—"}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Progress bar */}
+                  {eanPool && <>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--dm)", marginBottom: 4 }}>
+                        <span>Gebruik</span><span>{pct.toFixed(1)}%</span>
+                      </div>
+                      <div style={{ height: 8, background: "var(--s3)", borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: low ? "var(--re)" : pct > 70 ? "var(--ac)" : "var(--gr)", borderRadius: 99, transition: "width 0.4s" }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--dm)", lineHeight: 1.6 }}>
+                      EAN codes worden automatisch toegewezen bij het dupliceren van producten via de <strong>⧉ knop</strong> in de productenlijst.
+                      {low && <span style={{ color: "var(--re)", fontWeight: 600, display: "block", marginTop: 4 }}>
+                        ⚠ Minder dan {eanThreshold} codes over — importeer nieuwe codes via het <strong>Importeer</strong> tabblad.
+                        Bestel nieuwe codes op <a href="https://www.eankoning.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)" }}>eankoning.com</a>.
+                      </span>}
+                    </div>
+                  </>}
+                  {/* Alert config */}
+                  <div style={{ padding: 14, background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: "var(--mx)" }}>🔔 E-mailmelding bij lage voorraad</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <Field label="Drempelwaarde" hint="Stuur melding als beschikbaar ≤ dit getal">
+                        <Inp value={eanThreshold} onChange={e => setEanThreshold(e.target.value)} type="number" suffix="codes" />
+                      </Field>
+                      <Field label="E-mailadres melding">
+                        <Inp value={eanAlertEmail} onChange={e => setEanAlertEmail(e.target.value)} type="email" placeholder="info@jouwbedrijf.com" />
+                      </Field>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <Btn variant="secondary" size="sm" onClick={saveEanThreshold} disabled={eanThresholdSaving}>
+                        {eanThresholdSaving ? "Opslaan..." : "Instellingen opslaan"}
+                      </Btn>
+                      <span style={{ fontSize: 11, color: "var(--dm)" }}>Vereist <code style={{ background: "var(--s2)", padding: "1px 4px", borderRadius: 3 }}>SENDGRID_API_KEY</code> Netlify env var</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── TAB: Import ── */}
+              {eanTab === "import" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ padding: "12px 14px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 13, lineHeight: 1.7 }}>
+                    <strong>Hoe te importeren:</strong><br />
+                    1. Bestel nieuwe EAN-codes op <a href="https://www.eankoning.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)" }}>eankoning.com</a><br />
+                    2. Download het meegeleverde <strong>.xlsx bestand</strong><br />
+                    3. Upload het hieronder — duplicaten worden automatisch overgeslagen
+                  </div>
+
+                  {/* Drop zone */}
+                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "32px 20px", border: `2px dashed ${eanImporting ? "var(--pr)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", cursor: eanImporting ? "wait" : "pointer", background: "var(--s3)", transition: "border-color 0.2s, background 0.2s" }}
+                    onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--pr)"; e.currentTarget.style.background = "rgba(99,102,241,0.05)"; }}
+                    onDragLeave={e => { e.currentTarget.style.borderColor = "var(--b2)"; e.currentTarget.style.background = "var(--s3)"; }}
+                    onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--b2)"; e.currentTarget.style.background = "var(--s3)"; const f = e.dataTransfer.files[0]; if (f) handleEanImport(f); }}>
+                    <input type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) { handleEanImport(f); e.target.value = ""; }}} />
+                    {eanImporting ? (
+                      <>
+                        <div style={{ width: 32, height: 32, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>Importeren...</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 36 }}>📥</div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>Klik om .xlsx te selecteren, of sleep hier naartoe</div>
+                        <div style={{ fontSize: 12, color: "var(--dm)" }}>Accepteert: .xlsx, .xls, .csv · Verwacht kolom A = EAN-13 codes</div>
+                      </>
+                    )}
+                  </label>
+
+                  {/* Import result */}
+                  {eanImportResult && (
+                    eanImportResult.error ? (
+                      <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "var(--rd)", color: "var(--re)", fontSize: 13 }}>
+                        ❌ {eanImportResult.error}
+                      </div>
+                    ) : (
+                      <div style={{ padding: "12px 14px", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "var(--rd)", fontSize: 13 }}>
+                        ✅ <strong>{eanImportResult.imported?.toLocaleString("nl-NL")} nieuwe EAN-codes</strong> toegevoegd aan de pool
+                        {eanImportResult.skipped > 0 && <span style={{ color: "var(--dm)" }}> · {eanImportResult.skipped} duplicaten overgeslagen</span>}
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* ── TAB: Export ── */}
+              {eanTab === "export" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ padding: "12px 14px", background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", fontSize: 13, lineHeight: 1.7 }}>
+                    Exporteer een CSV met alle <strong>gebruikte EAN-codes</strong> inclusief de gekoppelde SKU en datum.<br />
+                    Handig voor je GS1-administratie of als backup.
+                  </div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <Btn variant="primary" onClick={handleEanExport} disabled={eanExporting} icon="📤">
+                      {eanExporting ? "Exporteren..." : `Download CSV (${eanPool?.used?.toLocaleString("nl-NL") || "?"} regels)`}
+                    </Btn>
+                    <span style={{ fontSize: 12, color: "var(--dm)" }}>Kolommen: EAN · SKU · Datum · Product ID</span>
+                  </div>
+                  <div style={{ padding: "10px 12px", background: "var(--s3)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", fontSize: 12, color: "var(--dm)", fontFamily: "monospace" }}>
+                    EAN,SKU,Toegewezen op,Product ID<br />
+                    8785364874703,FA-5L-100-CM,07/03/2026,13099<br />
+                    8785364874710,FA-3L-050-CM,07/03/2026,13100<br />
+                    <span style={{ color: "var(--b3)" }}>...</span>
+                  </div>
+                </div>
+              )}
+
             </div>
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       <Btn variant="primary" onClick={save} disabled={saving} style={{ alignSelf: "flex-start", minWidth: 160 }}>
         {saved ? "✓ Opgeslagen" : saving ? "Opslaan..." : "Opslaan"}
