@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
+import nodemailer from 'nodemailer'
 
 const SUPERADMIN_EMAIL = 'leadingvation@gmail.com'
 
 export default async (req) => {
-  if (!['GET', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+  if (!['GET', 'PUT', 'PATCH', 'DELETE', 'POST'].includes(req.method)) {
     return new Response('Method not allowed', { status: 405 })
   }
 
@@ -73,6 +74,165 @@ export default async (req) => {
       if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }) }
+  }
+
+  // POST: create user from superadmin
+  if (req.method === 'POST') {
+    try {
+      const body = await req.json()
+      const { email, password, full_name, business_name, country, plan, billingPeriod, discountCode,
+              max_shops, max_connected_products, gemini_model, img_max_kb, img_quality, img_max_width,
+              ai_taxonomy_enabled } = body
+
+      if (!email?.trim() || !password || password.length < 8) {
+        return new Response(JSON.stringify({ error: 'E-mail en wachtwoord (min 8 tekens) zijn verplicht.' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      const isFree = discountCode?.toLowerCase() === 'freeforever'
+      const effectivePlan = isFree ? 'free_forever' : 'pending_payment'
+      const chosenPlan = isFree ? null : (plan || 'growth')
+
+      // Check if user already exists
+      const { data: { users: existingUsers } } = await supabase.auth.admin.listUsers()
+      if (existingUsers?.some(u => u.email?.toLowerCase() === email.toLowerCase())) {
+        return new Response(JSON.stringify({ error: 'Dit e-mailadres is al in gebruik.' }), { status: 409, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // Create auth user
+      const { data: { user: newUser }, error: createErr } = await supabase.auth.admin.createUser({
+        email, password,
+        email_confirm: true,
+        user_metadata: { full_name: full_name || '', country: country || 'NL', plan: chosenPlan || 'free_forever', billing_period: billingPeriod || 'monthly' },
+      })
+      if (createErr) return new Response(JSON.stringify({ error: createErr.message }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+
+      // Determine plan limits for defaults
+      const PLAN_LIMITS = {
+        starter:      { sites: 2,  connected_products: 500,   img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: 'gemini-2.0-flash-lite' },
+        growth:       { sites: 5,  connected_products: 2000,  img_max_kb: 400,  img_quality: 85, img_max_width: 1600, gemini_model: 'gemini-2.0-flash' },
+        pro:          { sites: 10, connected_products: 10000, img_max_kb: 600,  img_quality: 90, img_max_width: 2400, gemini_model: 'gemini-2.5-flash-image' },
+        free_forever: { sites: 2,  connected_products: 500,   img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: 'gemini-2.0-flash-lite' },
+      }
+      const limits = PLAN_LIMITS[chosenPlan || 'free_forever'] || PLAN_LIMITS.growth
+
+      // Create user_profile
+      const profileRow = {
+        id: newUser.id,
+        full_name: full_name || '',
+        business_name: business_name || null,
+        country: country || 'NL',
+        plan: effectivePlan,
+        chosen_plan: chosenPlan,
+        billing_period: billingPeriod || 'monthly',
+        max_shops: max_shops ? parseInt(max_shops) : limits.sites,
+        max_connected_products: max_connected_products ? parseInt(max_connected_products) : limits.connected_products,
+        gemini_model: gemini_model || limits.gemini_model,
+        img_max_kb: img_max_kb ? parseInt(img_max_kb) : limits.img_max_kb,
+        img_quality: img_quality ? parseInt(img_quality) : limits.img_quality,
+        img_max_width: img_max_width ? parseInt(img_max_width) : limits.img_max_width,
+        ai_taxonomy_enabled: ai_taxonomy_enabled ?? false,
+      }
+      await supabase.from('user_profiles').upsert(profileRow)
+
+      // Send email
+      try {
+        const firstName = (full_name || email).split(' ')[0]
+        const smtpUser = Netlify.env.get('AWS_SES_ACCESS_KEY_ID')
+        const smtpPass = Netlify.env.get('AWS_SES_SMTP_PASSWORD')
+        const smtpHost = `email-smtp.${Netlify.env.get('AWS_SES_REGION') || 'eu-west-1'}.amazonaws.com`
+        const transporter = nodemailer.createTransport({ host: smtpHost, port: 465, secure: true, auth: { user: smtpUser, pass: smtpPass } })
+
+        if (isFree) {
+          // Welcome email (same template as register.mjs free_forever)
+          await transporter.sendMail({
+            from: '"WooSyncShop" <info@woosyncshop.com>',
+            to: email,
+            subject: 'Welkom bij WooSyncShop 🎁 — je gratis account is klaar',
+            html: `<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#0f1117;font-family:'DM Sans',Arial,sans-serif;color:#e2e8f0">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f1117;padding:40px 0"><tr><td align="center">
+  <table width="560" cellpadding="0" cellspacing="0" style="background:#1a1d2e;border-radius:12px;overflow:hidden;border:1px solid #2d3056">
+    <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 40px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#fff">WooSync<span style="color:#c4b5fd">Shop</span></div>
+      <div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:6px">Multi-shop WooCommerce beheer</div>
+    </td></tr>
+    <tr><td style="padding:36px 40px">
+      <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#f1f5f9">Hoi ${firstName}, welkom! 👋</p>
+      <p style="margin:0 0 20px;font-size:14px;line-height:1.7;color:#94a3b8">Je gratis WooSyncShop account is aangemaakt. Je kunt direct inloggen met je e-mailadres.</p>
+      <div style="text-align:center;margin:28px 0 8px">
+        <a href="https://woosyncshop.com" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">Inloggen →</a>
+      </div>
+      <p style="margin:16px 0 0;font-size:13px;line-height:1.7;color:#94a3b8">Je account heeft vaste limieten. Voor wijzigingen kun je contact opnemen via de <strong style="color:#e2e8f0">Help</strong> knop of de <strong style="color:#e2e8f0">contactpagina</strong>.</p>
+    </td></tr>
+    <tr><td style="padding:20px 40px;border-top:1px solid #2d3056;text-align:center">
+      <p style="margin:0;font-size:12px;color:#4b5563">WooSyncShop · Webs Media · De Wittenkade 152H · 1051 AN Amsterdam<br>
+      <a href="https://woosyncshop.com/contact" style="color:#6366f1;text-decoration:none">Contact</a></p>
+    </td></tr>
+  </table></td></tr></table>
+</body></html>`,
+          })
+        } else {
+          // Payment reminder email
+          const planNames = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
+          const planName = planNames[chosenPlan] || 'Growth'
+          const billingLabel = billingPeriod === 'annual' ? 'jaarabonnement' : 'maandabonnement'
+          const planPrices = { starter: { monthly: '7.99', annual_mo: '7.19' }, growth: { monthly: '11.99', annual_mo: '10.79' }, pro: { monthly: '19.99', annual_mo: '17.99' } }
+          const price = planPrices[chosenPlan]?.[billingPeriod === 'annual' ? 'annual_mo' : 'monthly'] || '11.99'
+          await transporter.sendMail({
+            from: '"WooSyncShop" <info@woosyncshop.com>',
+            to: email,
+            subject: `Je WooSyncShop ${planName} account is klaar — voltooi je betaling`,
+            html: `<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#0f1117;font-family:'DM Sans',Arial,sans-serif;color:#e2e8f0">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f1117;padding:40px 0"><tr><td align="center">
+  <table width="560" cellpadding="0" cellspacing="0" style="background:#1a1d2e;border-radius:12px;overflow:hidden;border:1px solid #2d3056">
+    <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 40px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#fff">WooSync<span style="color:#c4b5fd">Shop</span></div>
+      <div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:6px">Multi-shop WooCommerce beheer</div>
+    </td></tr>
+    <tr><td style="padding:36px 40px">
+      <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#f1f5f9">Hoi ${firstName}, je account staat klaar! 🎉</p>
+      <p style="margin:0 0 20px;font-size:14px;line-height:1.7;color:#94a3b8">Je bent aangemeld voor <strong style="color:#c4b5fd">WooSyncShop ${planName}</strong> (${billingLabel} · €${price}/maand). Voltooi je betaling om toegang te krijgen.</p>
+      <div style="background:#0f1117;border:1px solid #2d3056;border-radius:8px;padding:16px 20px;margin:0 0 24px">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="font-size:13px;color:#94a3b8">Pakket</td><td style="font-size:13px;font-weight:700;color:#f1f5f9;text-align:right">WooSyncShop ${planName}</td></tr>
+          <tr><td colspan="2" style="padding:4px 0"></td></tr>
+          <tr><td style="font-size:13px;color:#94a3b8">Facturering</td><td style="font-size:13px;color:#e2e8f0;text-align:right">${billingLabel}</td></tr>
+          <tr><td colspan="2" style="padding:4px 0"></td></tr>
+          <tr><td style="font-size:13px;color:#94a3b8">Bedrag</td><td style="font-size:15px;font-weight:800;color:#c4b5fd;text-align:right">€${price} / maand</td></tr>
+        </table>
+      </div>
+      <div style="text-align:center;margin:0 0 8px">
+        <a href="https://woosyncshop.com" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">Betaling afronden →</a>
+      </div>
+      <p style="margin:8px 0 0;font-size:11px;color:#4b5563;text-align:center">🔒 Veilige betaling via Mollie</p>
+    </td></tr>
+    <tr><td style="padding:20px 40px;border-top:1px solid #2d3056;text-align:center">
+      <p style="margin:0;font-size:12px;color:#4b5563">WooSyncShop · Webs Media · De Wittenkade 152H · 1051 AN Amsterdam<br>
+      <a href="https://woosyncshop.com/contact" style="color:#6366f1;text-decoration:none">Contact</a></p>
+    </td></tr>
+  </table></td></tr></table>
+</body></html>`,
+          })
+        }
+      } catch (mailErr) {
+        await supabase.from('system_logs').insert({ level: 'warn', function_name: 'admin-users', message: `Email failed for created user ${email}: ${mailErr.message}`, metadata: { user_id: newUser.id } })
+      }
+
+      await supabase.from('system_logs').insert({ level: 'info', function_name: 'admin-users', message: `Superadmin created user: ${email} (plan: ${effectivePlan})`, metadata: { user_id: newUser.id, plan: effectivePlan } })
+
+      // Return the new user row for the list
+      const returnUser = {
+        ...profileRow,
+        email,
+        sites: 0,
+        status: effectivePlan === 'free_forever' ? 'active' : 'pending',
+        name: full_name || '',
+      }
+      return new Response(JSON.stringify({ ok: true, user: returnUser }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
   }
 
   // GET: list all users

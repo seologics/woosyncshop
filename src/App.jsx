@@ -2643,6 +2643,9 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [editUser, setEditUser] = useState(null);
+  const [createUser, setCreateUser] = useState(null);
+  const [createUserLoading, setCreateUserLoading] = useState(false);
+  const [createUserError, setCreateUserError] = useState(null);
   const [paymentsData, setPaymentsData] = useState(null);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -2732,6 +2735,28 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
   };
 
+  const handleCreateUser = async () => {
+    const u = createUser;
+    if (!u.email?.trim()) { setCreateUserError("E-mail is verplicht."); return; }
+    if (!u.password || u.password.length < 8) { setCreateUserError("Wachtwoord moet minimaal 8 tekens zijn."); return; }
+    setCreateUserLoading(true); setCreateUserError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin-users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify(u),
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) { setCreateUserError(result.error || "Aanmaken mislukt."); return; }
+      // Add to local list
+      setUsers(us => [result.user, ...us]);
+      setCreateUser(null);
+    } catch (e) { setCreateUserError(e.message); }
+    finally { setCreateUserLoading(false); }
+  };
+
   const archiveUser = async (u) => {
     const isArchived = u.archived;
     const label = isArchived ? "Dearchiveren" : "Archiveren";
@@ -2804,9 +2829,12 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <span style={{ fontSize: 13, color: "var(--mx)" }}>{visibleUsers.length} gebruiker{visibleUsers.length !== 1 ? "s" : ""}</span>
-                <Btn variant="ghost" size="sm" onClick={() => setShowArchived(a => !a)}>
-                  {showArchived ? "← Actieve gebruikers" : `📦 Gearchiveerd (${archivedCount})`}
-                </Btn>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Btn variant="ghost" size="sm" onClick={() => setShowArchived(a => !a)}>
+                    {showArchived ? "← Actieve gebruikers" : `📦 Gearchiveerd (${archivedCount})`}
+                  </Btn>
+                  <Btn variant="primary" size="sm" onClick={() => setCreateUser({ plan: "growth", billingPeriod: "monthly", country: "NL" })}>+ Gebruiker toevoegen</Btn>
+                </div>
               </div>
               <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "150px 170px 120px 70px 90px 60px 80px 1fr", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
@@ -2986,6 +3014,139 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
       </div>
 
       {/* Per-user config overlay */}
+      {createUser && (() => {
+        const isFree = createUser.discountCode?.toLowerCase() === "freeforever";
+        const planLimits = PLANS[createUser.plan] || PLANS.growth;
+        return (
+          <Overlay open onClose={() => { setCreateUser(null); setCreateUserError(null); }} width={580} title="Gebruiker aanmaken">
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Basic info */}
+              <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>👤 Account gegevens</div>
+              <div className="settings-2col">
+                <Field label="Naam">
+                  <Inp value={createUser.full_name || ""} onChange={e => setCreateUser(u => ({ ...u, full_name: e.target.value }))} placeholder="Jan de Vries" />
+                </Field>
+                <Field label="Bedrijfsnaam">
+                  <Inp value={createUser.business_name || ""} onChange={e => setCreateUser(u => ({ ...u, business_name: e.target.value }))} placeholder="Optioneel" />
+                </Field>
+                <Field label="E-mailadres">
+                  <Inp value={createUser.email || ""} onChange={e => setCreateUser(u => ({ ...u, email: e.target.value }))} placeholder="jan@bedrijf.nl" />
+                </Field>
+                <Field label="Wachtwoord" hint="Min. 8 tekens">
+                  <Inp value={createUser.password || ""} onChange={e => setCreateUser(u => ({ ...u, password: e.target.value }))} type="password" placeholder="Tijdelijk wachtwoord" />
+                </Field>
+                <Field label="Land">
+                  <Sel value={createUser.country || "NL"} onChange={e => setCreateUser(u => ({ ...u, country: e.target.value }))}
+                    options={[{ value: "NL", label: "Nederland" }, ...EU_COUNTRIES.filter(c => c.code !== "NL").map(c => ({ value: c.code, label: c.label || c.code })), { value: "OTHER", label: "Buiten EU" }]} />
+                </Field>
+                <Field label="Kortingscode" hint="Gebruik FREEFOREVER voor gratis account">
+                  <Inp value={createUser.discountCode || ""} onChange={e => setCreateUser(u => ({ ...u, discountCode: e.target.value }))} placeholder="Optioneel" />
+                </Field>
+              </div>
+
+              {/* Plan section */}
+              <Divider />
+              <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>📦 Plan</div>
+              {isFree ? (
+                <div style={{ padding: "10px 14px", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--gr)" }}>
+                  🎁 Free Forever — welkomstmail met login-link wordt verstuurd, geen betaallink.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="settings-2col">
+                    <Field label="Plan">
+                      <Sel value={createUser.plan} onChange={e => setCreateUser(u => ({ ...u, plan: e.target.value }))} options={[
+                        { value: "starter", label: "Starter – €7,99/mnd" },
+                        { value: "growth",  label: "Growth – €11,99/mnd" },
+                        { value: "pro",     label: "Pro – €19,99/mnd" },
+                      ]} />
+                    </Field>
+                    <Field label="Facturering">
+                      <Sel value={createUser.billingPeriod || "monthly"} onChange={e => setCreateUser(u => ({ ...u, billingPeriod: e.target.value }))} options={[
+                        { value: "monthly", label: "Maandelijks" },
+                        { value: "annual",  label: "Jaarlijks (−10%)" },
+                      ]} />
+                    </Field>
+                  </div>
+                  <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                    📧 Betaalherinnering wordt verstuurd naar het opgegeven e-mailadres.
+                  </div>
+                </div>
+              )}
+
+              {/* Overrides */}
+              <Divider />
+              <div className="settings-2col">
+                <Field label="Max shops (override)" hint={`Standaard plan: ${isFree ? PLANS.starter.sites : (planLimits.sites ?? "—")}`}>
+                  <Inp value={createUser.max_shops ?? (isFree ? PLANS.starter.sites : planLimits.sites)} onChange={e => setCreateUser(u => ({ ...u, max_shops: e.target.value }))} type="number" />
+                </Field>
+                <Field label="Max verbonden producten (override)" hint={`Standaard plan: ${isFree ? PLANS.starter.connected_products : (planLimits.connected_products ?? "—")}`}>
+                  <Inp value={createUser.max_connected_products ?? (isFree ? PLANS.starter.connected_products : planLimits.connected_products)} onChange={e => setCreateUser(u => ({ ...u, max_connected_products: e.target.value }))} type="number" />
+                </Field>
+              </div>
+
+              {/* AI Image pipeline */}
+              <Divider />
+              <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
+              {(() => {
+                const limits = isFree ? PLANS.starter : planLimits;
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                      Standaard limieten: model <strong>{limits.gemini_model}</strong> · max <strong>{limits.img_max_kb} KB</strong> · kwaliteit <strong>{limits.img_quality}%</strong> · max breedte <strong>{limits.img_max_width}px</strong>
+                    </div>
+                    <div className="settings-2col">
+                      <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
+                        <Sel value={createUser.gemini_model || limits.gemini_model} onChange={e => setCreateUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
+                          { value: "gemini-2.0-flash-lite",  label: "Flash Lite — zuinig (Starter/Free)" },
+                          { value: "gemini-2.0-flash",       label: "Flash — gebalanceerd (Growth)" },
+                          { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
+                          { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
+                        ]} />
+                      </Field>
+                      <Field label="Max bestandsgrootte" hint={`Plan max: ${limits.img_max_kb} KB`}>
+                        <Inp value={createUser.img_max_kb ?? limits.img_max_kb} onChange={e => setCreateUser(u => ({ ...u, img_max_kb: e.target.value }))} type="number" suffix="KB" />
+                      </Field>
+                      <Field label="Compressiekwaliteit" hint={`Plan max: ${limits.img_quality}%`}>
+                        <Inp value={createUser.img_quality ?? limits.img_quality} onChange={e => setCreateUser(u => ({ ...u, img_quality: e.target.value }))} type="number" suffix="%" />
+                      </Field>
+                      <Field label="Max breedte" hint={`Plan max: ${limits.img_max_width}px`}>
+                        <Inp value={createUser.img_max_width ?? limits.img_max_width} onChange={e => setCreateUser(u => ({ ...u, img_max_width: e.target.value }))} type="number" suffix="px" />
+                      </Field>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* AI Taxonomy */}
+              <Divider />
+              <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🧠 AI Taxonomie Vertaling</div>
+              <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>Functie inschakelen</div>
+                  <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 2 }}>Staat de gebruiker toe AI-taxonomievertaling te activeren.</div>
+                </div>
+                <Tog checked={createUser.ai_taxonomy_enabled ?? false} onChange={v => setCreateUser(u => ({ ...u, ai_taxonomy_enabled: v }))} />
+              </div>
+
+              {createUserError && (
+                <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--re)" }}>
+                  {createUserError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 8 }}>
+                <Btn variant="secondary" onClick={() => { setCreateUser(null); setCreateUserError(null); }}>Annuleren</Btn>
+                <Btn variant="primary" onClick={handleCreateUser} disabled={createUserLoading}>
+                  {createUserLoading ? "Aanmaken..." : (isFree ? "Aanmaken + welkomstmail →" : "Aanmaken + betaalmail →")}
+                </Btn>
+              </div>
+            </div>
+          </Overlay>
+        );
+      })()}
+
       {editUser && (
         <Overlay open onClose={() => setEditUser(null)} width={580} title={`Configuratie: ${editUser.name || editUser.email || "gebruiker"}`}>
           <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
