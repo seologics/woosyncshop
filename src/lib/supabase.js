@@ -1,12 +1,41 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Anon key is intentionally public — safe to expose (protected by RLS)
-// Service role key stays server-side in Netlify env vars only
 const supabaseUrl = 'https://pwrtuqybtvgiiyghqxiw.supabase.co'
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB3cnR1cXlidHZnaWl5Z2hxeGl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4NDM4NTIsImV4cCI6MjA4ODQxOTg1Mn0.hghy63YrDUixzGbdUu5-gF2-OPOGIuQ66zxhNzu_q3Y'
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  }
+})
 
+// ─── Module-level token cache ─────────────────────────────────────────────────
+// Updated by onAuthStateChange in App.jsx the moment a session changes.
+// getToken() never hangs: it returns the cached value immediately, or falls back
+// to getSession() with a 3-second timeout. This eliminates all "stuck loading"
+// states caused by getSession() hanging during token refresh.
+let _cachedToken = null
+
+export const setCachedToken = (token) => { _cachedToken = token }
+
+export const getToken = () => {
+  if (_cachedToken) return Promise.resolve(_cachedToken)
+  // Fallback: ask Supabase, but never wait more than 3 seconds
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 3000)
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        clearTimeout(timer)
+        _cachedToken = session?.access_token || null
+        resolve(_cachedToken)
+      })
+      .catch(() => { clearTimeout(timer); resolve(null) })
+  })
+}
+
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
 export const signUp = async (email, password, options = {}) => {
   const { data, error } = await supabase.auth.signUp({ email, password, ...options })
   if (error) throw error
@@ -20,6 +49,7 @@ export const signIn = async (email, password) => {
 }
 
 export const signOut = async () => {
+  _cachedToken = null
   const { error } = await supabase.auth.signOut()
   if (error) throw error
 }

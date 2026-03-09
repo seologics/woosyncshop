@@ -1,4 +1,4 @@
-import { signIn, signUp, signOut, getSession, getUser, supabase } from "./lib/supabase.js";
+import { signIn, signUp, signOut, getSession, getUser, supabase, getToken, setCachedToken } from "./lib/supabase.js";
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
@@ -598,7 +598,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
       const hasFullVariations = Array.isArray(product.variations) && product.variations.length > 0 && typeof product.variations[0] === "object" && product.variations[0].regular_price !== undefined;
       if (!hasFullVariations) {
         setVariationsLoading(true);
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        getToken().then((tok) => { const session = { access_token: tok };
           fetch("/api/woo", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -891,7 +891,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
             const reader = new FileReader();
             reader.onload = async (e) => {
               const base64 = e.target.result.split(",")[1];
-              const { data: { session } } = await supabase.auth.getSession();
+              const session = { access_token: await getToken() };
               try {
                 // Pipeline: base64 → image-pipeline → compressed base64 → WooCommerce media
                 const pipeRes = await fetch("/api/image-pipeline", {
@@ -1444,7 +1444,7 @@ const AiScanModal = ({ sourceShop, targetShop, onClose, onConfirmMatches, getTok
 
 // ─── EAN pool helper ──────────────────────────────────────────────────────────
 const fetchEanFromPool = async (sku, productId = null) => {
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = { access_token: await getToken() };
   const res = await fetch("/api/ean-assign", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -1755,7 +1755,7 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const [saving, setSaving] = useState(false);
 
   const getToken = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = { access_token: await getToken() };
     return session?.access_token;
   };
 
@@ -2250,8 +2250,7 @@ const CouponManager = ({ activeSite, user }) => {
     setCheckingPlugin(true);
     const checkPlugin = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = await getToken();
         const res = await fetch("/api/woo", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -2284,8 +2283,7 @@ const CouponManager = ({ activeSite, user }) => {
     setCreating(true);
     setCouponResult(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getToken();
       const res = await fetch("/api/coupon-create", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -2514,7 +2512,7 @@ const HreflangView = ({ sites }) => {
   useEffect(() => {
     const load = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = { access_token: await getToken() };
         const res = await fetch("/api/connected-products", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
         const data = await res.json();
         const conns = Array.isArray(data) ? data : [];
@@ -2661,7 +2659,7 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   const loadPayments = async () => {
     setPaymentsLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/mollie-payments", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const data = await res.json();
       if (!data.error) setPaymentsData(data);
@@ -2681,7 +2679,7 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
       setPlanHistory(null);
       setHistoryError("");
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = { access_token: await getToken() };
         const res = await fetch(`/api/admin-users?history=${editUser.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
         const data = await res.json();
         if (!cancelled) setPlanHistory(data.history || []);
@@ -2696,7 +2694,7 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
     const loadUsers = async () => {
       try {
         // Ensure we have a fresh session
-        const { data: { session }, error: sessErr } = await supabase.auth.getSession();
+        const token = await getToken(); const sessErr = token ? null : new Error("No session"); const session = { access_token: token };
         if (sessErr || !session) {
           console.error("No session for admin-users:", sessErr);
           setUsersLoading(false);
@@ -2724,8 +2722,7 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   const updUser = (id, field, val) => setUsers(us => us.map(u => u.id === id ? { ...u, [field]: val } : u));
   const saveUser = async (u) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getToken();
       const planLimits = PLANS[u.plan] || PLANS.growth;
       // Soft ceiling: cap values at 2× plan limit (allows custom overrides but prevents runaway costs)
       const capKb    = planLimits.img_max_kb * 2;
@@ -2766,8 +2763,7 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
     if (!u.password || u.password.length < 8) { setCreateUserError("Wachtwoord moet minimaal 8 tekens zijn."); return; }
     setCreateUserLoading(true); setCreateUserError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getToken();
       const res = await fetch("/api/admin-users", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -2788,7 +2784,7 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
     const label = isArchived ? "Dearchiveren" : "Archiveren";
     if (!window.confirm(`${label}: ${u.email}? ${isArchived ? "Account wordt hersteld." : "Account wordt gesuspendeerd en verborgen."}`)) return;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/admin-users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -2806,8 +2802,9 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
 Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
     if (!window.confirm("Weet je het zeker? Dit verwijdert het account permanent uit de database en authenticatie.")) return;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { alert("Sessie verlopen — log opnieuw in."); return; }
+      const token = await getToken();
+      if (!token) { alert("Sessie verlopen — log opnieuw in."); return; }
+      const session = { access_token: token };
       const res = await fetch("/api/admin-users", {
         method: "DELETE",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
@@ -2828,7 +2825,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
           const loadInvoices = async (u) => {
             setInvoiceUser(u); setInvoicesLoading(true);
             try {
-              const { data: { session } } = await supabase.auth.getSession();
+              const session = { access_token: await getToken() };
               // Use API endpoint (service role key, bypasses RLS) instead of direct client query
               const res = await fetch(`/api/get-invoice?user_id=${u.id}`, { headers: { Authorization: `Bearer ${session?.access_token}` } });
               if (res.ok) {
@@ -2998,7 +2995,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                             <Btn variant="primary" size="sm" onClick={async () => {
                               setInvoicesLoading(true);
                               try {
-                                const { data: { session } } = await supabase.auth.getSession();
+                                const session = { access_token: await getToken() };
                                 const res = await fetch("/api/send-invoice", {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -3034,7 +3031,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                             <span style={{ fontSize: 13 }}>€{parseFloat(inv.vat_amount || 0).toFixed(2).replace(".", ",")}</span>
                             <span style={{ fontWeight: 600, fontSize: 13 }}>€{parseFloat(inv.amount || 0).toFixed(2).replace(".", ",")}</span>
                             <Btn variant="ghost" size="sm" onClick={async () => {
-                              const { data: { session } } = await supabase.auth.getSession();
+                              const session = { access_token: await getToken() };
                               const win = window.open("about:blank", "_blank");
                               const res = await fetch(`/api/get-invoice?id=${inv.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
                               const html = await res.text();
@@ -3471,7 +3468,7 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
     setTestResult(null);
     setTestError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/ai-translate", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -3637,7 +3634,7 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
               <Btn variant="danger" size="sm" onClick={async () => {
                   if (!confirm("Weet je zeker dat je de volledige vertaalcache wilt wissen?")) return;
                   setCache([]);
-                  const { data: { session } } = await supabase.auth.getSession();
+                  const session = { access_token: await getToken() };
                   // Delete all cache entries for this user via Supabase
                   await supabase.from("ai_translation_cache").delete().neq("id", 0);
                 }}>Cache wissen</Btn>
@@ -3748,7 +3745,7 @@ const BillingTab = ({ userProfile }) => {
     const load = async () => {
       setPaymentsLoading(true);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = { access_token: await getToken() };
         const res = await fetch("/api/mollie-payments", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
         const data = await res.json();
         setPayments(data.payments || []);
@@ -3775,7 +3772,7 @@ const BillingTab = ({ userProfile }) => {
       setProrationLoading(true);
       setProrationInfo(null);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = { access_token: await getToken() };
         const res = await fetch(`/api/plan-change?plan=${selectedPlan}&billing_period=${selectedBilling}`, {
           headers: { "Authorization": `Bearer ${session?.access_token}` }
         });
@@ -3794,7 +3791,7 @@ const BillingTab = ({ userProfile }) => {
     setChangeError("");
     setChangeSuccess("");
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const isUpgrade = (PLAN_ORDER_BILLING[selectedPlan] || 0) > (PLAN_ORDER_BILLING[planKey] || 0);
       const res = await fetch("/api/plan-change", {
         method: "POST",
@@ -3810,7 +3807,7 @@ const BillingTab = ({ userProfile }) => {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Mislukt");
       if (data.checkout_url) {
-        window.location.href = data.checkout_url;
+        window.open(data.checkout_url, "_blank", "noopener,noreferrer");
       } else if (data.action === "downgrade_scheduled") {
         setChangeSuccess(`Je ${PLANS[selectedPlan]?.name} abonnement gaat in na afloop van de huidige betaalperiode. Je houdt toegang tot je huidige plan tot die tijd.`);
         setChangeOpen(false);
@@ -3837,7 +3834,7 @@ const BillingTab = ({ userProfile }) => {
     setCancelLoading(true);
     setCancelError("");
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/cancel-subscription", {
         method: "POST",
         headers: { "Authorization": `Bearer ${session?.access_token}` },
@@ -3858,15 +3855,17 @@ const BillingTab = ({ userProfile }) => {
   const handleUpdatePaymentMethod = async () => {
     setPmLoading(true); setPmError("");
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getToken();
       const res = await fetch("/api/update-payment-method", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Aanmaken mislukt");
-      window.location.href = data.checkout_url;
-    } catch (e) { setPmError(e.message); setPmLoading(false); }
+      // Open in new tab — prevents session loss when Mollie redirects back
+      window.open(data.checkout_url, "_blank", "noopener,noreferrer");
+    } catch (e) { setPmError(e.message); }
+    finally { setPmLoading(false); }
   };
 
   const isCancelledPending = userProfile?.pending_downgrade_plan === "cancelled";
@@ -4064,7 +4063,7 @@ const BillingTab = ({ userProfile }) => {
                 {p.status === "paid" && (
                   <button
                     onClick={async () => {
-                      const { data: { session } } = await supabase.auth.getSession();
+                      const session = { access_token: await getToken() };
                       const win = window.open("about:blank", "_blank");
                       const param = p.id ? `payment_id=${p.id}` : invoices.__all?.[0]?.id ? `id=${invoices.__all[0].id}` : null;
                       if (!param) { win.close(); return; }
@@ -4185,8 +4184,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const testConnection = async (shop) => {
     setTestingShop(shop.id);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getToken();
       const res = await fetch("/api/woo-test", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -4238,7 +4236,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
     try {
       // Password change via backend (admin API) — avoids OTP confirmation and session disruption
       if (profileForm.password) {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = { access_token: await getToken() };
         const res = await fetch("/api/update-password", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -4764,7 +4762,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks }) => {
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
 
   const getToken = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = { access_token: await getToken() };
     return session?.access_token;
   };
 
@@ -5140,7 +5138,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
         { id: "bancontact", description: "Bancontact", image: { size1x: "https://www.mollie.com/external/icons/payment-methods/bancontact.png" } },
       ];
     const useFallback = (list) => { setPaymentMethods(fallbackMethods); setSelectedMethod("ideal"); };
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    getToken().then((tok) => { const session = { access_token: tok };
       fetch("/api/mollie-payments?type=methods", {
         headers: session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {},
       })
@@ -5242,22 +5240,22 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
       }
 
       // Sign in to get session — skip if already authenticated (e.g. user went back and changed plan)
-      const { data: { session: existingSession } } = await supabase.auth.getSession();
-      if (!existingSession) {
+      const existingToken = await getToken();
+      if (!existingToken) {
         await signIn(form.email, form.password);
       }
 
       // If user went back and chose a different plan, patch the profile now (session is fresh)
       if (accountCreated && !isFree) {
         try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user?.id) {
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser?.id) {
             await supabase.from("user_profiles").update({
               chosen_plan: form.plan,
               billing_period: form.billingPeriod,
               price_total: parseFloat(vi.total),
               vat_rate: parseFloat(vi.rate),
-            }).eq("id", session.user.id);
+            }).eq("id", currentUser.id);
           }
         } catch {}
       }
@@ -5270,11 +5268,12 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
     setLoading(true); setError(null);
     try {
       // Ensure we have a fresh session
-      let { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      let sessionToken = await getToken();
+      if (!sessionToken) {
         const { data } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
-        session = data?.session;
+        sessionToken = data?.session?.access_token;
       }
+      let session = { access_token: sessionToken };
       if (!session?.access_token) { setError("Sessie verlopen. Probeer opnieuw in te loggen."); setLoading(false); return; }
       const vi = getVatInfo(form.country, form.vat_validated, getPlanPrice(form.plan, form.billingPeriod));
       const res = await fetch("/api/mollie-payments", {
@@ -6398,7 +6397,7 @@ const TrackingSettings = () => {
   // Load current settings
   const load = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/platform-settings", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const d = await res.json();
       setTs({
@@ -6434,7 +6433,7 @@ const TrackingSettings = () => {
     setFetching(true);
     setFetchError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/google-tracking-fetch", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const d = await res.json();
       if (d.error === "not_connected") { setFetchError("Nog niet gekoppeld met Google."); return; }
@@ -6447,7 +6446,7 @@ const TrackingSettings = () => {
   const disconnect = async () => {
     if (!confirm("Google koppeling verwijderen?")) return;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       await fetch("/api/google-tracking-disconnect", { method: "POST", headers: { "Authorization": `Bearer ${session?.access_token}` } });
       setTs(s => ({ ...s, google_connected: false, google_connected_email: null }));
       setGoogleData(null);
@@ -6460,7 +6459,7 @@ const TrackingSettings = () => {
     if (!confirm("WooSyncShop maakt automatisch GA4 en Google Ads tags aan in jouw GTM container en publiceert de container. Doorgaan?")) return;
     setGtmSetup({ running: true, result: null, error: null });
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/google-gtm-setup", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -6482,7 +6481,7 @@ const TrackingSettings = () => {
   const save = async () => {
     setSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/platform-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -6796,8 +6795,7 @@ const SystemLogsPanel = () => {
     setLoading(true);
     setLogsError("");
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getToken();
       const params = new URLSearchParams({ limit: "300" });
       if (lvl !== "all") params.set("level", lvl);
       if (f !== "all") params.set("fn", f);
@@ -6825,8 +6823,7 @@ const SystemLogsPanel = () => {
     if (!confirm("Alle logs wissen?")) return;
     setClearing(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getToken();
       await fetch("/api/system-logs", { method: "DELETE", headers: { "Authorization": `Bearer ${token}` } });
       setLogs([]);
     } catch (e) { alert("Wissen mislukt: " + e.message); }
@@ -6991,7 +6988,7 @@ const PlatformSettings = () => {
     setEanPoolLoading(true);
     setEanPoolError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/ean-assign", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const d = await res.json();
       if (!res.ok) { setEanPoolError(d.error || `HTTP ${res.status}`); return; }
@@ -7008,7 +7005,7 @@ const PlatformSettings = () => {
   const loadMethods = async () => {
     setMethodsLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/mollie-payments?type=methods", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
       const data = await res.json();
       setMethods(data.methods || []);
@@ -7018,7 +7015,7 @@ const PlatformSettings = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = { access_token: await getToken() };
         const res = await fetch("/api/platform-settings", { headers: { "Authorization": `Bearer ${session?.access_token}` } });
         const d = await res.json();
         setPs(p => ({
@@ -7045,7 +7042,7 @@ const PlatformSettings = () => {
   const save = async () => {
     setSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       await fetch("/api/platform-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -7078,7 +7075,7 @@ const PlatformSettings = () => {
       const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
       eans = rows.flat().map(v => String(v || "").trim().replace(/\D/g, "")).filter(v => v.length === 13);
       if (eans.length === 0) { setEanImportResult({ error: "Geen geldige EAN-13 codes gevonden in dit bestand." }); return; }
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/ean-assign", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -7098,7 +7095,7 @@ const PlatformSettings = () => {
   const handleEanExport = async () => {
     setEanExporting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       const res = await fetch("/api/ean-assign", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -7122,7 +7119,7 @@ const PlatformSettings = () => {
   const saveEanThreshold = async () => {
     setEanThresholdSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = { access_token: await getToken() };
       await fetch("/api/ean-assign", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -7477,6 +7474,7 @@ export default function App() {
       try {
         const session = await getSession();
         if (session) {
+          setCachedToken(session.access_token || null); // seed cache before any handlers run
           const u = session.user;
           setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
           // Track last activity — fire and forget
@@ -7503,8 +7501,14 @@ export default function App() {
             setView("landing");
           }
         }
+        let signOutTimer = null;
         supabase.auth.onAuthStateChange(async (_event, session) => {
+          // Always update token cache immediately — all handlers rely on this
+          setCachedToken(session?.access_token || null);
+
           if (session?.user) {
+            // Cancel any pending sign-out (tab switch fires SIGNED_OUT then TOKEN_REFRESHED)
+            if (signOutTimer) { clearTimeout(signOutTimer); signOutTimer = null; }
             const u = session.user;
             setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
             // Track last activity on every sign-in event
@@ -7517,8 +7521,6 @@ export default function App() {
               const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
               if (profile?.plan === "pending_payment") {
                 setPendingPaymentData({ chosenPlan: profile.chosen_plan || "growth", billingPeriod: profile.billing_period || "monthly", country: profile.country || "NL", vatValidated: profile.vat_validated || false });
-                // Only show the paywall overlay if the AuthModal is NOT currently handling payment
-                // (authModalOpenRef tracks whether a payment-mode modal is open)
                 if (!authModalOpenRef.current) {
                   setPendingPaymentWall(true);
                 }
@@ -7526,8 +7528,13 @@ export default function App() {
             } catch {}
             setView("app");
           } else {
-            setUser(null);
-            setView("landing");
+            // Debounce SIGNED_OUT by 1 second — Supabase v2 fires SIGNED_OUT during token
+            // refresh and on tab switch. If TOKEN_REFRESHED arrives within 1s, cancel the sign-out.
+            signOutTimer = setTimeout(() => {
+              signOutTimer = null;
+              setUser(null);
+              setView("landing");
+            }, 1000);
           }
         });
       } catch {
@@ -7554,14 +7561,14 @@ export default function App() {
 
     const verify = async () => {
       try {
-        const session = await getSession();
-        if (!session) {
+        const token = await getToken();
+        if (!token) {
           // No session = user wasn't logged in, nothing to verify
           setPaymentReturn(false);
           return;
         }
         const res = await fetch("/api/check-payment", {
-          headers: { Authorization: `Bearer ${session.access_token}` }
+          headers: { Authorization: `Bearer ${token}` }
         });
         const data = await res.json();
         const mollieStatus = data.status; // paid | open | canceled | expired | failed | pending
