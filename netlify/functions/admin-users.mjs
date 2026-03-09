@@ -56,8 +56,13 @@ export default async (req) => {
       const body = await req.json()
       const { id, ...updates } = body
       if (!id) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+
+      // Fetch current profile to detect plan changes for history logging
+      const { data: prevProfile } = await supabase.from('user_profiles').select('plan, billing_period').eq('id', id).single()
+
       const allowed = {
         plan: updates.plan,
+        billing_period: updates.billing_period || undefined,
         max_shops: updates.max_shops != null ? parseInt(updates.max_shops) : undefined,
         max_connected_products: updates.max_connected_products != null ? parseInt(updates.max_connected_products) : undefined,
         is_admin: updates.is_admin ?? undefined,
@@ -72,6 +77,34 @@ export default async (req) => {
       Object.keys(allowed).forEach(k => allowed[k] === undefined && delete allowed[k])
       const { error } = await supabase.from('user_profiles').update(allowed).eq('id', id)
       if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+
+      // Log plan change in history if plan was changed
+      if (updates.plan && prevProfile?.plan !== updates.plan) {
+        const planOrder = { starter: 1, growth: 2, pro: 3, free_forever: 0, pending_payment: 0, suspended: 0 }
+        const fromOrder = planOrder[prevProfile?.plan] || 0
+        const toOrder = planOrder[updates.plan] || 0
+        let eventType = 'admin_change'
+        if (toOrder > fromOrder) eventType = 'upgraded'
+        else if (toOrder < fromOrder && toOrder > 0) eventType = 'downgraded'
+
+        try {
+          await supabase.from('user_plan_history').insert({
+            user_id: id,
+            event_type: eventType,
+            from_plan: prevProfile?.plan || null,
+            to_plan: updates.plan,
+            billing_period: updates.billing_period || prevProfile?.billing_period || 'monthly',
+            notes: `Handmatig gewijzigd door superadmin (${prevProfile?.plan || '?'} → ${updates.plan})`,
+          })
+        } catch {}
+
+        await supabase.from('system_logs').insert({
+          level: 'info', function_name: 'admin-users',
+          message: `Admin changed plan for user ${id}: ${prevProfile?.plan} → ${updates.plan}`,
+          metadata: { user_id: id, from_plan: prevProfile?.plan, to_plan: updates.plan },
+        })
+      }
+
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }) }
   }
@@ -259,10 +292,11 @@ export default async (req) => {
     const shopCounts = {}
     shops?.forEach(s => { shopCounts[s.user_id] = (shopCounts[s.user_id] || 0) + 1 })
     const emailMap = {}
-    authUsers?.forEach(u => { emailMap[u.id] = u.email })
+    const registeredAtMap = {}
+    authUsers?.forEach(u => { emailMap[u.id] = u.email; registeredAtMap[u.id] = u.created_at })
     const profileIds = new Set((profiles || []).map(p => p.id))
     const extraUsers = (authUsers || []).filter(u => !profileIds.has(u.id)).map(u => ({ id: u.id, full_name: u.user_metadata?.full_name || '', plan: 'pro', max_shops: 10, status: 'pending' }))
-    const merged = [...(profiles || []), ...extraUsers].map(p => ({ ...p, email: emailMap[p.id] || '', sites: shopCounts[p.id] || 0 }))
+    const merged = [...(profiles || []), ...extraUsers].map(p => ({ ...p, email: emailMap[p.id] || '', sites: shopCounts[p.id] || 0, registered_at: registeredAtMap[p.id] || p.registered_at || null }))
     return new Response(JSON.stringify(merged), { status: 200, headers: { 'Content-Type': 'application/json' } })
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })

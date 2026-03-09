@@ -2649,6 +2649,8 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   const [paymentsData, setPaymentsData] = useState(null);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminPlanFilter, setAdminPlanFilter] = useState("all");
   const [invoiceUser, setInvoiceUser] = useState(null);
   const [userInvoices, setUserInvoices] = useState([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
@@ -2822,31 +2824,70 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
             } catch { setUserInvoices([]); } finally { setInvoicesLoading(false); }
           };
 
-          const visibleUsers = users.filter(u => showArchived ? u.archived : !u.archived);
           const archivedCount = users.filter(u => u.archived).length;
+          const visibleUsers = users.filter(u => {
+            if (showArchived ? !u.archived : u.archived) return false;
+            if (adminPlanFilter !== "all" && u.plan !== adminPlanFilter) return false;
+            if (adminSearch.trim()) {
+              const q = adminSearch.toLowerCase();
+              return (u.email || "").toLowerCase().includes(q) ||
+                (u.full_name || u.name || "").toLowerCase().includes(q) ||
+                (u.business_name || "").toLowerCase().includes(q);
+            }
+            return true;
+          });
 
           return (
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <span style={{ fontSize: 13, color: "var(--mx)" }}>{visibleUsers.length} gebruiker{visibleUsers.length !== 1 ? "s" : ""}</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Btn variant="ghost" size="sm" onClick={() => setShowArchived(a => !a)}>
-                    {showArchived ? "← Actieve gebruikers" : `📦 Gearchiveerd (${archivedCount})`}
-                  </Btn>
-                  <Btn variant="primary" size="sm" onClick={() => setCreateUser({ plan: "growth", billingPeriod: "monthly", country: "NL" })}>+ Gebruiker toevoegen</Btn>
-                </div>
+              {/* Toolbar */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+                <input
+                  value={adminSearch}
+                  onChange={e => setAdminSearch(e.target.value)}
+                  placeholder="Zoek op naam, e-mail of bedrijf…"
+                  style={{ flex: "1 1 200px", minWidth: 180, padding: "6px 10px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", fontSize: 13 }}
+                />
+                <select
+                  value={adminPlanFilter}
+                  onChange={e => setAdminPlanFilter(e.target.value)}
+                  style={{ padding: "6px 10px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", fontSize: 13, cursor: "pointer" }}
+                >
+                  <option value="all">Alle plannen</option>
+                  <option value="starter">Starter</option>
+                  <option value="growth">Growth</option>
+                  <option value="pro">Pro</option>
+                  <option value="free_forever">Free forever</option>
+                  <option value="pending_payment">In afwachting</option>
+                  <option value="suspended">Gesuspendeerd</option>
+                </select>
+                <span style={{ fontSize: 12, color: "var(--dm)", whiteSpace: "nowrap" }}>{visibleUsers.length} van {users.filter(u => showArchived ? u.archived : !u.archived).length}</span>
+                <Btn variant="ghost" size="sm" onClick={() => setShowArchived(a => !a)}>
+                  {showArchived ? "← Actief" : `📦 Gearchiveerd (${archivedCount})`}
+                </Btn>
+                <Btn variant="primary" size="sm" onClick={() => setCreateUser({ plan: "growth", billingPeriod: "monthly", country: "NL" })}>+ Gebruiker</Btn>
               </div>
               <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "150px 170px 120px 70px 90px 60px 80px 1fr", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
-                  {["Naam", "E-mail", "Bedrijf / Land", "BTW", "Plan", "Shops", "Status", "Acties"].map((h, i) => (
+                <div style={{ display: "grid", gridTemplateColumns: "140px 160px 110px 90px 100px 50px 80px 90px 1fr", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
+                  {["Naam", "E-mail", "Bedrijf", "Plan", "Volgende betaling", "Shops", "Status", "Ingeschreven", "Acties"].map((h, i) => (
                     <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
                   ))}
                 </div>
                 {visibleUsers.length === 0 && (
                   <div style={{ padding: "20px 14px", fontSize: 13, color: "var(--dm)" }}>Geen gebruikers gevonden.</div>
                 )}
-                {visibleUsers.map(u => (
-                  <div key={u.id} style={{ display: "grid", gridTemplateColumns: "150px 170px 120px 70px 90px 60px 80px 1fr", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center", opacity: u.archived ? 0.6 : 1, background: u.archived ? "rgba(239,68,68,0.03)" : "transparent" }}>
+                {visibleUsers.map(u => {
+                  // Compute next renewal date
+                  let nextRenewal = null;
+                  if (u.billing_cycle_start && ["starter","growth","pro"].includes(u.plan)) {
+                    const d = new Date(u.billing_cycle_start);
+                    u.billing_period === "annual" ? d.setFullYear(d.getFullYear() + 1) : d.setMonth(d.getMonth() + 1);
+                    nextRenewal = d;
+                  }
+                  const renewalStr = nextRenewal ? nextRenewal.toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" }) : "—";
+                  const renewalPast = nextRenewal && nextRenewal < new Date();
+
+                  return (
+                  <div key={u.id} style={{ display: "grid", gridTemplateColumns: "140px 160px 110px 90px 100px 50px 80px 90px 1fr", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center", opacity: u.archived ? 0.6 : 1, background: u.archived ? "rgba(239,68,68,0.03)" : "transparent" }}>
                     <div>
                       <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.name || "—"}</div>
                       {u.address_city && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.address_city}</div>}
@@ -2859,16 +2900,20 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       <div style={{ fontSize: 12, color: "var(--mx)" }}>{u.business_name || "—"}</div>
                       {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}</div>}
                     </div>
-                    <div style={{ fontSize: 11 }}>
-                      {u.vat_number ? <div style={{ color: u.vat_validated ? "var(--gr)" : "var(--mx)" }}>{u.vat_validated ? "✓ " : ""}{u.vat_number}</div> : <span style={{ color: "var(--dm)" }}>—</span>}
-                    </div>
                     <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
                       {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "⏳ Pending" : PLANS[u.plan]?.name || u.plan || "–"}
                     </Badge>
+                    <div>
+                      <div style={{ fontSize: 11, color: renewalPast ? "var(--re)" : "var(--mx)" }}>{renewalStr}</div>
+                      {u.pending_downgrade_plan && <div style={{ fontSize: 10, color: "var(--ac)" }}>↓ {u.pending_downgrade_plan === "cancelled" ? "Opgezegd" : PLANS[u.pending_downgrade_plan]?.name}</div>}
+                    </div>
                     <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
                     <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : ["starter","growth","pro"].includes(u.plan) ? "green" : "amber"} size="sm">
                       {u.plan === "free_forever" ? "Free forever" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "In afwachting" : ["starter","growth","pro"].includes(u.plan) ? "Actief" : "In afwachting"}
                     </Badge>
+                    <div style={{ fontSize: 11, color: "var(--dm)" }}>
+                      {u.registered_at ? new Date(u.registered_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                    </div>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                       <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>✏</Btn>
                       <Btn variant="ghost" size="sm" onClick={() => loadInvoices(u)} title="Facturen">🧾</Btn>
@@ -2876,7 +2921,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       <Btn variant="ghost" size="sm" onClick={() => deleteUser(u)} title="Permanent verwijderen" style={{ color: "var(--re)" }}>🗑</Btn>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Invoices panel */}
@@ -3748,6 +3794,33 @@ const BillingTab = ({ userProfile }) => {
   const isDowngrade = selectedOrder < currentOrder;
   const isSamePlan = selectedPlan === planKey && selectedBilling === billingPeriod;
 
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  const [cancelDone, setCancelDone] = useState(null); // end_date string
+
+  const handleCancelSubscription = async () => {
+    setCancelLoading(true);
+    setCancelError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/cancel-subscription", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session?.access_token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Mislukt");
+      setCancelDone(data.end_date);
+      setCancelModalOpen(false);
+    } catch (e) {
+      setCancelError(e.message);
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  const isCancelledPending = userProfile?.pending_downgrade_plan === "cancelled";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Current plan card */}
@@ -3771,6 +3844,11 @@ const BillingTab = ({ userProfile }) => {
             {userProfile?.billing_cycle_start && (
               <span>🔄 Cyclus gestart: {new Date(userProfile.billing_cycle_start).toLocaleDateString("nl-NL")}</span>
             )}
+            {userProfile?.billing_cycle_start && ["starter","growth","pro"].includes(planKey) && (() => {
+              const d = new Date(userProfile.billing_cycle_start);
+              billingPeriod === "annual" ? d.setFullYear(d.getFullYear() + 1) : d.setMonth(d.getMonth() + 1);
+              return <span>📅 Volgende betaling: {d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })}</span>;
+            })()}
           </div>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
@@ -3955,7 +4033,49 @@ const BillingTab = ({ userProfile }) => {
           })}
         </div>
       )}
-      {!isFreeForever && <Btn variant="danger" size="sm" style={{ alignSelf: "flex-start" }}>Abonnement opzeggen</Btn>}
+      {/* Cancel subscription section */}
+      {!isFreeForever && !isPendingPayment && currentPlan && (
+        <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>Abonnement opzeggen</div>
+          {isCancelledPending ? (
+            <div style={{ fontSize: 13, color: "var(--ac)" }}>
+              ✓ Je abonnement is opgezegd. Je houdt toegang tot het einde van je huidige betaalperiode.
+            </div>
+          ) : cancelDone ? (
+            <div style={{ fontSize: 13, color: "var(--gr)" }}>
+              ✓ Opzegging geregistreerd. Je houdt toegang tot en met {new Date(cancelDone).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })}.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: "var(--dm)", marginBottom: 10, lineHeight: 1.6 }}>
+                Na opzegging houd je toegang tot het einde van je huidige betaalperiode. Automatische verlenging stopt direct.
+              </div>
+              <Btn variant="danger" size="sm" onClick={() => { setCancelModalOpen(true); setCancelError(""); }}>Abonnement opzeggen</Btn>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Cancel confirmation modal */}
+      {cancelModalOpen && (
+        <Overlay open onClose={() => setCancelModalOpen(false)} width={440} title="Abonnement opzeggen">
+          <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--mx)" }}>
+              Weet je zeker dat je je <strong style={{ color: "var(--tx)" }}>{currentPlan?.name}</strong> abonnement wilt opzeggen?
+            </div>
+            <div style={{ padding: 14, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--mx)", lineHeight: 1.6 }}>
+              ⚠ Je houdt toegang tot WooSyncShop tot het einde van je huidige betaalperiode. Daarna wordt je account opgeschort.
+            </div>
+            {cancelError && <div style={{ fontSize: 13, color: "var(--re)" }}>⚠ {cancelError}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <Btn variant="secondary" onClick={() => setCancelModalOpen(false)}>Annuleren</Btn>
+              <Btn variant="danger" disabled={cancelLoading} onClick={handleCancelSubscription}>
+                {cancelLoading ? "Verwerken…" : "Ja, opzeggen"}
+              </Btn>
+            </div>
+          </div>
+        </Overlay>
+      )}
     </div>
   );
 };
