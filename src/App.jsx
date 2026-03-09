@@ -1,5 +1,6 @@
 import { signIn, signUp, signOut, getSession, getUser, supabase, getToken, setCachedToken } from "./lib/supabase.js";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
 const EU_COUNTRIES = [
@@ -4521,7 +4522,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
     finally { setPushing(false); }
   };
 
-  const tabDefs = [["products", "📦", "Producten"], ["connected", "🔗", "Verbonden"], ["hreflang", "🌐", "Hreflang"], ["marketing", "📣", "Marketing"], ["settings", "⚙", "Instellingen"], ...(isAdmin ? [["admin", "🛡", "Admin"]] : [])];
+  const tabDefs = [["products", "📦", "Producten"], ["connected", "🔗", "Verbonden"], ["hreflang", "🌐", "Hreflang"], ["marketing", "📣", "Marketing"], ["analytics", "📊", "Analytics"], ["settings", "⚙", "Instellingen"], ...(isAdmin ? [["admin", "🛡", "Admin"]] : [])];
 
   const TabBtn = ({ id, icon, label }) => (
     <button onClick={() => setActiveView(id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", background: activeView === id ? (id === "admin" ? "rgba(239,68,68,0.15)" : "var(--s2)") : "transparent", border: activeView === id ? (id === "admin" ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--b2)") : "1px solid transparent", borderRadius: "var(--rd)", cursor: "pointer", color: activeView === id ? (id === "admin" ? "var(--re)" : "var(--tx)") : id === "admin" ? "rgba(239,68,68,0.7)" : "var(--mx)", fontSize: 12, fontWeight: activeView === id ? 600 : 400, transition: "all 0.15s", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -4748,8 +4749,516 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
   );
 };
 
+// ─── AnalyticsView ────────────────────────────────────────────────────────────
+function AnalyticsView({ shops, user }) {
+  const RANGES = [
+    { key: "7d",   label: "7 dagen" },
+    { key: "30d",  label: "30 dagen" },
+    { key: "90d",  label: "90 dagen" },
+    { key: "year", label: "Dit jaar" },
+  ];
+
+  const SOURCE_GROUPS = {
+    organic:  { label: "Organisch",      color: "#34D399", icon: "🌿" },
+    paid:     { label: "Betaald",         color: "#6E6EF7", icon: "📢" },
+    direct:   { label: "Direct",          color: "#60A5FA", icon: "🔗" },
+    referral: { label: "Doorverwijzing",  color: "#F59E0B", icon: "↗️" },
+    ai:       { label: "AI zoekmachines", color: "#F472B6", icon: "🤖" },
+    email:    { label: "E-mail",          color: "#A78BFA", icon: "📧" },
+    other:    { label: "Overig",          color: "#94A3B8", icon: "❓" },
+  };
+
+  const SHOP_COLORS = ["#6E6EF7", "#34D399", "#60A5FA", "#F59E0B", "#F472B6", "#A78BFA"];
+
+  const [selectedShop, setSelectedShop]       = useState("all");
+  const [range, setRange]                     = useState("30d");
+  const [activeMetric, setActiveMetric]       = useState("revenue");
+  const [activeSourceTab, setActiveSourceTab] = useState("overview");
+  const [loading, setLoading]                 = useState(false);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [error, setError]                     = useState(null);
+  const [data, setData]                       = useState(null);
+  const [insights, setInsights]               = useState(null);
+  const [selectedSourceGroup, setSelectedSourceGroup] = useState(null);
+
+  const fmt = (n) => "€" + (n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtShort = (n) => n >= 1000 ? "€" + (n / 1000).toFixed(1) + "k" : fmt(n);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setInsights(null);
+    try {
+      const token = await getToken();
+      const params = new URLSearchParams({ range });
+      if (selectedShop !== "all") params.set("shop_id", selectedShop);
+      const res = await fetch(`/api/analytics-orders?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Fout bij ophalen data");
+      setData(json);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [range, selectedShop]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const fetchInsights = useCallback(async () => {
+    if (!data) return;
+    setInsightsLoading(true);
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/analytics-insights", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      setInsights(json.insights);
+    } catch (e) {
+      console.error("Insights error:", e);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [data, range]);
+
+  useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
+
+  const displayData = React.useMemo(() => {
+    if (!data) return null;
+    if (selectedShop === "all") return data.merged;
+    return data.shops?.find(s => s.shopId === selectedShop) || data.merged;
+  }, [data, selectedShop]);
+
+  const chartData = React.useMemo(() => {
+    if (!displayData?.byDate) return [];
+    return displayData.byDate.map(d => ({
+      label: new Date(d.date).toLocaleDateString("nl-NL", { day: "numeric", month: "short" }),
+      revenue: Math.round(d.revenue * 100) / 100,
+      orders: d.orders,
+    }));
+  }, [displayData]);
+
+  const sourceDonutData = React.useMemo(() => {
+    if (!displayData?.bySource) return [];
+    const grouped = {};
+    for (const s of displayData.bySource) {
+      const g = s.group || "other";
+      if (!grouped[g]) grouped[g] = { group: g, revenue: 0, orders: 0 };
+      grouped[g].revenue += s.revenue;
+      grouped[g].orders  += s.orders;
+    }
+    return Object.values(grouped)
+      .sort((a, b) => b.revenue - a.revenue)
+      .map(g => ({ ...g, ...(SOURCE_GROUPS[g.group] || SOURCE_GROUPS.other) }));
+  }, [displayData]);
+
+  const filteredSources = React.useMemo(() => {
+    if (!displayData?.bySource) return [];
+    if (!selectedSourceGroup) return displayData.bySource;
+    return displayData.bySource.filter(s => s.group === selectedSourceGroup);
+  }, [displayData, selectedSourceGroup]);
+
+  const shopColor = selectedShop === "all"
+    ? "var(--pr-h)"
+    : SHOP_COLORS[(shops?.findIndex(s => s.id === selectedShop) || 0) + 1] || "var(--pr-h)";
+
+  const S = {
+    wrap:      { padding: "24px 28px", color: "var(--tx)", minHeight: "100vh" },
+    card:      { background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", padding: "20px 22px" },
+    cardTitle: { fontFamily: "var(--font-h)", fontSize: 14, fontWeight: 700, color: "var(--tx)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" },
+    pill: (active, color) => ({
+      padding: "5px 13px", borderRadius: 99,
+      border: `1.5px solid ${active ? (color || "var(--pr)") : "var(--b2)"}`,
+      background: active ? (color || "var(--pr-l)") : "transparent",
+      color: active ? (color === "var(--pr)" ? "var(--pr-h)" : "#fff") : "var(--mx)",
+      fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap",
+    }),
+    rangeBtn: (active) => ({
+      padding: "5px 11px", borderRadius: "var(--rd)",
+      border: `1px solid ${active ? "var(--pr)" : "var(--b1)"}`,
+      background: active ? "var(--pr-l)" : "transparent",
+      color: active ? "var(--pr-h)" : "var(--mx)",
+      fontSize: 12, fontWeight: 500, cursor: "pointer",
+    }),
+    metricBtn: (active) => ({
+      fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "none",
+      background: active ? "var(--pr-l)" : "transparent",
+      color: active ? "var(--pr-h)" : "var(--mx)",
+      cursor: "pointer", fontWeight: 600,
+    }),
+    tabBtn: (active) => ({
+      padding: "5px 12px", borderRadius: "var(--rd)", border: "none",
+      background: active ? "var(--pr)" : "transparent",
+      color: active ? "#fff" : "var(--mx)",
+      fontSize: 12, fontWeight: 600, cursor: "pointer",
+    }),
+    badge: (color) => ({
+      display: "inline-flex", alignItems: "center", padding: "2px 7px",
+      borderRadius: 99, fontSize: 10, fontWeight: 700,
+      background: color + "22", color: color,
+    }),
+  };
+
+  const ChartTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div style={{ background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
+        <div style={{ color: "var(--mx)", marginBottom: 3 }}>{label}</div>
+        {payload.map(p => (
+          <div key={p.dataKey} style={{ color: "var(--pr-h)", fontWeight: 600 }}>
+            {p.dataKey === "revenue" ? fmt(p.value) : `${p.value} orders`}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  if (loading) return (
+    <div style={{ ...S.wrap, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ width: 32, height: 32, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
+        <div style={{ color: "var(--mx)", fontSize: 14 }}>Data ophalen van je shops…</div>
+      </div>
+    </div>
+  );
+
+  if (error) return (
+    <div style={{ ...S.wrap, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+        <div style={{ color: "var(--re)", marginBottom: 16, fontSize: 14 }}>{error}</div>
+        <button onClick={fetchData} style={{ padding: "8px 20px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600 }}>Opnieuw proberen</button>
+      </div>
+    </div>
+  );
+
+  const d = displayData;
+  if (!d) return null;
+
+  const kpis = [
+    { label: "Omzet",            value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
+    { label: "Bestellingen",     value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
+    { label: "Gem. orderwaarde", value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
+    { label: "Terugboekingen",   value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
+  ];
+
+  const insightTypeStyle = {
+    opportunity: { color: "#34D399", label: "Kans" },
+    warning:     { color: "var(--re)", label: "Aandacht" },
+    win:         { color: "#60A5FA", label: "Win" },
+    action:      { color: "var(--ac)", label: "Actie" },
+  };
+
+  return (
+    <div style={S.wrap}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ fontFamily: "var(--font-h)", fontSize: 20, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>📊 Analytics</h2>
+          <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 3 }}>
+            Verkoopstatistieken · {RANGES.find(r => r.key === range)?.label}
+            {data?.after && ` · ${new Date(data.after).toLocaleDateString("nl-NL")} – ${new Date(data.before).toLocaleDateString("nl-NL")}`}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {RANGES.map(r => <button key={r.key} style={S.rangeBtn(r.key === range)} onClick={() => setRange(r.key)}>{r.label}</button>)}
+          <button onClick={fetchData} style={{ ...S.rangeBtn(false), padding: "5px 9px" }} title="Vernieuwen">🔄</button>
+        </div>
+      </div>
+
+      {/* Shop selector */}
+      <div style={{ display: "flex", gap: 7, marginBottom: 20, flexWrap: "wrap" }}>
+        <button style={S.pill(selectedShop === "all", "var(--pr)")} onClick={() => setSelectedShop("all")}>Alle shops</button>
+        {(shops || []).map((shop, i) => {
+          const c = SHOP_COLORS[i + 1] || SHOP_COLORS[0];
+          return (
+            <button key={shop.id} style={{ padding: "5px 13px", borderRadius: 99, border: `1.5px solid ${selectedShop === shop.id ? c : "var(--b2)"}`, background: selectedShop === shop.id ? c + "22" : "transparent", color: selectedShop === shop.id ? c : "var(--mx)", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap" }} onClick={() => setSelectedShop(shop.id)}>
+              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: c, marginRight: 5, verticalAlign: "middle" }} />{shop.name}
+            </button>
+          );
+        })}
+        {data?.failed?.length > 0 && <span style={{ fontSize: 12, color: "var(--ac)", alignSelf: "center" }}>⚠️ {data.failed.length} shop{data.failed.length > 1 ? "s" : ""} niet bereikbaar</span>}
+      </div>
+
+      {/* KPI cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+        {kpis.map((k, i) => (
+          <div key={i} style={{ ...S.card, position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: -8, right: -8, fontSize: 44, opacity: .05 }}>{k.icon}</div>
+            <div style={{ fontSize: 11, color: "var(--mx)", textTransform: "uppercase", letterSpacing: .5, fontWeight: 600, marginBottom: 6 }}>{k.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)", letterSpacing: -1, color: k.color }}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Revenue chart + Source donut */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 14 }}>
+        <div style={S.card}>
+          <div style={S.cardTitle}>
+            <span>Omzet over tijd</span>
+            <div style={{ display: "flex", gap: 3 }}>
+              {["revenue", "orders"].map(m => <button key={m} style={S.metricBtn(activeMetric === m)} onClick={() => setActiveMetric(m)}>{m === "revenue" ? "Omzet" : "Orders"}</button>)}
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--pr)" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="var(--pr)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--b1)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: "var(--dm)", fontSize: 11 }} axisLine={false} tickLine={false} interval={chartData.length > 14 ? Math.floor(chartData.length / 7) : 0} />
+              <YAxis tick={{ fill: "var(--dm)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => activeMetric === "revenue" ? fmtShort(v) : v} />
+              <Tooltip content={<ChartTooltip />} />
+              <Area type="monotone" dataKey={activeMetric} stroke="var(--pr-h)" strokeWidth={2.5} fill="url(#aGrad)" dot={false} activeDot={{ r: 5, fill: "var(--pr-h)" }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div style={S.card}>
+          <div style={S.cardTitle}>Kanaalverdeling</div>
+          <ResponsiveContainer width="100%" height={140}>
+            <PieChart>
+              <Pie data={sourceDonutData} cx="50%" cy="50%" innerRadius={40} outerRadius={62} paddingAngle={3} dataKey="revenue" strokeWidth={0}>
+                {sourceDonutData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              </Pie>
+              <Tooltip formatter={(v) => fmt(v)} contentStyle={{ background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: 8, fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {sourceDonutData.map(s => (
+              <button key={s.group} onClick={() => setSelectedSourceGroup(selectedSourceGroup === s.group ? null : s.group)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: selectedSourceGroup === s.group ? s.color + "18" : "none", border: "none", borderRadius: 6, padding: "3px 5px", cursor: "pointer", width: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block", flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "var(--mx)" }}>{s.icon} {s.label}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: 12, color: "var(--tx)", fontWeight: 700 }}>{fmt(s.revenue)}</span>
+                  <span style={{ fontSize: 11, color: "var(--mx)", marginLeft: 5 }}>{s.orders}x</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Source breakdown + Top products */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+        <div style={S.card}>
+          <div style={S.cardTitle}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              Herkomst bestellingen
+              {selectedSourceGroup && (
+                <span style={S.badge(SOURCE_GROUPS[selectedSourceGroup]?.color || "var(--pr)")}>
+                  {SOURCE_GROUPS[selectedSourceGroup]?.icon} {SOURCE_GROUPS[selectedSourceGroup]?.label}
+                  <button onClick={() => setSelectedSourceGroup(null)} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 3, color: "inherit", lineHeight: 1 }}>×</button>
+                </span>
+              )}
+            </span>
+            <div style={{ display: "flex", gap: 3 }}>
+              {["overview", "products"].map(t => <button key={t} style={S.tabBtn(activeSourceTab === t)} onClick={() => setActiveSourceTab(t)}>{t === "overview" ? "Bronnen" : "× Product"}</button>)}
+            </div>
+          </div>
+          {activeSourceTab === "overview" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 1, maxHeight: 290, overflowY: "auto" }}>
+              {filteredSources.slice(0, 15).map((s, i) => {
+                const color = SOURCE_GROUPS[s.group]?.color || "#94A3B8";
+                const maxRev = filteredSources[0]?.revenue || 1;
+                return (
+                  <div key={i} style={{ padding: "7px 0", borderBottom: i < filteredSources.length - 1 ? "1px solid var(--b1)" : "none" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={S.badge(color)}>{SOURCE_GROUPS[s.group]?.icon || "?"}</span>
+                        <span style={{ fontSize: 13, color: "var(--tx)", fontWeight: 500, maxWidth: 175, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{fmt(s.revenue)}</span>
+                        <span style={{ fontSize: 11, color: "var(--mx)", marginLeft: 5 }}>{s.orders}x</span>
+                      </div>
+                    </div>
+                    <div style={{ height: 3, borderRadius: 99, background: "var(--b1)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${(s.revenue / maxRev) * 100}%`, background: color, borderRadius: 99 }} />
+                    </div>
+                  </div>
+                );
+              })}
+              {!filteredSources.length && <div style={{ color: "var(--mx)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Geen data voor dit kanaal</div>}
+            </div>
+          ) : (
+            <div style={{ maxHeight: 290, overflowY: "auto" }}>
+              {(d.byProduct || []).slice(0, 10).map((p, i) => (
+                <div key={i} style={{ padding: "8px 0", borderBottom: i < 9 ? "1px solid var(--b1)" : "none" }}>
+                  <div style={{ fontSize: 13, color: "var(--tx)", fontWeight: 600, marginBottom: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {Object.entries(p.sources || {}).sort((a, b) => b[1] - a[1]).map(([grp, cnt]) => (
+                      <span key={grp} style={S.badge(SOURCE_GROUPS[grp]?.color || "#94A3B8")}>{SOURCE_GROUPS[grp]?.icon} {cnt}x</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={S.card}>
+          <div style={S.cardTitle}>Top producten</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1, maxHeight: 300, overflowY: "auto" }}>
+            {(d.byProduct || []).slice(0, 10).map((p, i) => {
+              const maxRev = d.byProduct[0]?.revenue || 1;
+              return (
+                <div key={i} style={{ padding: "7px 0", borderBottom: i < 9 ? "1px solid var(--b1)" : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: 5, background: "var(--b1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--mx)", fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
+                      <span style={{ fontSize: 13, color: "var(--tx)", fontWeight: 500, maxWidth: 155, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.revenue)}</div>
+                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders} orders</div>
+                    </div>
+                  </div>
+                  <div style={{ height: 3, borderRadius: 99, background: "var(--b1)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(p.revenue / maxRev) * 100}%`, background: "var(--pr)", borderRadius: 99 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Campaigns + Hourly */}
+      {((d.byCampaign?.length > 0) || (d.byHour?.length > 0)) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+          {d.byCampaign?.length > 0 && (
+            <div style={S.card}>
+              <div style={S.cardTitle}>Google Ads campagnes</div>
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, padding: "0 0 7px", borderBottom: "1px solid var(--b1)", fontSize: 10, color: "var(--mx)", fontWeight: 600, textTransform: "uppercase", letterSpacing: .3 }}>
+                  <span>Campagne</span><span>Orders</span><span>Omzet</span>
+                </div>
+                {d.byCampaign.slice(0, 8).map((c, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, padding: "7px 0", borderBottom: i < d.byCampaign.length - 1 ? "1px solid var(--b1)" : "none", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: "var(--tx)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.campaign}</div>
+                      {c.term && <div style={{ fontSize: 11, color: "var(--mx)" }}>🔑 {c.term}</div>}
+                    </div>
+                    <span style={{ fontSize: 12, color: "var(--mx)", textAlign: "right" }}>{c.orders}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, textAlign: "right" }}>{fmt(c.revenue)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {d.byHour?.length > 0 && (
+            <div style={S.card}>
+              <div style={S.cardTitle}>Orders per uur</div>
+              <ResponsiveContainer width="100%" height={185}>
+                <BarChart data={d.byHour.map(h => ({ label: `${h.hour}u`, orders: h.orders }))} margin={{ top: 5, right: 0, left: -24, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--b1)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "var(--dm)", fontSize: 10 }} axisLine={false} tickLine={false} interval={3} />
+                  <YAxis tick={{ fill: "var(--dm)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Bar dataKey="orders" fill="var(--pr)" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              {(() => {
+                const peak = d.byHour.reduce((a, b) => b.orders > a.orders ? b : a, { hour: 0, orders: 0 });
+                return peak.orders > 0 ? <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 6, textAlign: "center" }}>Piekuur: <strong style={{ color: "var(--tx)" }}>{peak.hour}:00–{peak.hour + 1}:00</strong> · {peak.orders} orders</div> : null;
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Per-shop comparison */}
+      {selectedShop === "all" && data?.shops?.length > 1 && (
+        <div style={{ ...S.card, marginBottom: 14 }}>
+          <div style={S.cardTitle}>Vergelijking per shop</div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(data.shops.length, 4)}, 1fr)`, gap: 12 }}>
+            {data.shops.map((shop, i) => {
+              const c = SHOP_COLORS[i + 1] || SHOP_COLORS[0];
+              const maxRev = Math.max(...data.shops.map(s => s.summary.totalRevenue));
+              return (
+                <div key={shop.shopId} style={{ padding: "14px 16px", borderRadius: "var(--rd-lg)", background: "var(--bg)", border: "1px solid var(--b1)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: c, flexShrink: 0, display: "inline-block" }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shop.shopName}</span>
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", color: c, letterSpacing: -0.5, marginBottom: 2 }}>{fmt(shop.summary.totalRevenue)}</div>
+                  <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 8 }}>{shop.summary.totalOrders} orders · gem. {fmt(shop.summary.avgOrderValue)}</div>
+                  <div style={{ height: 4, borderRadius: 99, background: "var(--b1)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(shop.summary.totalRevenue / maxRev) * 100}%`, background: c, borderRadius: 99 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* AI Insights */}
+      <div style={S.card}>
+        <div style={{ ...S.cardTitle, marginBottom: 14 }}>
+          <span>🤖 AI Inzichten</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {insightsLoading && <span style={{ fontSize: 12, color: "var(--mx)" }}>Analyseren…</span>}
+            <button onClick={fetchInsights} style={S.rangeBtn(false)} disabled={insightsLoading}>{insightsLoading ? "⏳" : "🔄 Vernieuwen"}</button>
+          </div>
+        </div>
+        {insightsLoading && !insights && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[1,2,3,4].map(i => (
+              <div key={i} style={{ borderRadius: "var(--rd-lg)", background: "var(--bg)", border: "1px solid var(--b1)", padding: 16, minHeight: 100 }}>
+                <div style={{ width: "55%", height: 11, background: "var(--b1)", borderRadius: 5, marginBottom: 10 }} />
+                <div style={{ width: "90%", height: 8, background: "var(--b1)", borderRadius: 5, marginBottom: 6 }} />
+                <div style={{ width: "70%", height: 8, background: "var(--b1)", borderRadius: 5 }} />
+              </div>
+            ))}
+          </div>
+        )}
+        {insights && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {insights.map((ins, i) => {
+              const ts = insightTypeStyle[ins.type] || insightTypeStyle.action;
+              return (
+                <div key={i} style={{ borderRadius: "var(--rd-lg)", background: "var(--bg)", border: `1px solid ${ts.color}33`, padding: "16px 18px", position: "relative", overflow: "hidden" }}>
+                  <div style={{ position: "absolute", top: 0, right: 0, width: 55, height: 55, borderRadius: "0 12px 0 55px", background: ts.color + "0a" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+                    <span style={{ fontSize: 20 }}>{ins.icon}</span>
+                    <span style={S.badge(ts.color)}>{ts.label}</span>
+                    <span style={{ fontSize: 10, color: "var(--mx)", marginLeft: "auto" }}>#{i + 1}</span>
+                  </div>
+                  <div style={{ fontFamily: "var(--font-h)", fontSize: 13, fontWeight: 700, color: "var(--tx)", marginBottom: 5, lineHeight: 1.3 }}>{ins.title}</div>
+                  <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, marginBottom: 9 }}>{ins.insight}</div>
+                  <div style={{ fontSize: 12, color: ts.color, fontWeight: 600, lineHeight: 1.5, borderTop: `1px solid ${ts.color}22`, paddingTop: 9 }}>→ {ins.action}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!insightsLoading && !insights && (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 10 }}>Nog geen inzichten gegenereerd</div>
+            <button onClick={fetchInsights} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600, fontSize: 13 }}>🤖 Analyseer nu</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── User Dashboard ────────────────────────────────────────────────────────────
-const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "settings"];
+const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "analytics", "settings"];
 
 const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefreshKey = 0 }) => {
   const [shops, setShops] = useState([]);
@@ -4991,6 +5500,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} activeSite={activeSite} wooCall={wooCall} />}
             {activeView === "hreflang" && <HreflangView sites={shops} />}
             {activeView === "marketing" && <MarketingView activeSite={activeSite} shops={shops} user={user} />}
+            {activeView === "analytics" && <AnalyticsView shops={shops} user={user} />}
           </>
         )}
         {activeView === "settings" && (
