@@ -3688,8 +3688,9 @@ const BillingTab = ({ userProfile }) => {
 
   // Fetch proration when plan/billing selection changes
   useEffect(() => {
-    if (!selectedPlan || !changeOpen) { setProrationInfo(null); return; }
-    if (selectedPlan === planKey && selectedBilling === billingPeriod) { setProrationInfo(null); return; }
+    if (!selectedPlan || !changeOpen) { setProrationInfo(null); setProrationLoading(false); return; }
+    if (selectedPlan === planKey && selectedBilling === billingPeriod) { setProrationInfo(null); setProrationLoading(false); return; }
+    let cancelled = false;
     const fetch_ = async () => {
       setProrationLoading(true);
       setProrationInfo(null);
@@ -3699,11 +3700,12 @@ const BillingTab = ({ userProfile }) => {
           headers: { "Authorization": `Bearer ${session?.access_token}` }
         });
         const data = await res.json();
-        setProrationInfo(data);
-      } catch (e) { setProrationInfo({ error: e.message }); }
-      finally { setProrationLoading(false); }
+        if (!cancelled) setProrationInfo(data);
+      } catch (e) { if (!cancelled) setProrationInfo({ error: e.message }); }
+      finally { if (!cancelled) setProrationLoading(false); }
     };
     fetch_();
+    return () => { cancelled = true; setProrationLoading(false); };
   }, [selectedPlan, selectedBilling, changeOpen]);
 
   const handlePlanChange = async () => {
@@ -7373,8 +7375,7 @@ export default function App() {
     closeAuthModal();
     // Show welcome page — load plan from profile
     supabase.from("user_profiles").select("plan").eq("id", userData.id).single()
-      .then(({ data }) => { setWelcomePlan(data?.plan || "free_forever"); })
-      .catch(() => { setWelcomePlan("free_forever"); });
+      .then(({ data }) => { setWelcomePlan(data?.plan || "free_forever"); }, () => { setWelcomePlan("free_forever"); });
     setView("welcome");
     try {
       if (window.gtag) window.gtag("event", "signup_complete", { event_category: "conversion" });
@@ -7523,16 +7524,14 @@ export default function App() {
                 <Btn variant="primary" size="lg" style={{ width: "100%" }} onClick={async () => {
                   setPaymentReturn(false); setPendingPaymentWall(false);
                   try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
-                  const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
-                  setWelcomePlan(profile?.plan || "growth");
+                  try { const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single(); setWelcomePlan(profile?.plan || "growth"); } catch { setWelcomePlan("growth"); }
                   window.location.hash = "settings";
                   setView("app");
                 }}>🏪 Eerste shop toevoegen →</Btn>
                 <Btn variant="secondary" size="lg" style={{ width: "100%" }} onClick={async () => {
                   setPaymentReturn(false); setPendingPaymentWall(false);
                   try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
-                  const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single().catch(() => ({ data: null }));
-                  setWelcomePlan(profile?.plan || "growth");
+                  try { const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single(); setWelcomePlan(profile?.plan || "growth"); } catch { setWelcomePlan("growth"); }
                   setView("how-it-works");
                 }}>💡 Hoe werkt het?</Btn>
               </div>
