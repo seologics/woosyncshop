@@ -4744,6 +4744,21 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
       // Sign in to get session (always works — user is pre-confirmed)
       await signIn(form.email, form.password);
 
+      // If user went back and chose a different plan, patch the profile now (session is fresh)
+      if (accountCreated && !isFree) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) {
+            await supabase.from("user_profiles").update({
+              chosen_plan: form.plan,
+              billing_period: form.billingPeriod,
+              price_total: parseFloat(vi.total),
+              vat_rate: parseFloat(vi.rate),
+            }).eq("id", session.user.id);
+          }
+        } catch {}
+      }
+
       if (isFree) { setStep("success"); } else { setStep("payment"); }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
