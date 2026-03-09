@@ -5585,7 +5585,7 @@ const HowItWorksView = ({ onBack, onAddShop }) => {
     <div style={{ fontFamily: "var(--font-b)", minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column" }}>
       {/* Top bar */}
       <div style={{ background: "var(--s1)", borderBottom: "1px solid var(--b1)", padding: "14px 24px", display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 100 }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mx)", fontSize: 20, padding: "4px 8px", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 500 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mx)", padding: "4px 8px", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 500 }}>
           ← Terug
         </button>
         <div style={{ width: 1, height: 20, background: "var(--b1)" }} />
