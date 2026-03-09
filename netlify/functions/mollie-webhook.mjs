@@ -209,6 +209,18 @@ export default async (req) => {
 
     // ── PAID ──────────────────────────────────────────────────────────────────
     if (payment.status === 'paid') {
+      // ── IDEMPOTENCY: bail out immediately if this payment was already processed ──
+      const { data: existing } = await supabase
+        .from('user_plan_history')
+        .select('id')
+        .eq('payment_id', paymentId)
+        .limit(1)
+        .maybeSingle()
+      if (existing) {
+        // Already handled — return 200 so Mollie stops retrying
+        return new Response('OK', { status: 200 })
+      }
+
       const now = new Date().toISOString()
       const activatedPlan = ['starter', 'growth', 'pro'].includes(subscriptionPlan || payment.metadata?.plan)
         ? (subscriptionPlan || payment.metadata?.plan)
