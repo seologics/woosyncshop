@@ -5046,8 +5046,11 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
         setAccountCreated(true);
       }
 
-      // Sign in to get session (always works — user is pre-confirmed)
-      await signIn(form.email, form.password);
+      // Sign in to get session — skip if already authenticated (e.g. user went back and changed plan)
+      const { data: { session: existingSession } } = await supabase.auth.getSession();
+      if (!existingSession) {
+        await signIn(form.email, form.password);
+      }
 
       // If user went back and chose a different plan, patch the profile now (session is fresh)
       if (accountCreated && !isFree) {
