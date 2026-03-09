@@ -471,7 +471,7 @@ const Chk = ({ checked, onChange, label, indeterminate }) => (
 );
 
 const Badge = ({ children, color = "default", size = "sm" }) => {
-  const colors = { default: { bg: "var(--s3)", c: "var(--mx)" }, green: { bg: "var(--gr-l)", c: "var(--gr)" }, red: { bg: "var(--re-l)", c: "var(--re)" }, amber: { bg: "var(--ac-l)", c: "var(--ac)" }, blue: { bg: "var(--pr-l)", c: "var(--pr-h)" }, orange: { bg: "var(--or-l)", c: "var(--or)" } }[color];
+  const colors = { default: { bg: "var(--s3)", c: "var(--mx)" }, green: { bg: "var(--gr-l)", c: "var(--gr)" }, red: { bg: "var(--re-l)", c: "var(--re)" }, amber: { bg: "var(--ac-l)", c: "var(--ac)" }, blue: { bg: "var(--pr-l)", c: "var(--pr-h)" }, orange: { bg: "var(--or-l)", c: "var(--or)" }, purple: { bg: "rgba(139,92,246,0.15)", c: "rgb(167,139,250)" } }[color] || { bg: "var(--s3)", c: "var(--mx)" };
   return <span style={{ display: "inline-flex", alignItems: "center", padding: size === "sm" ? "2px 8px" : "3px 10px", borderRadius: 100, fontSize: size === "sm" ? 11 : 12, fontWeight: 500, background: colors.bg, color: colors.c, whiteSpace: "nowrap" }}>{children}</span>;
 };
 
