@@ -226,7 +226,7 @@ export default async (req) => {
     <tr><td style="padding:36px 40px">
       <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#f1f5f9">Hoi ${firstName}, je account staat klaar! 🎉</p>
       <p style="margin:0 0 20px;font-size:14px;line-height:1.7;color:#94a3b8">Je bent aangemeld voor <strong style="color:#c4b5fd">WooSyncShop ${planName}</strong> (${billingLabel} · €${price}/maand). Voltooi je betaling om toegang te krijgen.</p>
-      <div style="background:#0f1117;border:1px solid #2d3056;border-radius:8px;padding:16px 20px;margin:0 0 24px">
+      <div style="background:#0f1117;border:1px solid #2d3056;border-radius:8px;padding:16px 20px;margin:0 0 16px">
         <table width="100%" cellpadding="0" cellspacing="0">
           <tr><td style="font-size:13px;color:#94a3b8">Pakket</td><td style="font-size:13px;font-weight:700;color:#f1f5f9;text-align:right">WooSyncShop ${planName}</td></tr>
           <tr><td colspan="2" style="padding:4px 0"></td></tr>
@@ -234,6 +234,14 @@ export default async (req) => {
           <tr><td colspan="2" style="padding:4px 0"></td></tr>
           <tr><td style="font-size:13px;color:#94a3b8">Bedrag</td><td style="font-size:15px;font-weight:800;color:#c4b5fd;text-align:right">€${price} / maand</td></tr>
         </table>
+      </div>
+      <div style="background:#0f1117;border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:16px 20px;margin:0 0 24px">
+        <div style="font-size:12px;color:#6366f1;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">🔑 Inloggegevens</div>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="font-size:13px;color:#94a3b8;padding-bottom:6px">E-mailadres</td><td style="font-size:13px;font-weight:600;color:#f1f5f9;text-align:right;padding-bottom:6px">${email}</td></tr>
+          <tr><td style="font-size:13px;color:#94a3b8">Tijdelijk wachtwoord</td><td style="font-size:13px;font-weight:700;color:#c4b5fd;text-align:right;font-family:monospace;letter-spacing:0.05em">${password}</td></tr>
+        </table>
+        <p style="margin:10px 0 0;font-size:11px;color:#4b5563">Wijzig je wachtwoord na je eerste login via Instellingen → Profiel.</p>
       </div>
       <div style="text-align:center;margin:0 0 8px">
         <a href="https://woosyncshop.com/?pay=1" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">Betaling afronden →</a>

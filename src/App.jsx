@@ -2775,9 +2775,10 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
       });
       const result = await res.json();
       if (!res.ok || result.error) { setCreateUserError(result.error || "Aanmaken mislukt."); return; }
-      // Add to local list
-      setUsers(us => [result.user, ...us]);
       setCreateUser(null);
+      // Reload full user list from server to ensure clean state
+      const res2 = await fetch("/api/admin-users", { headers: { "Authorization": `Bearer ${token}` } });
+      if (res2.ok) { const data = await res2.json(); setUsers(data || []); }
     } catch (e) { setCreateUserError(e.message); }
     finally { setCreateUserLoading(false); }
   };
