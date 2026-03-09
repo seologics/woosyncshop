@@ -2643,6 +2643,9 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [editUser, setEditUser] = useState(null);
+  const [planHistory, setPlanHistory] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [createUser, setCreateUser] = useState(null);
   const [createUserLoading, setCreateUserLoading] = useState(false);
   const [createUserError, setCreateUserError] = useState(null);
@@ -2668,6 +2671,26 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
   };
 
   useEffect(() => { if (adminTab === "payments") loadPayments(); }, [adminTab]);
+
+  // Load plan history whenever a user is opened for editing
+  useEffect(() => {
+    if (!editUser?.id) { setPlanHistory(null); setHistoryError(""); return; }
+    let cancelled = false;
+    const load = async () => {
+      setHistoryLoading(true);
+      setPlanHistory(null);
+      setHistoryError("");
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(`/api/admin-users?history=${editUser.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+        const data = await res.json();
+        if (!cancelled) setPlanHistory(data.history || []);
+      } catch (e) { if (!cancelled) setHistoryError(e.message); }
+      finally { if (!cancelled) setHistoryLoading(false); }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [editUser?.id]);
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -2901,15 +2924,15 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       {u.country && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.country}</div>}
                     </div>
                     <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : "blue"} size="sm">
-                      {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "⏳ Pending" : PLANS[u.plan]?.name || u.plan || "–"}
+                      {u.email === SUPERADMIN_EMAIL ? "⚡ Superadmin" : u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "⏳ Pending" : PLANS[u.plan]?.name || u.plan || "–"}
                     </Badge>
                     <div>
                       <div style={{ fontSize: 11, color: renewalPast ? "var(--re)" : "var(--mx)" }}>{renewalStr}</div>
                       {u.pending_downgrade_plan && <div style={{ fontSize: 10, color: "var(--ac)" }}>↓ {u.pending_downgrade_plan === "cancelled" ? "Opgezegd" : PLANS[u.pending_downgrade_plan]?.name}</div>}
                     </div>
                     <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
-                    <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : ["starter","growth","pro"].includes(u.plan) ? "green" : "amber"} size="sm">
-                      {u.plan === "free_forever" ? "Free forever" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "In afwachting" : ["starter","growth","pro"].includes(u.plan) ? "Actief" : "In afwachting"}
+                    <Badge color={u.email === SUPERADMIN_EMAIL ? "purple" : u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : ["starter","growth","pro"].includes(u.plan) ? "green" : "amber"} size="sm">
+                      {u.email === SUPERADMIN_EMAIL ? "Superadmin" : u.plan === "free_forever" ? "Free forever" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "In afwachting" : ["starter","growth","pro"].includes(u.plan) ? "Actief" : "In afwachting"}
                     </Badge>
                     <div style={{ fontSize: 11, color: "var(--dm)" }}>
                       {u.registered_at ? new Date(u.registered_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" }) : "—"}
@@ -3194,28 +3217,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
       })()}
 
       {editUser && (() => {
-        const EditUserModal = () => {
-          const [planHistory, setPlanHistory] = useState(null);
-          const [historyLoading, setHistoryLoading] = useState(false);
-          const [historyError, setHistoryError] = useState("");
-
-          useEffect(() => {
-            const load = async () => {
-              setHistoryLoading(true);
-              try {
-                const { data: { session } } = await supabase.auth.getSession();
-                const res = await fetch(`/api/admin-users?history=${editUser.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
-                const data = await res.json();
-                setPlanHistory(data.history || []);
-              } catch (e) { setHistoryError(e.message); }
-              finally { setHistoryLoading(false); }
-            };
-            load();
-          }, []);
-
-          const eventLabel = { registered: "Geregistreerd", activated: "Geactiveerd", upgraded: "Upgrade", downgraded: "Downgrade", pending_upgrade: "Upgrade gestart", pending_downgrade: "Downgrade gepland", downgrade_applied: "Downgrade doorgevoerd", cancelled: "Betaling mislukt" };
-          const eventColor = { registered: "blue", activated: "green", upgraded: "green", downgraded: "amber", pending_upgrade: "blue", pending_downgrade: "amber", downgrade_applied: "amber", cancelled: "red" };
-
+          const eventLabel = { registered: "Geregistreerd", activated: "Geactiveerd", upgraded: "Upgrade", downgraded: "Downgrade", pending_upgrade: "Upgrade gestart", pending_downgrade: "Downgrade gepland", downgrade_applied: "Downgrade doorgevoerd", cancelled: "Betaling mislukt", renewal: "Automatische verlenging", suspended: "Gesuspendeerd", admin_change: "Admin wijziging", pending_cancellation: "Opzegging gepland" };
+          const eventColor = { registered: "blue", activated: "green", upgraded: "green", downgraded: "amber", pending_upgrade: "blue", pending_downgrade: "amber", downgrade_applied: "amber", cancelled: "red", renewal: "green", suspended: "red", admin_change: "blue", pending_cancellation: "amber" };
           return (
             <Overlay open onClose={() => setEditUser(null)} width={620} title={`Configuratie: ${editUser.name || editUser.email || "gebruiker"}`}>
               <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -3226,14 +3229,15 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                     <div style={{ fontSize: 12, color: "var(--dm)" }}>{editUser.sites} shops verbonden</div>
                   </div>
                   <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>
-                      {editUser.plan === "free_forever" ? "🎁 Free forever"
+                    <Badge color={editUser.email === SUPERADMIN_EMAIL ? "purple" : editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>
+                      {editUser.email === SUPERADMIN_EMAIL ? "⚡ Superadmin"
+                        : editUser.plan === "free_forever" ? "🎁 Free forever"
                         : editUser.plan === "suspended" ? "Gesuspendeerd"
                         : editUser.plan === "pending_payment" ? `⏳ Kiest ${PLANS[editUser.chosen_plan]?.name || "?"} €${PLANS[editUser.chosen_plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`
                         : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
                     </Badge>
-                    <Badge color={editUser.plan === "suspended" ? "red" : ["starter","growth","pro","free_forever"].includes(editUser.plan) ? "green" : "amber"}>
-                      {editUser.plan === "suspended" ? "Gesuspendeerd" : ["starter","growth","pro"].includes(editUser.plan) ? "Actief" : "In afwachting"}
+                    <Badge color={editUser.email === SUPERADMIN_EMAIL ? "purple" : editUser.plan === "suspended" ? "red" : ["starter","growth","pro","free_forever"].includes(editUser.plan) ? "green" : "amber"}>
+                      {editUser.email === SUPERADMIN_EMAIL ? "Superadmin" : editUser.plan === "suspended" ? "Gesuspendeerd" : ["starter","growth","pro"].includes(editUser.plan) ? "Actief" : "In afwachting"}
                     </Badge>
                     {editUser.pending_downgrade_plan && (
                       <Badge color="amber">↓ Downgrade → {PLANS[editUser.pending_downgrade_plan]?.name}</Badge>
@@ -3388,8 +3392,6 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
               </div>
             </Overlay>
           );
-        };
-        return <EditUserModal key={editUser.id} />;
       })()}
     </div>
   );
