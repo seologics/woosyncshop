@@ -7217,6 +7217,18 @@ export default function App() {
   const [view, setView] = useState(initPage || "loading"); // loading | landing | app | welcome | how-it-works | privacy | voorwaarden | contact
   const [welcomePlan, setWelcomePlan] = useState(null);
   const [authModal, setAuthModal] = useState(null);
+  const authModalOpenRef = useRef(false); // true while AuthModal is open in payment mode — prevents paywall overlay from firing
+  const openAuthModal = (config) => {
+    // Any signup or payment modal can lead to a pending_payment login — block paywall during this flow
+    if (config && (config.mode === "signup" || config.mode === "payment")) {
+      authModalOpenRef.current = true;
+    }
+    setAuthModal(config);
+  };
+  const closeAuthModal = () => {
+    authModalOpenRef.current = false;
+    setAuthModal(null);
+  };
   const [user, setUser] = useState(null);
   const [cookieConsent, setCookieConsent] = useState(() => localStorage.getItem("wss_cookie_consent")); // null | accepted | rejected
 
@@ -7270,7 +7282,7 @@ export default function App() {
           // ?pay=1 but not logged in → open login modal, paywall triggers after login via Dashboard useEffect
           if (payDeepLink) {
             setView("landing");
-            setTimeout(() => setAuthModal({ mode: "login" }), 300);
+            setTimeout(() => openAuthModal({ mode: "login" }), 300);
           } else {
             setView("landing");
           }
@@ -7280,11 +7292,16 @@ export default function App() {
             const u = session.user;
             setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
             // Always check plan on login — pending_payment users must see paywall
+            // BUT: skip if AuthModal is already open in payment mode (user is mid-registration flow)
             try {
               const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
               if (profile?.plan === "pending_payment") {
                 setPendingPaymentData({ chosenPlan: profile.chosen_plan || "growth", billingPeriod: profile.billing_period || "monthly", country: profile.country || "NL", vatValidated: profile.vat_validated || false });
-                setPendingPaymentWall(true);
+                // Only show the paywall overlay if the AuthModal is NOT currently handling payment
+                // (authModalOpenRef tracks whether a payment-mode modal is open)
+                if (!authModalOpenRef.current) {
+                  setPendingPaymentWall(true);
+                }
               }
             } catch {}
             setView("app");
@@ -7345,7 +7362,7 @@ export default function App() {
 
   const handleSuccess = (userData) => {
     setUser(userData);
-    setAuthModal(null);
+    closeAuthModal();
     // Show welcome page — load plan from profile
     supabase.from("user_profiles").select("plan").eq("id", userData.id).single()
       .then(({ data }) => { setWelcomePlan(data?.plan || "free_forever"); })
@@ -7400,8 +7417,8 @@ export default function App() {
       <TrackingInjector consent={cookieConsent} />
       {view === "landing" && (
         <LandingPage
-          onLogin={() => setAuthModal({ mode: "login" })}
-          onSignup={(plan, billingPeriod) => setAuthModal({ mode: "signup", plan: plan || "growth", billingPeriod: billingPeriod || "monthly" })}
+          onLogin={() => openAuthModal({ mode: "login" })}
+          onSignup={(plan, billingPeriod) => openAuthModal({ mode: "signup", plan: plan || "growth", billingPeriod: billingPeriod || "monthly" })}
           onPage={goPage}
         />
       )}
@@ -7450,7 +7467,7 @@ export default function App() {
                 const plan = pendingPaymentData?.chosenPlan || "growth";
                 const billing = pendingPaymentData?.billingPeriod || "monthly";
                 setPendingPaymentWall(false);
-                setAuthModal({ mode: "payment", plan, billingPeriod: billing, country: pendingPaymentData?.country, vatValidated: pendingPaymentData?.vatValidated });
+                openAuthModal({ mode: "payment", plan, billingPeriod: billing, country: pendingPaymentData?.country, vatValidated: pendingPaymentData?.vatValidated });
               }}>Betaling voltooien →</Btn>
             </div>
           </div>
@@ -7464,9 +7481,10 @@ export default function App() {
           initialCountry={authModal?.country}
           initialVatValidated={authModal?.vatValidated}
           onClose={() => {
-            setAuthModal(null);
+            const wasPayment = authModal?.mode === "payment";
+            closeAuthModal();
             // If this was a payment modal triggered from the paywall, put the paywall back
-            if (authModal?.mode === "payment" && user) {
+            if (wasPayment && user) {
               setPendingPaymentWall(true);
             }
           }}
@@ -7527,7 +7545,7 @@ export default function App() {
               </p>
               <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
                 <Btn variant="secondary" onClick={() => { setPaymentReturn(false); }}>Sluiten</Btn>
-                <Btn variant="primary" onClick={() => { setPaymentReturn(false); setAuthModal({ mode: "payment" }); }}>Opnieuw betalen →</Btn>
+                <Btn variant="primary" onClick={() => { setPaymentReturn(false); openAuthModal({ mode: "payment" }); }}>Opnieuw betalen →</Btn>
               </div>
             </>}
           </div>
