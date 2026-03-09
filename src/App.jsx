@@ -3524,7 +3524,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
           }));
           // Notify App if payment not completed
           if (data.plan === "pending_payment" && onPaymentWall) {
-            onPaymentWall(true);
+            onPaymentWall(true, { chosenPlan: data.chosen_plan || "growth", billingPeriod: data.billing_period || "monthly", country: data.country || "NL", vatValidated: data.vat_validated || false });
           }
         }
       });
@@ -4447,7 +4447,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks }) => {
 };
 
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
-const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod }) => {
+const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod, initialCountry, initialVatValidated }) => {
   const [step, setStep] = useState(
     mode === "signup" ? (initialPlan ? "form" : "plan") :
     mode === "reset" ? "reset" :
@@ -4455,8 +4455,8 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
   );
   const [form, setForm] = useState({
     name: "", email: "", password: "", code: "",
-    business_name: "", country: "NL",
-    vat_number: "", vat_validated: false, vat_checking: false, vat_error: null,
+    business_name: "", country: initialCountry || "NL",
+    vat_number: "", vat_validated: initialVatValidated || false, vat_checking: false, vat_error: null,
     address_street: "", address_zip: "", address_city: "",
     plan: initialPlan || "growth",
     billingPeriod: initialBillingPeriod || "monthly",
@@ -4773,8 +4773,39 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
         </>}
 
         {step === "payment" && <>
+          {/* Back button — only shown during signup flow, not from paywall */}
+          {mode !== "payment" && (
+            <div style={{ marginBottom: 12 }}>
+              <span onClick={() => setStep("form")} style={{ fontSize: 12, color: "var(--pr-h)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>← Terug</span>
+            </div>
+          )}
           <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Betaling</h2>
           <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>Start je {PLANS[form.plan]?.name || "Growth"} abonnement</p>
+
+          {/* Plan switcher — shown from paywall (mode=payment) so user can change their mind */}
+          {mode === "payment" && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Pakket wijzigen</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                {["starter","growth","pro"].map(p => (
+                  <div key={p} onClick={() => setForm(f => ({ ...f, plan: p }))}
+                    style={{ flex: 1, padding: "8px 4px", borderRadius: "var(--rd)", border: `1px solid ${form.plan === p ? "var(--pr)" : "var(--b1)"}`, background: form.plan === p ? "var(--pr-l)" : "var(--s2)", cursor: "pointer", textAlign: "center", transition: "all 0.15s" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: form.plan === p ? "var(--pr-h)" : "var(--tx)" }}>{PLANS[p]?.name}</div>
+                    <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 1 }}>€{getPlanPrice(p, form.billingPeriod).toFixed(2).replace(".",",")}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                {[["monthly","Maandelijks"],["annual","Jaarlijks (−10%)"]].map(([val, label]) => (
+                  <div key={val} onClick={() => setForm(f => ({ ...f, billingPeriod: val }))}
+                    style={{ flex: 1, padding: "7px 6px", borderRadius: "var(--rd)", border: `1px solid ${form.billingPeriod === val ? "var(--pr)" : "var(--b1)"}`, background: form.billingPeriod === val ? "var(--pr-l)" : "var(--s2)", cursor: "pointer", textAlign: "center", fontSize: 11, fontWeight: form.billingPeriod === val ? 700 : 400, color: form.billingPeriod === val ? "var(--pr-h)" : "var(--mx)", transition: "all 0.15s" }}>
+                    {label}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontSize: 13, color: "var(--mx)" }}>WooSyncShop {PLANS[form.plan]?.name || "Growth"} · {form.billingPeriod === "annual" ? "jaarabonnement" : "maandabonnement"}</div>
@@ -6730,6 +6761,8 @@ export default function App() {
 
   const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash.startsWith("#payment-return"));
   const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
+  const [pendingPaymentData, setPendingPaymentData] = useState(null);
+  const handlePaymentWall = (show, data) => { setPendingPaymentWall(show); if (data) setPendingPaymentData(data); };
   const [paymentReturnStatus, setPaymentReturnStatus] = useState("checking"); // checking | paid | pending | failed | cancelled
 
   useEffect(() => {
@@ -6834,21 +6867,50 @@ export default function App() {
       {view === "app" && user && (
         user.email === SUPERADMIN_EMAIL
           ? <SuperAdminDashboard user={user} onLogout={handleLogout} />
-          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={setPendingPaymentWall} onHowItWorks={() => setView("how-it-works")} />
+          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={handlePaymentWall} onHowItWorks={() => setView("how-it-works")} />
       )}
 
       {/* Payment wall — shown when user is logged in but hasn't paid yet */}
       {pendingPaymentWall && view === "app" && user && user.email !== SUPERADMIN_EMAIL && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9990, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", padding: 40, maxWidth: 460, textAlign: "center", boxShadow: "0 8px 48px rgba(0,0,0,0.6)" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>💳</div>
-            <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling nog niet voltooid</h2>
-            <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 24, lineHeight: 1.6 }}>
-              Je account is aangemaakt maar de betaling is niet afgerond. Voltooi je betaling om toegang te krijgen tot het dashboard.
-            </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <Btn variant="secondary" onClick={handleLogout}>Uitloggen</Btn>
-              <Btn variant="primary" onClick={() => { setPendingPaymentWall(false); setAuthModal({ mode: "payment" }); }}>Betaling voltooien →</Btn>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)", zIndex: 9990, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", padding: "36px 40px", maxWidth: 520, width: "100%", boxShadow: "0 8px 48px rgba(0,0,0,0.6)" }}>
+            <div style={{ textAlign: "center", marginBottom: 24 }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>💳</div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 6 }}>Betaling nog niet voltooid</h2>
+              <p style={{ fontSize: 13, color: "var(--mx)", lineHeight: 1.6 }}>
+                Je account is aangemaakt maar de betaling is nog niet afgerond.<br/>
+                Kies je pakket en voltooi de betaling om toegang te krijgen.
+              </p>
+            </div>
+            {/* Plan switcher */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Pakket</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                {["starter","growth","pro"].map(p => (
+                  <div key={p} onClick={() => setPendingPaymentData(d => ({ ...d, chosenPlan: p }))}
+                    style={{ flex: 1, padding: "10px 6px", borderRadius: "var(--rd)", border: `1px solid ${(pendingPaymentData?.chosenPlan || "growth") === p ? "var(--pr)" : "var(--b1)"}`, background: (pendingPaymentData?.chosenPlan || "growth") === p ? "var(--pr-l)" : "var(--s2)", cursor: "pointer", textAlign: "center", transition: "all 0.15s" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: (pendingPaymentData?.chosenPlan || "growth") === p ? "var(--pr-h)" : "var(--tx)" }}>{PLANS[p]?.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>€{getPlanPrice(p, pendingPaymentData?.billingPeriod || "monthly").toFixed(2).replace(".",",")}/mo</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["monthly","Maandelijks"],["annual","Jaarlijks (10% korting)"]].map(([val, label]) => (
+                  <div key={val} onClick={() => setPendingPaymentData(d => ({ ...d, billingPeriod: val }))}
+                    style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--rd)", border: `1px solid ${(pendingPaymentData?.billingPeriod || "monthly") === val ? "var(--pr)" : "var(--b1)"}`, background: (pendingPaymentData?.billingPeriod || "monthly") === val ? "var(--pr-l)" : "var(--s2)", cursor: "pointer", textAlign: "center", fontSize: 12, fontWeight: (pendingPaymentData?.billingPeriod || "monthly") === val ? 700 : 400, color: (pendingPaymentData?.billingPeriod || "monthly") === val ? "var(--pr-h)" : "var(--mx)", transition: "all 0.15s" }}>
+                    {label}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Btn variant="secondary" onClick={handleLogout} style={{ flex: "0 0 auto" }}>Uitloggen</Btn>
+              <Btn variant="primary" style={{ flex: 1 }} onClick={() => {
+                const plan = pendingPaymentData?.chosenPlan || "growth";
+                const billing = pendingPaymentData?.billingPeriod || "monthly";
+                setPendingPaymentWall(false);
+                setAuthModal({ mode: "payment", plan, billingPeriod: billing, country: pendingPaymentData?.country, vatValidated: pendingPaymentData?.vatValidated });
+              }}>Betaling voltooien →</Btn>
             </div>
           </div>
         </div>
@@ -6858,6 +6920,8 @@ export default function App() {
           mode={typeof authModal === "string" ? authModal : authModal?.mode}
           initialPlan={authModal?.plan}
           initialBillingPeriod={authModal?.billingPeriod}
+          initialCountry={authModal?.country}
+          initialVatValidated={authModal?.vatValidated}
           onClose={() => setAuthModal(null)}
           onSuccess={handleSuccess}
         />
