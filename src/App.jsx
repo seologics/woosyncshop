@@ -3887,7 +3887,7 @@ const BillingTab = ({ userProfile }) => {
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {paymentMethods.map(m => (
                         <button key={m.id} onClick={() => setSelectedMethod(m.id)}
-                          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: "var(--rd)", border: `2px solid ${selectedMethod === m.id ? "var(--pr)" : "var(--b1)"}`, background: selectedMethod === m.id ? "var(--pr-l)" : "var(--s3)", cursor: "pointer", fontSize: 12, fontWeight: selectedMethod === m.id ? 700 : 400 }}>
+                          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: "var(--rd)", border: `2px solid ${selectedMethod === m.id ? "var(--pr)" : "var(--b1)"}`, background: selectedMethod === m.id ? "var(--pr-l)" : "var(--s3)", cursor: "pointer", fontSize: 12, fontWeight: selectedMethod === m.id ? 700 : 400, color: selectedMethod === m.id ? "var(--pr-h)" : "var(--tx)" }}>
                           {m.image?.size1x && <img src={m.image.size1x} alt={m.description} style={{ width: 24, height: 16, objectFit: "contain" }} />}
                           {m.description}
                         </button>

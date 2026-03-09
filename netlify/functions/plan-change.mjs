@@ -136,109 +136,122 @@ export default async (req) => {
 
     if (!PLAN_PRICES[new_plan]) return new Response(JSON.stringify({ error: 'Ongeldig plan' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
 
-    const currentPlan   = profile.plan
-    const currentOrder  = PLAN_ORDER[currentPlan] || 0
-    const newOrder      = PLAN_ORDER[new_plan] || 0
-    const effectiveBillingPeriod = billing_period || profile.billing_period || 'monthly'
+    try {
+      const currentPlan   = profile.plan
+      const currentOrder  = PLAN_ORDER[currentPlan] || 0
+      const newOrder      = PLAN_ORDER[new_plan] || 0
+      const effectiveBillingPeriod = billing_period || profile.billing_period || 'monthly'
 
-    // ── DOWNGRADE ─────────────────────────────────────────────────────────────
-    if (action === 'downgrade' || newOrder < currentOrder) {
+      // ── DOWNGRADE ─────────────────────────────────────────────────────────────
+      if (action === 'downgrade' || newOrder < currentOrder) {
+        await supabase.from('user_profiles').update({
+          pending_downgrade_plan: new_plan,
+          pending_downgrade_billing_period: effectiveBillingPeriod,
+        }).eq('id', user.id)
+
+        await supabase.from('user_plan_history').insert({
+          user_id: user.id,
+          event_type: 'pending_downgrade',
+          from_plan: currentPlan,
+          to_plan: new_plan,
+          billing_period: effectiveBillingPeriod,
+          notes: 'Downgrade aangevraagd — geen restitutie, van kracht na huidig betalingstijdvak',
+        })
+
+        return new Response(JSON.stringify({ ok: true, action: 'downgrade_scheduled', new_plan }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // ── UPGRADE ───────────────────────────────────────────────────────────────
+      const mollieKey = await getMollieKey(supabase)
+      if (!mollieKey) return new Response(JSON.stringify({ error: 'Betaalgateway niet geconfigureerd' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
+
+      // Calculate proration amount
+      const priceKey = effectiveBillingPeriod === 'annual' ? 'annual_mo' : 'monthly'
+      let amount
+      let proration = { days: null, daysInMonth: null }
+      if (profile.billing_cycle_start) {
+        proration = calcProration(profile.billing_cycle_start, currentPlan, new_plan, effectiveBillingPeriod)
+        amount = proration.amount.toFixed(2)
+      } else {
+        amount = PLAN_PRICES[new_plan][priceKey].toFixed(2)
+      }
+
+      // Get or create Mollie customer
+      let customerId = profile.mollie_customer_id || null
+      if (!customerId) {
+        // Get email from auth
+        const { data: { users: authUserList } } = await supabase.auth.admin.listUsers()
+        const authUser = authUserList?.find(u => u.id === user.id)
+        const email = authUser?.email || profile.email || user.email || 'noreply@woosyncshop.com'
+        const customer = await mollieRequest(mollieKey, '/customers', 'POST', {
+          name: profile.full_name || email,
+          email,
+          metadata: { supabase_user_id: user.id },
+        })
+        if (customer.id) {
+          customerId = customer.id
+          await supabase.from('user_profiles').update({ mollie_customer_id: customerId }).eq('id', user.id)
+        }
+      }
+
+      const planNames  = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
+      const description = `WooSyncShop upgrade ${planNames[currentPlan] || currentPlan} → ${planNames[new_plan] || new_plan}${proration.days ? ` (${proration.days}/${proration.daysInMonth} dagen)` : ''}`
+
+      const paymentBody = {
+        amount: { currency: 'EUR', value: amount },
+        description,
+        redirectUrl: return_url || 'https://woosyncshop.com/#payment-return',
+        webhookUrl:  'https://woosyncshop.com/api/mollie-webhook',
+        sequenceType: 'first',
+        metadata: {
+          supabase_user_id: user.id,
+          plan: new_plan,
+          billing_period: effectiveBillingPeriod,
+          upgrade_from: currentPlan,
+          proration_days: proration.days ? String(proration.days) : null,
+        },
+      }
+      // Only add customerId and method if we have them
+      if (customerId) paymentBody.customerId = customerId
+      if (payment_method) paymentBody.method = payment_method
+
+      const payment = await mollieRequest(mollieKey, '/payments', 'POST', paymentBody)
+
+      if (!payment?.id || !payment?._links?.checkout?.href) {
+        const detail = payment?.detail || payment?.message || JSON.stringify(payment)
+        return new Response(JSON.stringify({ error: `Mollie: ${detail}` }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // Update profile: chosen_plan reflects new target, plan stays current until webhook fires
       await supabase.from('user_profiles').update({
-        pending_downgrade_plan: new_plan,
-        pending_downgrade_billing_period: effectiveBillingPeriod,
+        mollie_payment_id: payment.id,
+        chosen_plan: new_plan,
       }).eq('id', user.id)
 
-      await supabase.from('user_plan_history').insert({
-        user_id: user.id,
-        event_type: 'pending_downgrade',
-        from_plan: currentPlan,
-        to_plan: new_plan,
-        billing_period: effectiveBillingPeriod,
-        notes: 'Downgrade aangevraagd — geen restitutie, van kracht na huidig betalingstijdvak',
-      })
+      // Log history (non-fatal — table may not exist yet if migration pending)
+      try {
+        await supabase.from('user_plan_history').insert({
+          user_id: user.id,
+          event_type: 'pending_upgrade',
+          from_plan: currentPlan,
+          to_plan: new_plan,
+          billing_period: effectiveBillingPeriod,
+          payment_id: payment.id,
+          amount_paid: parseFloat(amount),
+          proration_days: proration.days || null,
+          notes: description,
+        })
+      } catch {}
 
-      return new Response(JSON.stringify({ ok: true, action: 'downgrade_scheduled', new_plan }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ ok: true, checkout_url: payment._links.checkout.href, payment_id: payment.id, amount }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+
+    } catch (err) {
+      console.error('plan-change POST error:', err)
+      return new Response(JSON.stringify({ error: err.message || 'Onbekende fout' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
-
-    // ── UPGRADE ───────────────────────────────────────────────────────────────
-    const mollieKey = await getMollieKey(supabase)
-    if (!mollieKey) return new Response(JSON.stringify({ error: 'Betaalgateway niet geconfigureerd' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
-
-    // Calculate proration amount
-    let amount
-    const priceKey = effectiveBillingPeriod === 'annual' ? 'annual_mo' : 'monthly'
-    if (profile.billing_cycle_start) {
-      const p = calcProration(profile.billing_cycle_start, currentPlan, new_plan, effectiveBillingPeriod)
-      amount = p.amount.toFixed(2)
-    } else {
-      amount = PLAN_PRICES[new_plan][priceKey].toFixed(2)
-    }
-
-    const proration = profile.billing_cycle_start
-      ? calcProration(profile.billing_cycle_start, currentPlan, new_plan, effectiveBillingPeriod)
-      : { days: null, daysInMonth: null }
-
-    // Get or create Mollie customer
-    let customerId = profile.mollie_customer_id
-    if (!customerId) {
-      const { data: authUser } = await supabase.auth.admin.getUserById(user.id)
-      const email = authUser?.user?.email || user.email
-      const customer = await mollieRequest(mollieKey, '/customers', 'POST', {
-        name: profile.full_name || email,
-        email,
-        metadata: { supabase_user_id: user.id },
-      })
-      if (customer.id) {
-        customerId = customer.id
-        await supabase.from('user_profiles').update({ mollie_customer_id: customerId }).eq('id', user.id)
-      }
-    }
-
-    const planNames  = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
-    const description = `WooSyncShop upgrade ${planNames[currentPlan]} → ${planNames[new_plan]}${proration.days ? ` (${proration.days}/${proration.daysInMonth} dagen)` : ''}`
-
-    const paymentBody = {
-      amount: { currency: 'EUR', value: amount },
-      description,
-      redirectUrl: return_url || 'https://woosyncshop.com/#payment-return',
-      webhookUrl:  'https://woosyncshop.com/api/mollie-webhook',
-      customerId,
-      sequenceType: 'first',
-      metadata: {
-        supabase_user_id: user.id,
-        plan: new_plan,
-        billing_period: effectiveBillingPeriod,
-        upgrade_from: currentPlan,
-        proration_days: proration.days ? String(proration.days) : null,
-      },
-    }
-    if (payment_method) paymentBody.method = payment_method
-
-    const payment = await mollieRequest(mollieKey, '/payments', 'POST', paymentBody)
-    if (!payment.id || !payment._links?.checkout?.href) {
-      return new Response(JSON.stringify({ error: payment.detail || 'Betaallink aanmaken mislukt' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
-    }
-
-    // Update profile: chosen_plan reflects new target, plan stays current until webhook fires
-    await supabase.from('user_profiles').update({
-      mollie_payment_id: payment.id,
-      chosen_plan: new_plan,
-    }).eq('id', user.id)
-
-    await supabase.from('user_plan_history').insert({
-      user_id: user.id,
-      event_type: 'pending_upgrade',
-      from_plan: currentPlan,
-      to_plan: new_plan,
-      billing_period: effectiveBillingPeriod,
-      payment_id: payment.id,
-      amount_paid: parseFloat(amount),
-      proration_days: proration.days || null,
-      notes: description,
-    })
-
-    return new Response(JSON.stringify({ ok: true, checkout_url: payment._links.checkout.href, payment_id: payment.id, amount }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
+
+  return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } })
 }
 
 export const config = { path: '/api/plan-change' }
