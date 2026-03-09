@@ -477,7 +477,7 @@ const Badge = ({ children, color = "default", size = "sm" }) => {
 
 const Divider = ({ my = 12 }) => <div style={{ height: 1, background: "var(--b1)", margin: `${my}px 0` }} />;
 
-const Overlay = ({ open, onClose, children, width = 860, title }) => {
+const Overlay = ({ open, onClose, children, width = 860, title, noClose = false }) => {
   useEffect(() => { if (open) document.body.style.overflow = "hidden"; else document.body.style.overflow = ""; return () => { document.body.style.overflow = ""; }; }, [open]);
   if (!open) return null;
   const backdropRef = useRef(null);
@@ -486,12 +486,12 @@ const Overlay = ({ open, onClose, children, width = 860, title }) => {
     <div
       ref={backdropRef}
       onMouseDown={e => { downTargetRef.current = e.target; }}
-      onMouseUp={e => { if (e.target === backdropRef.current && downTargetRef.current === backdropRef.current) onClose?.(); }}
+      onMouseUp={e => { if (!noClose && e.target === backdropRef.current && downTargetRef.current === backdropRef.current) onClose?.(); }}
       className="overlay-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onMouseDown={e => e.stopPropagation()} className="slide-up overlay-panel" style={{ background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: "var(--rd-xl)", width: "100%", maxWidth: width, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
         {title && <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--mx)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px", borderRadius: 4 }}>×</button>
+          {!noClose && <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--mx)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px", borderRadius: 4 }}>×</button>}
         </div>}
         <div style={{ overflow: "auto", flex: 1 }}>{children}</div>
       </div>
@@ -4812,7 +4812,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
   };
 
   return (
-    <Overlay open onClose={onClose} width={step === "plan" ? 700 : 440} title={null}>
+    <Overlay open onClose={onClose} width={step === "plan" ? 700 : 440} title={null} noClose={step === "payment"}>
       <div style={{ padding: 32 }}>
         {error && (
           error === "__PENDING__" ? (
@@ -7158,7 +7158,13 @@ export default function App() {
           initialBillingPeriod={authModal?.billingPeriod}
           initialCountry={authModal?.country}
           initialVatValidated={authModal?.vatValidated}
-          onClose={() => setAuthModal(null)}
+          onClose={() => {
+            setAuthModal(null);
+            // If this was a payment modal triggered from the paywall, put the paywall back
+            if (authModal?.mode === "payment" && user) {
+              setPendingPaymentWall(true);
+            }
+          }}
           onSuccess={handleSuccess}
         />
       )}
