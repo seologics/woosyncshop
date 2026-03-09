@@ -209,15 +209,18 @@ export default async (req) => {
 
     // ── PAID ──────────────────────────────────────────────────────────────────
     if (payment.status === 'paid') {
-      // ── IDEMPOTENCY: bail out immediately if this payment was already processed ──
+      // ── IDEMPOTENCY: bail out if this payment was already ACTIVATED ──
+      // NOTE: mollie-payments.mjs inserts 'registered'/'pending_upgrade' rows when
+      // creating the checkout — those must NOT count as "already processed".
       const { data: existing } = await supabase
         .from('user_plan_history')
         .select('id')
         .eq('payment_id', paymentId)
+        .in('event_type', ['activated', 'renewal', 'upgraded', 'downgraded', 'payment_method_updated'])
         .limit(1)
         .maybeSingle()
       if (existing) {
-        // Already handled — return 200 so Mollie stops retrying
+        // Already activated — return 200 so Mollie stops retrying
         return new Response('OK', { status: 200 })
       }
 

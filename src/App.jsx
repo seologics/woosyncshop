@@ -4173,13 +4173,15 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
             address_street: data.address_street || "",
             address_city: data.address_city || "",
           }));
-          // Notify App if payment not completed
-          if (data.plan === "pending_payment" && onPaymentWall) {
+          // Notify App if payment not completed — but NOT during a Mollie payment return
+          // (the verify() effect in App handles the paywall state there)
+          const isPaymentReturn = window.location.hash.startsWith("#payment-return");
+          if (data.plan === "pending_payment" && onPaymentWall && !isPaymentReturn) {
             onPaymentWall(true, { chosenPlan: data.chosen_plan || "growth", billingPeriod: data.billing_period || "monthly", country: data.country || "NL", vatValidated: data.vat_validated || false });
           }
         }
       });
-  }, [user?.id]);
+  }, [user?.id, profileRefreshKey]);
 
   const testConnection = async (shop) => {
     setTestingShop(shop.id);
@@ -4727,7 +4729,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 // ─── User Dashboard ────────────────────────────────────────────────────────────
 const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "settings"];
 
-const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks }) => {
+const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefreshKey = 0 }) => {
   const [shops, setShops] = useState([]);
   const [shopsLoading, setShopsLoading] = useState(true);
   const [activeSite, setActiveSite] = useState(null);
@@ -7470,6 +7472,9 @@ export default function App() {
     if (initPage) return;
     const payDeepLink = new URLSearchParams(window.location.search).get("pay") === "1";
     if (payDeepLink) history.replaceState({}, "", "/"); // clean URL immediately
+    // If we're on a payment return URL, the verify effect handles everything —
+    // don't show the paywall here even if profile says pending_payment
+    const isPaymentReturn = window.location.hash.startsWith("#payment-return");
     const init = async () => {
       try {
         const session = await getSession();
@@ -7480,7 +7485,8 @@ export default function App() {
           // Track last activity — fire and forget
           supabase.from("user_profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(() => {});
           // Check plan before deciding view — pending users must see paywall
-          if (payDeepLink || true) {
+          // EXCEPT when returning from Mollie: let the verify effect handle the plan state
+          if (!isPaymentReturn) {
             const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
             if (profile?.plan === "pending_payment") {
               setView("app");
@@ -7490,7 +7496,7 @@ export default function App() {
               setView("app");
             }
           } else {
-            setView("app");
+            setView("app"); // let verify() handle plan state
           }
         } else {
           // ?pay=1 but not logged in → open login modal, paywall triggers after login via Dashboard useEffect
@@ -7516,12 +7522,12 @@ export default function App() {
               supabase.from("user_profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(() => {});
             }
             // Always check plan on login — pending_payment users must see paywall
-            // BUT: skip if AuthModal is already open in payment mode (user is mid-registration flow)
+            // BUT: skip if AuthModal is open in payment mode, or if returning from Mollie
             try {
-              const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
-              if (profile?.plan === "pending_payment") {
-                setPendingPaymentData({ chosenPlan: profile.chosen_plan || "growth", billingPeriod: profile.billing_period || "monthly", country: profile.country || "NL", vatValidated: profile.vat_validated || false });
-                if (!authModalOpenRef.current) {
+              if (!authModalOpenRef.current && !isPaymentReturn) {
+                const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
+                if (profile?.plan === "pending_payment") {
+                  setPendingPaymentData({ chosenPlan: profile.chosen_plan || "growth", billingPeriod: profile.billing_period || "monthly", country: profile.country || "NL", vatValidated: profile.vat_validated || false });
                   setPendingPaymentWall(true);
                 }
               }
@@ -7545,6 +7551,7 @@ export default function App() {
   }, []);
 
   const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash.startsWith("#payment-return"));
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
   const [pendingPaymentData, setPendingPaymentData] = useState(null);
   const handlePaymentWall = (show, data) => {
@@ -7561,9 +7568,14 @@ export default function App() {
 
     const verify = async () => {
       try {
-        const token = await getToken();
+        // Wait up to 4s for the session to be available (fresh page load after Mollie redirect)
+        let token = await getToken();
         if (!token) {
-          // No session = user wasn't logged in, nothing to verify
+          await new Promise(r => setTimeout(r, 1500));
+          token = await getToken();
+        }
+        if (!token) {
+          // Still no session — nothing to verify, dismiss silently
           setPaymentReturn(false);
           return;
         }
@@ -7574,13 +7586,26 @@ export default function App() {
         const mollieStatus = data.status; // paid | open | canceled | expired | failed | pending
         if (mollieStatus === "paid" || data.plan === "free_forever" || (data.plan && PLANS[data.plan])) {
           setPaymentReturnStatus("paid");
+          setPendingPaymentWall(false); // always clear paywall on confirmed payment
           sessionStorage.removeItem("wss_pending_payment_id");
-          // Auto-dismiss after 5s
-          setTimeout(() => setPaymentReturn(false), 5000);
+
+          // Force Dashboard to reload userProfile (it's in a different component scope)
+          setProfileRefreshKey(k => k + 1);
+          // Auto-dismiss after 6s
+          setTimeout(() => setPaymentReturn(false), 6000);
         } else if (mollieStatus === "canceled" || mollieStatus === "expired" || mollieStatus === "failed") {
           setPaymentReturnStatus("failed");
+          // Restore paywall so user can retry payment
+          if (user?.id) {
+            supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", user.id).single()
+              .then(({ data: p }) => {
+                if (p?.plan === "pending_payment") {
+                  setPendingPaymentData({ chosenPlan: p.chosen_plan || "growth", billingPeriod: p.billing_period || "monthly", country: p.country || "NL", vatValidated: p.vat_validated || false });
+                }
+              }).catch(() => {});
+          }
         } else {
-          // open / pending — payment processing
+          // open / pending — payment still processing (unusual for credit card but possible)
           setPaymentReturnStatus("pending");
           setTimeout(() => setPaymentReturn(false), 6000);
         }
@@ -7656,7 +7681,7 @@ export default function App() {
       {view === "app" && user && (
         user.email === SUPERADMIN_EMAIL
           ? <SuperAdminDashboard user={user} onLogout={handleLogout} />
-          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={handlePaymentWall} onHowItWorks={() => setView("how-it-works")} />
+          : <Dashboard user={user} onLogout={handleLogout} onPaymentWall={handlePaymentWall} onHowItWorks={() => setView("how-it-works")} profileRefreshKey={profileRefreshKey} />
       )}
 
       {/* Payment wall — shown when user is logged in but hasn't paid yet */}
