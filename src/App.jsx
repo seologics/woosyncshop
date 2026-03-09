@@ -2757,6 +2757,23 @@ const AdminPanel = ({ adminTab, setAdminTab }) => {
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
   };
 
+  const reactivateUser = async (u) => {
+    if (!window.confirm(`Abonnement van ${u.email} heractiveren?`)) return;
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/reactivate-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ user_id: u.id }),
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) { alert("Heractiveren mislukt: " + (result.error || res.statusText)); return; }
+      setUsers(us => us.map(usr => usr.id === u.id ? { ...usr, plan: result.plan, pending_downgrade_plan: null, pending_downgrade_billing_period: null } : usr));
+      setEditUser(prev => prev ? { ...prev, plan: result.plan, pending_downgrade_plan: null, pending_downgrade_billing_period: null } : null);
+      alert(`✅ Abonnement heractiveerd. E-mail verstuurd naar ${u.email}.`);
+    } catch (e) { alert("Heractiveren mislukt: " + e.message); }
+  };
+
   const handleCreateUser = async () => {
     const u = createUser;
     if (!u.email?.trim()) { setCreateUserError("E-mail is verplicht."); return; }
@@ -3268,9 +3285,11 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                     <Badge color={editUser.email === SUPERADMIN_EMAIL ? "purple" : editUser.plan === "suspended" ? "red" : ["starter","growth","pro","free_forever"].includes(editUser.plan) ? "green" : "amber"}>
                       {editUser.email === SUPERADMIN_EMAIL ? "Superadmin" : editUser.plan === "suspended" ? "Gesuspendeerd" : ["starter","growth","pro"].includes(editUser.plan) ? "Actief" : "In afwachting"}
                     </Badge>
-                    {editUser.pending_downgrade_plan && (
+                    {editUser.pending_downgrade_plan === "cancelled" ? (
+                      <Badge color="red">↓ Opgezegd</Badge>
+                    ) : editUser.pending_downgrade_plan ? (
                       <Badge color="amber">↓ Downgrade → {PLANS[editUser.pending_downgrade_plan]?.name}</Badge>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
@@ -3416,6 +3435,9 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
 
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 8 }}>
                   <Btn variant="secondary" onClick={() => setEditUser(null)}>Annuleren</Btn>
+                  {editUser.pending_downgrade_plan === "cancelled" && (
+                    <Btn variant="success" onClick={() => reactivateUser(editUser)}>✅ Heractiveer abonnement</Btn>
+                  )}
                   <Btn variant="primary" onClick={() => saveUser(editUser)}>Opslaan</Btn>
                 </div>
               </div>
