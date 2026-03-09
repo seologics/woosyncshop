@@ -6955,10 +6955,18 @@ export default function App() {
             setView("landing");
           }
         }
-        supabase.auth.onAuthStateChange((_event, session) => {
+        supabase.auth.onAuthStateChange(async (_event, session) => {
           if (session?.user) {
             const u = session.user;
             setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
+            // Always check plan on login — pending_payment users must see paywall
+            try {
+              const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
+              if (profile?.plan === "pending_payment") {
+                setPendingPaymentData({ chosenPlan: profile.chosen_plan || "growth", billingPeriod: profile.billing_period || "monthly", country: profile.country || "NL", vatValidated: profile.vat_validated || false });
+                setPendingPaymentWall(true);
+              }
+            } catch {}
             setView("app");
           } else {
             setUser(null);
