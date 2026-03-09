@@ -18,6 +18,11 @@ const PLAN_PRICES = {
   pro:     { monthly: '19.99', annual_mo: '17.99' },
 }
 const PLAN_NAMES = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
+const PLAN_LIMITS = {
+  starter: { max_shops: 2,  max_connected_products: 500 },
+  growth:  { max_shops: 5,  max_connected_products: 2000 },
+  pro:     { max_shops: 10, max_connected_products: 10000 },
+}
 
 export default async (req) => {
   if (req.method !== 'GET') {
@@ -98,6 +103,7 @@ export default async (req) => {
     const billingPeriod = payment.metadata?.billing_period || profile.billing_period || 'monthly'
     const now = new Date().toISOString()
 
+    const limits = PLAN_LIMITS[activatedPlan] || PLAN_LIMITS.growth
     await supabase.from('user_profiles').update({
       plan: activatedPlan,
       billing_period: billingPeriod,
@@ -108,6 +114,8 @@ export default async (req) => {
       pending_downgrade_plan: null,
       pending_downgrade_billing_period: null,
       payment_reminder_sent_at: null, // clear so no reminder fires after payment
+      max_shops: limits.max_shops,
+      max_connected_products: limits.max_connected_products,
     }).eq('id', user.id)
 
     await supabase.from('user_plan_history').insert({
