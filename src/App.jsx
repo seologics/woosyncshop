@@ -7320,7 +7320,12 @@ export default function App() {
   const [paymentReturn, setPaymentReturn] = useState(() => window.location.hash.startsWith("#payment-return"));
   const [pendingPaymentWall, setPendingPaymentWall] = useState(false);
   const [pendingPaymentData, setPendingPaymentData] = useState(null);
-  const handlePaymentWall = (show, data) => { setPendingPaymentWall(show); if (data) setPendingPaymentData(data); };
+  const handlePaymentWall = (show, data) => {
+    // Never show the paywall overlay while AuthModal is open and handling the payment flow
+    if (show && authModalOpenRef.current) return;
+    setPendingPaymentWall(show);
+    if (data) setPendingPaymentData(data);
+  };
   const [paymentReturnStatus, setPaymentReturnStatus] = useState("checking"); // checking | paid | pending | failed | cancelled
 
   useEffect(() => {
