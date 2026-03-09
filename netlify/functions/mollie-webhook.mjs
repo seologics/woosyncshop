@@ -3,12 +3,12 @@ import nodemailer from 'nodemailer'
 
 const MOLLIE_API = 'https://api.mollie.com/v2'
 
-async function sendInvoice(userId, paymentId, amount, method, plan, billingPeriod) {
+async function sendInvoice(userId, paymentId, amount, method, plan, billingPeriod, upgradeFrom) {
   try {
     await fetch('https://woosyncshop.com/api/send-invoice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, payment_id: paymentId, amount, mollie_method: method || null, plan, billing_period: billingPeriod }),
+      body: JSON.stringify({ user_id: userId, payment_id: paymentId, amount, mollie_method: method || null, plan, billing_period: billingPeriod, upgrade_from: upgradeFrom || null }),
     })
   } catch (e) { console.error('mollie-webhook: invoice trigger failed', e.message) }
 }
@@ -94,7 +94,7 @@ export default async (req) => {
         metadata: { payment_id: paymentId, amount: payment.amount?.value, method: payment.method, event_type: eventType },
       })
 
-      await sendInvoice(userId, paymentId, payment.amount?.value || '19.99', payment.method, activatedPlan, billingPeriod)
+      await sendInvoice(userId, paymentId, payment.amount?.value || '19.99', payment.method, activatedPlan, billingPeriod, payment.metadata?.upgrade_from || null)
 
     } else if (payment.status === 'failed' || payment.status === 'canceled' || payment.status === 'expired') {
       // On failure: revert to previous active plan (or keep pending if first time)

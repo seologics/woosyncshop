@@ -142,7 +142,7 @@ export default async (req) => {
   )
 
   try {
-    const { user_id, payment_id, amount, mollie_method, plan, billing_period } = await req.json()
+    const { user_id, payment_id, amount, mollie_method, plan, billing_period, upgrade_from } = await req.json()
     if (!user_id || !amount) return new Response(JSON.stringify({ error: 'Missing params' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     // ── DUPLICATE GUARD ─────────────────────────────────────────────────────
     // If we already have an invoice for this payment_id, return it without creating a duplicate
@@ -167,9 +167,13 @@ export default async (req) => {
     const PLAN_NAMES = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
     const planName = PLAN_NAMES[plan] || PLAN_NAMES[profile?.plan] || 'Pro'
     const billingLabel = billing_period === 'annual' ? 'jaarabonnement' : 'maandabonnement'
-    const planDescription = `WooSyncShop ${planName} – ${billingLabel}`
+    const isUpgrade = !!upgrade_from && upgrade_from !== plan
+    // For upgrades: include "Upgrade" in the description shown on invoice and subject
+    const planDescription = isUpgrade
+      ? `WooSyncShop ${planName} Upgrade – ${billingLabel}`
+      : `WooSyncShop ${planName} – ${billingLabel}`
 
-    // Get notify email for BCC
+    // Get admin notification email
     const { data: settings } = await supabase.from('platform_settings').select('contact_notification_email').eq('id', 1).single()
     const adminEmail = settings?.contact_notification_email || 'leadingvation@gmail.com'
 
@@ -212,33 +216,48 @@ export default async (req) => {
       planDescription,
     })
 
-    // Send via SES SMTP with PDF attachment
+    // SMTP transport
     const smtpUser = Netlify.env.get('AWS_SES_ACCESS_KEY_ID')
     const smtpPass = Netlify.env.get('AWS_SES_SMTP_PASSWORD')
     const smtpHost = `email-smtp.${Netlify.env.get('AWS_SES_REGION') || 'eu-west-1'}.amazonaws.com`
-
     const transporter = nodemailer.createTransport({ host: smtpHost, port: 465, secure: true, auth: { user: smtpUser, pass: smtpPass } })
 
+    // ── 1. Invoice email → customer only (no bcc) ──────────────────────────
+    const firstName = userObj.full_name ? userObj.full_name.split(' ')[0] : ''
     await transporter.sendMail({
       from: `"WooSyncShop" <${FROM_EMAIL}>`,
       to: email,
-      bcc: adminEmail,
       subject: `Factuur ${invoiceNumber} – ${planDescription}`,
-      html: `<p>Beste${userObj.full_name ? ` ${userObj.full_name.split(' ')[0]}` : ''},</p>
+      html: `<p>Beste${firstName ? ` ${firstName}` : ''},</p>
 <p>Bedankt voor je betaling! Hierbij ontvang je de factuur voor je ${planDescription}.</p>
 <p>Je kunt de factuur downloaden als PDF via de bijlage.</p>
 <p>Met vriendelijke groet,<br>Het WooSyncShop team</p>`,
-      attachments: [{
-        filename: `factuur-${invoiceNumber}.pdf`,
-        content: pdfBuffer,
-        contentType: 'application/pdf',
-      }],
+      attachments: [{ filename: `factuur-${invoiceNumber}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }],
     })
+
+    // ── 2. Admin notification → admin only (no PDF, just a plain notification) ──
+    try {
+      const displayName = userObj.full_name || email
+      const adminSubject = isUpgrade
+        ? `User ${displayName} upgraded to WooSyncShop ${planName}`
+        : `New WooSyncShop ${planName} subscription — ${displayName}`
+      const adminBody = isUpgrade
+        ? `<p><strong>${displayName}</strong> (${email}) heeft geüpgraded van <strong>${PLAN_NAMES[upgrade_from] || upgrade_from}</strong> naar <strong>${planName}</strong>.</p><p>Bedrag: €${amountFormatted} · Factuur: ${invoiceNumber}</p>`
+        : `<p>Nieuw abonnement van <strong>${displayName}</strong> (${email}).</p><p>Plan: ${planName} · ${billingLabel} · €${amountFormatted} · Factuur: ${invoiceNumber}</p>`
+      await transporter.sendMail({
+        from: `"WooSyncShop" <${FROM_EMAIL}>`,
+        to: adminEmail,
+        subject: adminSubject,
+        html: adminBody,
+      })
+    } catch (adminMailErr) {
+      console.error('send-invoice: admin notification failed (non-fatal)', adminMailErr.message)
+    }
 
     await supabase.from('system_logs').insert({
       level: 'info', function_name: 'send-invoice',
-      message: `Invoice ${invoiceNumber} sent to ${email} (with PDF)`,
-      metadata: { user_id, invoice_number: invoiceNumber, amount: totalFloat },
+      message: `Invoice ${invoiceNumber} sent to ${email}${isUpgrade ? ' (upgrade)' : ''}`,
+      metadata: { user_id, invoice_number: invoiceNumber, amount: totalFloat, is_upgrade: isUpgrade },
     })
 
     return new Response(JSON.stringify({ ok: true, invoice_number: invoiceNumber, invoice_id: invoice?.id }), { status: 200, headers: { 'Content-Type': 'application/json' } })

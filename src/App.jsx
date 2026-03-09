@@ -2866,8 +2866,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       {u.plan === "free_forever" ? "🎁 Free ∞" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "⏳ Pending" : PLANS[u.plan]?.name || u.plan || "–"}
                     </Badge>
                     <span style={{ fontSize: 13 }}>{u.sites || 0} / {u.max_shops || 10}</span>
-                    <Badge color={u.plan === "free_forever" ? "green" : u.status === "active" ? "green" : "amber"} size="sm">
-                      {u.plan === "free_forever" ? "Free forever" : u.plan === "pending_payment" ? "In afwachting" : u.status === "active" ? "Actief" : "In afwachting"}
+                    <Badge color={u.plan === "free_forever" ? "green" : u.plan === "suspended" ? "red" : ["starter","growth","pro"].includes(u.plan) ? "green" : "amber"} size="sm">
+                      {u.plan === "free_forever" ? "Free forever" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "In afwachting" : ["starter","growth","pro"].includes(u.plan) ? "Actief" : "In afwachting"}
                     </Badge>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                       <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>✏</Btn>
@@ -3186,8 +3186,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                         : editUser.plan === "pending_payment" ? `⏳ Kiest ${PLANS[editUser.chosen_plan]?.name || "?"} €${PLANS[editUser.chosen_plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`
                         : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
                     </Badge>
-                    <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>
-                      {editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}
+                    <Badge color={editUser.plan === "suspended" ? "red" : ["starter","growth","pro","free_forever"].includes(editUser.plan) ? "green" : "amber"}>
+                      {editUser.plan === "suspended" ? "Gesuspendeerd" : ["starter","growth","pro"].includes(editUser.plan) ? "Actief" : "In afwachting"}
                     </Badge>
                     {editUser.pending_downgrade_plan && (
                       <Badge color="amber">↓ Downgrade → {PLANS[editUser.pending_downgrade_plan]?.name}</Badge>
