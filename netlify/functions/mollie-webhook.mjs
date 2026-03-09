@@ -221,6 +221,27 @@ export default async (req) => {
         return new Response('OK', { status: 200 })
       }
 
+      // ── PAYMENT METHOD UPDATE (not a plan change — just replace mandate & subscription) ──
+      if (payment.metadata?.update_payment_method === 'true') {
+        const planForSub = payment.metadata?.plan || profile?.plan || 'growth'
+        const bpForSub   = payment.metadata?.billing_period || profile?.billing_period || 'monthly'
+        const cycleStart = profile?.billing_cycle_start || new Date().toISOString()
+        await createOrReplaceSubscription(supabase, mollieKey, payment.customerId || profile?.mollie_customer_id, userId, planForSub, bpForSub, cycleStart, profile?.mollie_subscription_id)
+        // Log in history for idempotency tracking (won't show as plan change in UI)
+        await supabase.from('user_plan_history').insert({
+          user_id: userId,
+          event_type: 'payment_method_updated',
+          from_plan: planForSub,
+          to_plan: planForSub,
+          billing_period: bpForSub,
+          payment_id: paymentId,
+          amount_paid: parseFloat(payment.amount?.value || 0),
+          notes: `Betaalmethode bijgewerkt via Mollie (${payment.method || 'onbekend'})`,
+        })
+        await supabase.from('system_logs').insert({ level: 'info', function_name: 'mollie-webhook', message: `Payment method updated for user ${userId} — new subscription created`, metadata: { payment_id: paymentId, plan: planForSub } })
+        return new Response('OK', { status: 200 })
+      }
+
       const now = new Date().toISOString()
       const activatedPlan = ['starter', 'growth', 'pro'].includes(subscriptionPlan || payment.metadata?.plan)
         ? (subscriptionPlan || payment.metadata?.plan)

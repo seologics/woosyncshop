@@ -20,6 +20,24 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: 'Wachtwoord moet minimaal 8 tekens zijn.' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     }
 
+    // ── RATE LIMITING: max 5 registration attempts per IP per hour ────────────
+    const clientIp = req.headers.get('x-nf-client-connection-ip') || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+    if (clientIp !== 'unknown') {
+      const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const { count } = await supabase
+        .from('system_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('function_name', 'register-attempt')
+        .gte('created_at', cutoff)
+        .eq('metadata->>ip', clientIp)
+      if ((count || 0) >= 5) {
+        await supabase.from('system_logs').insert({ level: 'warn', function_name: 'register-attempt', message: `Rate limit hit for IP ${clientIp}`, metadata: { ip: clientIp, email } })
+        return new Response(JSON.stringify({ error: 'Te veel pogingen. Probeer het over een uur opnieuw.' }), { status: 429, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    // Log this attempt (fires regardless of success/fail below)
+    await supabase.from('system_logs').insert({ level: 'info', function_name: 'register-attempt', message: `Registration attempt for ${email}`, metadata: { ip: clientIp, email } })
+
     // Check if user already exists
     const { data: { users: existing } } = await supabase.auth.admin.listUsers()
     const alreadyExists = existing?.some(u => u.email?.toLowerCase() === email.toLowerCase())

@@ -2888,11 +2888,41 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                 <Btn variant="ghost" size="sm" onClick={() => setShowArchived(a => !a)}>
                   {showArchived ? "← Actief" : `📦 Gearchiveerd (${archivedCount})`}
                 </Btn>
+                <Btn variant="ghost" size="sm" onClick={() => {
+                  const rows = [
+                    ["Naam", "E-mail", "Bedrijf", "Land", "Plan", "Facturering", "Status", "Shops", "Ingeschreven", "Laatst gezien", "Volgende betaling"].join(","),
+                    ...visibleUsers.map(u => {
+                      let nextRen = "";
+                      if (u.billing_cycle_start && ["starter","growth","pro"].includes(u.plan)) {
+                        const d = new Date(u.billing_cycle_start);
+                        u.billing_period === "annual" ? d.setFullYear(d.getFullYear()+1) : d.setMonth(d.getMonth()+1);
+                        nextRen = d.toLocaleDateString("nl-NL");
+                      }
+                      return [
+                        (u.full_name||u.name||"").replace(/,/g," "),
+                        u.email||"",
+                        (u.business_name||"").replace(/,/g," "),
+                        u.country||"",
+                        u.plan||"",
+                        u.billing_period||"",
+                        u.plan==="suspended"?"Gesuspendeerd":["starter","growth","pro"].includes(u.plan)?"Actief":u.plan,
+                        u.sites||0,
+                        u.registered_at?new Date(u.registered_at).toLocaleDateString("nl-NL"):"",
+                        u.last_seen_at?new Date(u.last_seen_at).toLocaleDateString("nl-NL"):"",
+                        nextRen,
+                      ].join(",");
+                    })
+                  ].join("\n");
+                  const blob = new Blob([rows], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a"); a.href = url; a.download = `woosyncshop-gebruikers-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+                  URL.revokeObjectURL(url);
+                }}>⬇ CSV</Btn>
                 <Btn variant="primary" size="sm" onClick={() => setCreateUser({ plan: "growth", billingPeriod: "monthly", country: "NL" })}>+ Gebruiker</Btn>
               </div>
               <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "140px 160px 110px 90px 100px 50px 80px 90px 1fr", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
-                  {["Naam", "E-mail", "Bedrijf", "Plan", "Volgende betaling", "Shops", "Status", "Ingeschreven", "Acties"].map((h, i) => (
+                <div style={{ display: "grid", gridTemplateColumns: "130px 150px 100px 90px 100px 50px 80px 110px 1fr", gap: 0, background: "var(--s2)", padding: "8px 14px", borderBottom: "1px solid var(--b1)" }}>
+                  {["Naam", "E-mail", "Bedrijf", "Plan", "Volgende betaling", "Shops", "Status", "Aangemeld / Gezien", "Acties"].map((h, i) => (
                     <span key={i} style={{ fontSize: 11, color: "var(--dm)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</span>
                   ))}
                 </div>
@@ -2911,7 +2941,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                   const renewalPast = nextRenewal && nextRenewal < new Date();
 
                   return (
-                  <div key={u.id} style={{ display: "grid", gridTemplateColumns: "140px 160px 110px 90px 100px 50px 80px 90px 1fr", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center", opacity: u.archived ? 0.6 : 1, background: u.archived ? "rgba(239,68,68,0.03)" : "transparent" }}>
+                  <div key={u.id} style={{ display: "grid", gridTemplateColumns: "130px 150px 100px 90px 100px 50px 80px 110px 1fr", gap: 0, padding: "10px 14px", borderBottom: "1px solid var(--b1)", alignItems: "center", opacity: u.archived ? 0.6 : 1, background: u.archived ? "rgba(239,68,68,0.03)" : "transparent" }}>
                     <div>
                       <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.name || "—"}</div>
                       {u.address_city && <div style={{ fontSize: 11, color: "var(--dm)" }}>{u.address_city}</div>}
@@ -2936,7 +2966,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       {u.email === SUPERADMIN_EMAIL ? "Superadmin" : u.plan === "free_forever" ? "Free forever" : u.plan === "suspended" ? "Gesuspendeerd" : u.plan === "pending_payment" ? "In afwachting" : ["starter","growth","pro"].includes(u.plan) ? "Actief" : "In afwachting"}
                     </Badge>
                     <div style={{ fontSize: 11, color: "var(--dm)" }}>
-                      {u.registered_at ? new Date(u.registered_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                      <div>{u.registered_at ? new Date(u.registered_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" }) : "—"}</div>
+                      {u.last_seen_at && <div style={{ color: "var(--pr-h)", marginTop: 2 }}>👁 {new Date(u.last_seen_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" })}</div>}
                     </div>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                       <Btn variant="ghost" size="sm" onClick={() => setEditUser(u)}>✏</Btn>
@@ -3822,6 +3853,22 @@ const BillingTab = ({ userProfile }) => {
     }
   };
 
+  const [pmLoading, setPmLoading] = useState(false);
+  const [pmError, setPmError] = useState("");
+  const handleUpdatePaymentMethod = async () => {
+    setPmLoading(true); setPmError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/update-payment-method", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Aanmaken mislukt");
+      window.location.href = data.checkout_url;
+    } catch (e) { setPmError(e.message); setPmLoading(false); }
+  };
+
   const isCancelledPending = userProfile?.pending_downgrade_plan === "cancelled";
 
   return (
@@ -4036,6 +4083,20 @@ const BillingTab = ({ userProfile }) => {
           })}
         </div>
       )}
+      {/* Update payment method */}
+      {!isFreeForever && !isPendingPayment && currentPlan && (
+        <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>Betaalmethode wijzigen</div>
+          <div style={{ fontSize: 13, color: "var(--dm)", marginBottom: 10, lineHeight: 1.6 }}>
+            Verlopen kaart of wil je overstappen op iDEAL, creditcard of een andere methode? Klik hieronder om een nieuwe betaalmethode in te stellen. Je betaalt hiervoor de reguliere maandprijs — je abonnement en cyclus blijven ongewijzigd.
+          </div>
+          {pmError && <div style={{ fontSize: 13, color: "var(--re)", marginBottom: 8 }}>⚠ {pmError}</div>}
+          <Btn variant="secondary" size="sm" disabled={pmLoading} onClick={handleUpdatePaymentMethod}>
+            {pmLoading ? "Doorsturen…" : "💳 Betaalmethode wijzigen"}
+          </Btn>
+        </div>
+      )}
+
       {/* Cancel subscription section */}
       {!isFreeForever && !isPendingPayment && currentPlan && (
         <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
@@ -7418,6 +7479,8 @@ export default function App() {
         if (session) {
           const u = session.user;
           setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
+          // Track last activity — fire and forget
+          supabase.from("user_profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(() => {});
           // Check plan before deciding view — pending users must see paywall
           if (payDeepLink || true) {
             const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
@@ -7444,6 +7507,10 @@ export default function App() {
           if (session?.user) {
             const u = session.user;
             setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
+            // Track last activity on every sign-in event
+            if (_event === "SIGNED_IN") {
+              supabase.from("user_profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(() => {});
+            }
             // Always check plan on login — pending_payment users must see paywall
             // BUT: skip if AuthModal is already open in payment mode (user is mid-registration flow)
             try {
