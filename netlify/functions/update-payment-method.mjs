@@ -56,14 +56,14 @@ export default async (req) => {
     }
 
     const planKey = ['starter', 'growth', 'pro'].includes(profile.plan) ? profile.plan : 'growth'
-    const billingKey = profile.billing_period === 'annual' ? 'annual_mo' : 'monthly'
-    const amount = PLAN_PRICES[planKey][billingKey]
     const billingLabel = profile.billing_period === 'annual' ? 'jaarabonnement' : 'maandabonnement'
 
-    // Create a new "first" payment — this captures a fresh payment mandate
+    // Create a new "first" payment — €0.01 just to capture the mandate.
+    // The existing billing cycle continues unchanged; the new subscription
+    // picks up from the current cycle_start + 1 period (handled in webhook).
     const payment = await mollieRequest(mollieKey, '/payments', 'POST', {
-      amount: { currency: 'EUR', value: parseFloat(amount).toFixed(2) },
-      description: `WooSyncShop ${PLAN_NAMES[planKey]} – ${billingLabel} (betaalmethode bijwerken)`,
+      amount: { currency: 'EUR', value: '0.01' },
+      description: `WooSyncShop ${PLAN_NAMES[planKey]} – betaalmethode autorisatie`,
       redirectUrl: `https://woosyncshop.com/#payment-method-updated`,
       webhookUrl: 'https://woosyncshop.com/api/mollie-webhook',
       customerId: profile.mollie_customer_id,
