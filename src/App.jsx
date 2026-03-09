@@ -5457,8 +5457,8 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
             <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: vatInfo.rate > 0 ? 6 : 0 }}>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>Woo Sync Shop Pro</div>
-                  <div style={{ fontSize: 12, color: "var(--mx)" }}>Tot 10 WordPress installaties</div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>WooSyncShop {PLANS[form.plan]?.name || "Growth"}</div>
+                  <div style={{ fontSize: 12, color: "var(--mx)" }}>{PLANS[form.plan]?.sites} shops · {(PLANS[form.plan]?.connected_products || 0).toLocaleString("nl-NL")} producten</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   {isFree ? <span style={{ fontWeight: 800, color: "var(--gr)", fontSize: 18 }}>Gratis</span> : (
