@@ -4125,6 +4125,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks }) => {
 
   // Load shops from Supabase on mount
   useEffect(() => {
+    if (!user?.id) { setShopsLoading(false); return; }
     const loadShops = async () => {
       try {
         const { data, error } = await supabase.from("shops").select("*").eq("user_id", user.id).order("created_at", { ascending: true });
@@ -4140,7 +4141,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks }) => {
       }
     };
     loadShops();
-  }, [user.id]);
+  }, [user?.id]);
 
   // Load products + shop metadata (attributes, categories) when active shop changes
   useEffect(() => {
