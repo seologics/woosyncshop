@@ -131,7 +131,27 @@ export default async (req) => {
         return new Response(JSON.stringify({ error: payment.detail || 'Mollie payment creation failed' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       }
 
-      await supabase.from('user_profiles').update({ mollie_payment_id: payment.id, plan: 'pending_payment', billing_period: billing_period || 'monthly' }).eq('id', user.id)
+      await supabase.from('user_profiles').update({
+        mollie_payment_id: payment.id,
+        plan: 'pending_payment',
+        chosen_plan: planKey,
+        billing_period: billing_period || 'monthly',
+      }).eq('id', user.id)
+
+      // Log the pending event in history
+      const { data: prevProfile } = await supabase.from('user_profiles').select('plan, chosen_plan').eq('id', user.id).single()
+      await supabase.from('user_plan_history').insert({
+        user_id: user.id,
+        event_type: body.upgrade_from ? 'pending_upgrade' : 'registered',
+        from_plan: prevProfile?.plan === 'pending_payment' ? (prevProfile?.chosen_plan || null) : (prevProfile?.plan || null),
+        to_plan: planKey,
+        billing_period: billing_period || 'monthly',
+        payment_id: payment.id,
+        amount_paid: parseFloat(amount),
+        proration_days: body.proration_days || null,
+        notes: body.upgrade_from ? `Upgrade van ${body.upgrade_from} → ${planKey}` : null,
+      })
+
       await log(supabase, 'info', 'Mollie checkout created', { user_id: user.id, payment_id: payment.id, amount, method: method || null, customer_id: customerId })
 
       return new Response(JSON.stringify({ checkout_url: payment._links.checkout.href, payment_id: payment.id }), { status: 200, headers: { 'Content-Type': 'application/json' } })

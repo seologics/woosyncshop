@@ -235,8 +235,22 @@ export default async (req) => {
     }
   }
 
-  // GET: list all users
+  // GET: list all users — or plan history for a single user
   try {
+    const url = new URL(req.url, 'https://woosyncshop.com')
+    const historyUserId = url.searchParams.get('history')
+
+    // Plan history for a specific user
+    if (historyUserId) {
+      const { data: history, error: histErr } = await supabase
+        .from('user_plan_history')
+        .select('*')
+        .eq('user_id', historyUserId)
+        .order('created_at', { ascending: false })
+      if (histErr) throw histErr
+      return new Response(JSON.stringify({ history: history || [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+
     const { data: profiles, error: profileErr } = await supabase.from('user_profiles').select('*')
     if (profileErr) throw profileErr
     const { data: { users: authUsers }, error: authUsersErr } = await supabase.auth.admin.listUsers()

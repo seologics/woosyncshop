@@ -3147,113 +3147,204 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
         );
       })()}
 
-      {editUser && (
-        <Overlay open onClose={() => setEditUser(null)} width={580} title={`Configuratie: ${editUser.name || editUser.email || "gebruiker"}`}>
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", gap: 16, alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{editUser.email}</div>
-                <div style={{ fontSize: 12, color: "var(--dm)" }}>{editUser.sites} shops verbonden</div>
-              </div>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>
-                  {editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.plan === "pending_payment" ? `${PLANS[editUser.chosen_plan]?.name || "pending"} €${PLANS[editUser.chosen_plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd` : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
-                </Badge>
-                <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>{editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}</Badge>
-              </div>
-            </div>
-            <Field label="Plan">
-              <Sel value={editUser.plan} onChange={e => setEditUser(u => ({ ...u, plan: e.target.value }))} options={[
-  { value: "starter", label: "Starter – €7,99 / maand (2 shops, 500 producten)" },
-  { value: "growth",  label: "Growth – €11,99 / maand (5 shops, 2000 producten)" },
-  { value: "pro",     label: "Pro – €19,99 / maand (10 shops, 10k producten)" },
-  { value: "free_forever", label: "Free forever (code: freeforever)" },
-  { value: "suspended", label: "Gesuspendeerd" },
-  { value: "pending_payment", label: "In afwachting betaling" },
-]} />
-            </Field>
-            <div className="settings-2col">
-              <Field label="Max shops (override)" hint={`Standaard plan: ${PLANS[editUser.plan]?.sites ?? "—"}`}>
-                <Inp value={editUser.max_shops ?? (PLANS[editUser.plan]?.sites || 10)}
-                  onChange={e => setEditUser(u => ({ ...u, max_shops: e.target.value }))} type="number" />
-              </Field>
-              <Field label="Max verbonden producten (override)" hint={`Standaard plan: ${(PLANS[editUser.plan]?.connected_products || 0).toLocaleString("nl-NL")}`}>
-                <Inp value={editUser.max_connected_products ?? (PLANS[editUser.plan]?.connected_products || 500)}
-                  onChange={e => setEditUser(u => ({ ...u, max_connected_products: e.target.value }))} type="number" />
-              </Field>
-            </div>
-            <Divider />
-            <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
-            {(() => {
-              const planLimits = PLANS[editUser.plan] || PLANS.growth;
-              return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
-                    Plan <strong style={{ color: "var(--pr-h)" }}>{planLimits.name}</strong> — standaard limieten:
-                    model <strong>{planLimits.gemini_model}</strong> · max <strong>{planLimits.img_max_kb} KB</strong> · kwaliteit <strong>{planLimits.img_quality}%</strong> · max breedte <strong>{planLimits.img_max_width}px</strong>
+      {editUser && (() => {
+        const EditUserModal = () => {
+          const [planHistory, setPlanHistory] = useState(null);
+          const [historyLoading, setHistoryLoading] = useState(false);
+          const [historyError, setHistoryError] = useState("");
+
+          useEffect(() => {
+            const load = async () => {
+              setHistoryLoading(true);
+              try {
+                const { data: { session } } = await supabase.auth.getSession();
+                const res = await fetch(`/api/admin-users?history=${editUser.id}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
+                const data = await res.json();
+                setPlanHistory(data.history || []);
+              } catch (e) { setHistoryError(e.message); }
+              finally { setHistoryLoading(false); }
+            };
+            load();
+          }, []);
+
+          const eventLabel = { registered: "Geregistreerd", activated: "Geactiveerd", upgraded: "Upgrade", downgraded: "Downgrade", pending_upgrade: "Upgrade gestart", pending_downgrade: "Downgrade gepland", downgrade_applied: "Downgrade doorgevoerd", cancelled: "Betaling mislukt" };
+          const eventColor = { registered: "blue", activated: "green", upgraded: "green", downgraded: "amber", pending_upgrade: "blue", pending_downgrade: "amber", downgrade_applied: "amber", cancelled: "red" };
+
+          return (
+            <Overlay open onClose={() => setEditUser(null)} width={620} title={`Configuratie: ${editUser.name || editUser.email || "gebruiker"}`}>
+              <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* User header card */}
+                <div style={{ padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{editUser.email}</div>
+                    <div style={{ fontSize: 12, color: "var(--dm)" }}>{editUser.sites} shops verbonden</div>
                   </div>
-                  <div className="settings-2col">
-                    <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
-                      <Sel value={editUser.gemini_model || planLimits.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
-                        { value: "gemini-2.0-flash-lite", label: "Flash Lite — zuinig (Starter/Free)" },
-                        { value: "gemini-2.0-flash",      label: "Flash — gebalanceerd (Growth)" },
-                        { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
-                        { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
-                      ]} />
-                    </Field>
-                    <Field label="Max bestandsgrootte" hint={`Plan max: ${planLimits.img_max_kb} KB`}>
-                      <Inp value={editUser.img_max_kb ?? planLimits.img_max_kb} onChange={e => setEditUser(u => ({ ...u, img_max_kb: e.target.value }))} type="number" suffix="KB" />
-                    </Field>
-                    <Field label="Compressiekwaliteit" hint={`Plan max: ${planLimits.img_quality}%`}>
-                      <Inp value={editUser.img_quality ?? planLimits.img_quality} onChange={e => setEditUser(u => ({ ...u, img_quality: e.target.value }))} type="number" suffix="%" />
-                    </Field>
-                    <Field label="Max breedte" hint={`Plan max: ${planLimits.img_max_width}px`}>
-                      <Inp value={editUser.img_max_width ?? planLimits.img_max_width} onChange={e => setEditUser(u => ({ ...u, img_max_width: e.target.value }))} type="number" suffix="px" />
-                    </Field>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>
+                      {editUser.plan === "free_forever" ? "🎁 Free forever"
+                        : editUser.plan === "suspended" ? "Gesuspendeerd"
+                        : editUser.plan === "pending_payment" ? `⏳ Kiest ${PLANS[editUser.chosen_plan]?.name || "?"} €${PLANS[editUser.chosen_plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`
+                        : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
+                    </Badge>
+                    <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>
+                      {editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}
+                    </Badge>
+                    {editUser.pending_downgrade_plan && (
+                      <Badge color="amber">↓ Downgrade → {PLANS[editUser.pending_downgrade_plan]?.name}</Badge>
+                    )}
                   </div>
-                  <Btn variant="ghost" size="sm" style={{ alignSelf: "flex-start", fontSize: 11 }}
-                    onClick={() => setEditUser(u => ({ ...u, gemini_model: planLimits.gemini_model, img_max_kb: planLimits.img_max_kb, img_quality: planLimits.img_quality, img_max_width: planLimits.img_max_width }))}>
-                    ↺ Reset naar plan standaard
-                  </Btn>
                 </div>
-              );
-            })()}
-            <Divider />
-            <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🧠 AI Taxonomie Vertaling (per gebruiker)</div>
-            <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>Functie inschakelen</div>
-                  <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 2 }}>Staat de gebruiker toe AI-taxonomievertaling te activeren vanuit zijn instellingen.</div>
+
+                {/* Billing cycle info */}
+                {editUser.billing_cycle_start && (
+                  <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <span>🔄 Cyclus gestart: <strong style={{ color: "var(--tx)" }}>{new Date(editUser.billing_cycle_start).toLocaleDateString("nl-NL")}</strong></span>
+                    {editUser.chosen_plan && editUser.plan !== editUser.chosen_plan && (
+                      <span>📦 Gekozen plan: <strong style={{ color: "var(--pr-h)" }}>{PLANS[editUser.chosen_plan]?.name || editUser.chosen_plan}</strong></span>
+                    )}
+                    {editUser.pending_downgrade_plan && (
+                      <span>⏱ Downgrade gepland: <strong style={{ color: "var(--ac)" }}>{PLANS[editUser.pending_downgrade_plan]?.name}</strong></span>
+                    )}
+                  </div>
+                )}
+
+                <Field label="Plan">
+                  <Sel value={editUser.plan} onChange={e => setEditUser(u => ({ ...u, plan: e.target.value }))} options={[
+                    { value: "starter", label: "Starter – €7,99 / maand (2 shops, 500 producten)" },
+                    { value: "growth",  label: "Growth – €11,99 / maand (5 shops, 2000 producten)" },
+                    { value: "pro",     label: "Pro – €19,99 / maand (10 shops, 10k producten)" },
+                    { value: "free_forever", label: "Free forever (code: freeforever)" },
+                    { value: "suspended", label: "Gesuspendeerd" },
+                    { value: "pending_payment", label: "In afwachting betaling" },
+                  ]} />
+                </Field>
+                <div className="settings-2col">
+                  <Field label="Max shops (override)" hint={`Standaard plan: ${PLANS[editUser.plan]?.sites ?? "—"}`}>
+                    <Inp value={editUser.max_shops ?? (PLANS[editUser.plan]?.sites || 10)}
+                      onChange={e => setEditUser(u => ({ ...u, max_shops: e.target.value }))} type="number" />
+                  </Field>
+                  <Field label="Max verbonden producten (override)" hint={`Standaard plan: ${(PLANS[editUser.plan]?.connected_products || 0).toLocaleString("nl-NL")}`}>
+                    <Inp value={editUser.max_connected_products ?? (PLANS[editUser.plan]?.connected_products || 500)}
+                      onChange={e => setEditUser(u => ({ ...u, max_connected_products: e.target.value }))} type="number" />
+                  </Field>
                 </div>
-                <Tog checked={editUser.ai_taxonomy_enabled ?? false} onChange={v => setEditUser(u => ({ ...u, ai_taxonomy_enabled: v }))} />
+                <Divider />
+                <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🤖 AI image pipeline (per gebruiker)</div>
+                {(() => {
+                  const planLimits = PLANS[editUser.plan] || PLANS.growth;
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                        Plan <strong style={{ color: "var(--pr-h)" }}>{planLimits.name}</strong> — standaard limieten:
+                        model <strong>{planLimits.gemini_model}</strong> · max <strong>{planLimits.img_max_kb} KB</strong> · kwaliteit <strong>{planLimits.img_quality}%</strong> · max breedte <strong>{planLimits.img_max_width}px</strong>
+                      </div>
+                      <div className="settings-2col">
+                        <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
+                          <Sel value={editUser.gemini_model || planLimits.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
+                            { value: "gemini-2.0-flash-lite", label: "Flash Lite — zuinig (Starter/Free)" },
+                            { value: "gemini-2.0-flash",      label: "Flash — gebalanceerd (Growth)" },
+                            { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
+                            { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
+                          ]} />
+                        </Field>
+                        <Field label="Max bestandsgrootte" hint={`Plan max: ${planLimits.img_max_kb} KB`}>
+                          <Inp value={editUser.img_max_kb ?? planLimits.img_max_kb} onChange={e => setEditUser(u => ({ ...u, img_max_kb: e.target.value }))} type="number" suffix="KB" />
+                        </Field>
+                        <Field label="Compressiekwaliteit" hint={`Plan max: ${planLimits.img_quality}%`}>
+                          <Inp value={editUser.img_quality ?? planLimits.img_quality} onChange={e => setEditUser(u => ({ ...u, img_quality: e.target.value }))} type="number" suffix="%" />
+                        </Field>
+                        <Field label="Max breedte" hint={`Plan max: ${planLimits.img_max_width}px`}>
+                          <Inp value={editUser.img_max_width ?? planLimits.img_max_width} onChange={e => setEditUser(u => ({ ...u, img_max_width: e.target.value }))} type="number" suffix="px" />
+                        </Field>
+                      </div>
+                      <Btn variant="ghost" size="sm" style={{ alignSelf: "flex-start", fontSize: 11 }}
+                        onClick={() => setEditUser(u => ({ ...u, gemini_model: planLimits.gemini_model, img_max_kb: planLimits.img_max_kb, img_quality: planLimits.img_quality, img_max_width: planLimits.img_max_width }))}>
+                        ↺ Reset naar plan standaard
+                      </Btn>
+                    </div>
+                  );
+                })()}
+                <Divider />
+                <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🧠 AI Taxonomie Vertaling (per gebruiker)</div>
+                <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>Functie inschakelen</div>
+                      <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 2 }}>Staat de gebruiker toe AI-taxonomievertaling te activeren vanuit zijn instellingen.</div>
+                    </div>
+                    <Tog checked={editUser.ai_taxonomy_enabled ?? false} onChange={v => setEditUser(u => ({ ...u, ai_taxonomy_enabled: v }))} />
+                  </div>
+                  {(editUser.ai_taxonomy_enabled) && <>
+                    <Divider my={4} />
+                    <Field label="Gemini model voor taxonomie" hint="Kan afwijken van image pipeline model">
+                      <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.0-flash"}
+                        onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_model: e.target.value }))}
+                        options={[
+                          { value: "gemini-2.0-flash-lite", label: "Flash Lite – zuinig, geschikt voor eenvoudige vertalingen" },
+                          { value: "gemini-2.0-flash",      label: "Flash – gebalanceerd (aanbevolen)" },
+                          { value: "gemini-2.5-pro",        label: "2.5 Pro – hoogste kwaliteit, meer tokens" },
+                        ]} />
+                    </Field>
+                    <Field label="Confidence drempel" hint="Vertalingen onder deze score vereisen handmatige review">
+                      <Inp value={editUser.ai_taxonomy_threshold ?? "80"} onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_threshold: e.target.value }))} type="number" suffix="%" style={{ maxWidth: 120 }} />
+                    </Field>
+                    <div style={{ padding: "8px 10px", background: "var(--pr-l)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)", fontSize: 12, color: "var(--mx)" }}>
+                      💡 De gebruiker kan de functie zelf aan/uitzetten via <strong style={{ color: "var(--tx)" }}>Instellingen → AI Vertaling</strong>. Dit admin-veld bepaalt of de optie überhaupt beschikbaar is voor zijn account.
+                    </div>
+                  </>}
+                </div>
+
+                {/* Plan history */}
+                <Divider />
+                <div style={{ fontWeight: 600, fontSize: 13, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>📋 Plan geschiedenis</div>
+                <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+                  {historyLoading ? (
+                    <div style={{ fontSize: 13, color: "var(--dm)", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 12, height: 12, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                      Laden...
+                    </div>
+                  ) : historyError ? (
+                    <div style={{ fontSize: 13, color: "var(--re)" }}>⚠ {historyError}</div>
+                  ) : !planHistory || planHistory.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "var(--dm)" }}>Geen plan-wijzigingen gevonden.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {planHistory.map((h, i) => (
+                        <div key={h.id || i} style={{ display: "flex", gap: 12, alignItems: "flex-start", paddingBottom: i < planHistory.length - 1 ? 10 : 0, marginBottom: i < planHistory.length - 1 ? 10 : 0, borderBottom: i < planHistory.length - 1 ? "1px solid var(--b1)" : "none" }}>
+                          {/* Timeline dot */}
+                          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 3 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: eventColor[h.event_type] === "green" ? "var(--gr)" : eventColor[h.event_type] === "red" ? "var(--re)" : eventColor[h.event_type] === "amber" ? "var(--ac)" : "var(--pr-h)" }} />
+                            {i < planHistory.length - 1 && <div style={{ width: 1, background: "var(--b1)", flex: 1, minHeight: 20, marginTop: 4 }} />}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <Badge color={eventColor[h.event_type] || "blue"} size="sm">{eventLabel[h.event_type] || h.event_type}</Badge>
+                              {h.from_plan && <span style={{ fontSize: 11, color: "var(--dm)" }}>{PLANS[h.from_plan]?.name || h.from_plan} →</span>}
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)" }}>{PLANS[h.to_plan]?.name || h.to_plan}</span>
+                              {h.amount_paid > 0 && <span style={{ fontSize: 11, color: "var(--gr)", fontWeight: 600 }}>€{parseFloat(h.amount_paid).toFixed(2).replace(".", ",")}</span>}
+                              {h.proration_days && <span style={{ fontSize: 10, color: "var(--dm)" }}>({h.proration_days}d pro-rata)</span>}
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 3 }}>
+                              {new Date(h.created_at).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              {h.notes && <span style={{ marginLeft: 8, fontStyle: "italic" }}>{h.notes}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 8 }}>
+                  <Btn variant="secondary" onClick={() => setEditUser(null)}>Annuleren</Btn>
+                  <Btn variant="primary" onClick={() => saveUser(editUser)}>Opslaan</Btn>
+                </div>
               </div>
-              {(editUser.ai_taxonomy_enabled) && <>
-                <Divider my={4} />
-                <Field label="Gemini model voor taxonomie" hint="Kan afwijken van image pipeline model">
-                  <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.0-flash"}
-                    onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_model: e.target.value }))}
-                    options={[
-                      { value: "gemini-2.0-flash-lite", label: "Flash Lite – zuinig, geschikt voor eenvoudige vertalingen" },
-                      { value: "gemini-2.0-flash",      label: "Flash – gebalanceerd (aanbevolen)" },
-                      { value: "gemini-2.5-pro",        label: "2.5 Pro – hoogste kwaliteit, meer tokens" },
-                    ]} />
-                </Field>
-                <Field label="Confidence drempel" hint="Vertalingen onder deze score vereisen handmatige review">
-                  <Inp value={editUser.ai_taxonomy_threshold ?? "80"} onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_threshold: e.target.value }))} type="number" suffix="%" style={{ maxWidth: 120 }} />
-                </Field>
-                <div style={{ padding: "8px 10px", background: "var(--pr-l)", borderRadius: "var(--rd)", border: "1px solid rgba(91,91,214,0.2)", fontSize: 12, color: "var(--mx)" }}>
-                  💡 De gebruiker kan de functie zelf aan/uitzetten via <strong style={{ color: "var(--tx)" }}>Instellingen → AI Vertaling</strong>. Dit admin-veld bepaalt of de optie überhaupt beschikbaar is voor zijn account.
-                </div>
-              </>}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 8 }}>
-              <Btn variant="secondary" onClick={() => setEditUser(null)}>Annuleren</Btn>
-              <Btn variant="primary" onClick={() => saveUser(editUser)}>Opslaan</Btn>
-            </div>
-          </div>
-        </Overlay>
-      )}
+            </Overlay>
+          );
+        };
+        return <EditUserModal key={editUser.id} />;
+      })()}
     </div>
   );
 };
@@ -3529,28 +3620,44 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
   );
 };
 // ─── Billing Tab Component ─────────────────────────────────────────────────────
+const PLAN_ORDER_BILLING = { starter: 1, growth: 2, pro: 3 };
+
 const BillingTab = ({ userProfile }) => {
   const isFreeForever = userProfile?.plan === "free_forever";
+  const isPendingPayment = userProfile?.plan === "pending_payment";
   const planKey = userProfile?.plan && PLANS[userProfile.plan] ? userProfile.plan : null;
   const currentPlan = planKey ? PLANS[planKey] : null;
   const billingPeriod = userProfile?.billing_period || "monthly";
-  const isPending = !isFreeForever && !userProfile?.mollie_customer_id && userProfile?.plan !== "pending_payment";
+
+  // payments history
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
-  const [invoices, setInvoices] = useState({}); // keyed by payment_id
+  const [invoices, setInvoices] = useState({});
+
+  // plan change UI
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [selectedBilling, setSelectedBilling] = useState(billingPeriod);
+  const [prorationInfo, setProrationInfo] = useState(null);
+  const [prorationLoading, setProrationLoading] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [selectedMethod, setSelectedMethod] = useState("");
+  const [changeLoading, setChangeLoading] = useState(false);
+  const [changeError, setChangeError] = useState("");
+  const [changeSuccess, setChangeSuccess] = useState("");
+
+  // pending downgrade notice
+  const hasPendingDowngrade = !!userProfile?.pending_downgrade_plan;
 
   useEffect(() => {
     if (isFreeForever || !userProfile?.id) return;
-    // Load invoices from Supabase for download links
     supabase.from("invoices").select("id, invoice_number, payment_id, issued_at").eq("user_id", userProfile.id).order("issued_at", { ascending: false })
       .then(({ data }) => {
         const map = {};
         (data || []).forEach(inv => {
           if (inv.payment_id) map[inv.payment_id] = inv;
-          // Also store by invoice id for fallback lookup
           map[`inv_${inv.id}`] = inv;
         });
-        // If there are invoices without payment_id, attach them to unmatched paid payments later via __all
         map.__all = data || [];
         setInvoices(map);
       });
@@ -3570,18 +3677,86 @@ const BillingTab = ({ userProfile }) => {
     load();
   }, [userProfile?.id, isFreeForever]);
 
+  // Load payment methods when change panel opens
+  useEffect(() => {
+    if (!changeOpen) return;
+    fetch("/api/mollie-payments?type=methods")
+      .then(r => r.json())
+      .then(d => setPaymentMethods(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [changeOpen]);
+
+  // Fetch proration when plan/billing selection changes
+  useEffect(() => {
+    if (!selectedPlan || !changeOpen) { setProrationInfo(null); return; }
+    if (selectedPlan === planKey && selectedBilling === billingPeriod) { setProrationInfo(null); return; }
+    const fetch_ = async () => {
+      setProrationLoading(true);
+      setProrationInfo(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(`/api/plan-change?plan=${selectedPlan}&billing_period=${selectedBilling}`, {
+          headers: { "Authorization": `Bearer ${session?.access_token}` }
+        });
+        const data = await res.json();
+        setProrationInfo(data);
+      } catch (e) { setProrationInfo({ error: e.message }); }
+      finally { setProrationLoading(false); }
+    };
+    fetch_();
+  }, [selectedPlan, selectedBilling, changeOpen]);
+
+  const handlePlanChange = async () => {
+    if (!selectedPlan || changeLoading) return;
+    setChangeLoading(true);
+    setChangeError("");
+    setChangeSuccess("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const isUpgrade = (PLAN_ORDER_BILLING[selectedPlan] || 0) > (PLAN_ORDER_BILLING[planKey] || 0);
+      const res = await fetch("/api/plan-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({
+          action: isUpgrade ? "upgrade" : "downgrade",
+          new_plan: selectedPlan,
+          billing_period: selectedBilling,
+          payment_method: selectedMethod || undefined,
+          return_url: "https://woosyncshop.com/#payment-return",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Mislukt");
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else if (data.action === "downgrade_scheduled") {
+        setChangeSuccess(`Je ${PLANS[selectedPlan]?.name} abonnement gaat in na afloop van de huidige betaalperiode. Je houdt toegang tot je huidige plan tot die tijd.`);
+        setChangeOpen(false);
+      }
+    } catch (e) {
+      setChangeError(e.message);
+    } finally {
+      setChangeLoading(false);
+    }
+  };
+
+  const currentOrder = PLAN_ORDER_BILLING[planKey] || 0;
+  const selectedOrder = PLAN_ORDER_BILLING[selectedPlan] || 0;
+  const isUpgrade = selectedOrder > currentOrder;
+  const isDowngrade = selectedOrder < currentOrder;
+  const isSamePlan = selectedPlan === planKey && selectedBilling === billingPeriod;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Current plan card */}
       <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--b2)" }}>
         <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 4 }}>Huidig abonnement</div>
         {isFreeForever ? (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
         ) : currentPlan ? (
-          <div>
-            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>
-              {currentPlan.name}
-              <span style={{ fontSize: 16, fontWeight: 400, color: "var(--mx)", marginLeft: 10 }}>€{getPlanPrice(planKey, billingPeriod).toFixed(2).replace(".", ",")} / maand</span>
-            </div>
+          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>
+            {currentPlan.name}
+            <span style={{ fontSize: 16, fontWeight: 400, color: "var(--mx)", marginLeft: 10 }}>€{getPlanPrice(planKey, billingPeriod).toFixed(2).replace(".", ",")} / maand</span>
           </div>
         ) : (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>€{userProfile?.price_total || "19,99"} <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>/ maand</span></div>
@@ -3589,23 +3764,154 @@ const BillingTab = ({ userProfile }) => {
         {currentPlan && (
           <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12, color: "var(--mx)", flexWrap: "wrap" }}>
             <span>🏪 Tot {userProfile?.max_shops || currentPlan.sites} shops</span>
-            <span>🔗 {(userProfile?.max_connected_products || currentPlan.connected_products).toLocaleString("nl-NL")} verbonden producten
-              {userProfile?.max_connected_products && userProfile.max_connected_products !== currentPlan.connected_products
-                ? <span style={{ marginLeft: 4, fontSize: 10, color: "var(--pr-h)", fontWeight: 700 }}>✦ aangepast</span>
-                : null}
-            </span>
-            <span>📅 {billingPeriod === "annual" ? "Jaarlijks" : "Maandelijks"}</span>
+            <span>🔗 {(userProfile?.max_connected_products || currentPlan.connected_products).toLocaleString("nl-NL")} verbonden producten</span>
+            <span>📅 {billingPeriod === "annual" ? "Jaarlijks (-10%)" : "Maandelijks"}</span>
+            {userProfile?.billing_cycle_start && (
+              <span>🔄 Cyclus gestart: {new Date(userProfile.billing_cycle_start).toLocaleDateString("nl-NL")}</span>
+            )}
           </div>
         )}
-        {isFreeForever
-          ? <Badge color="green" style={{ marginTop: 8, display: "inline-flex" }}>✓ Free forever account</Badge>
-          : userProfile?.plan === "pending_payment"
-            ? <Badge color="amber" style={{ marginTop: 8, display: "inline-flex" }}>⏳ Betaling in afwachting</Badge>
-            : currentPlan
-              ? <Badge color="blue" style={{ marginTop: 8, display: "inline-flex" }}>✓ {currentPlan.name} · actief via Mollie</Badge>
-              : <Badge color="amber" style={{ marginTop: 8, display: "inline-flex" }}>⚠ Onbekend plan</Badge>
-        }
+        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          {isFreeForever
+            ? <Badge color="green">✓ Free forever account</Badge>
+            : isPendingPayment
+              ? <Badge color="amber">⏳ Betaling in afwachting</Badge>
+              : currentPlan
+                ? <Badge color="blue">✓ {currentPlan.name} · actief via Mollie</Badge>
+                : <Badge color="amber">⚠ Onbekend plan</Badge>}
+          {hasPendingDowngrade && (
+            <Badge color="amber">↓ Downgrade naar {PLANS[userProfile.pending_downgrade_plan]?.name} gepland</Badge>
+          )}
+        </div>
       </div>
+
+      {/* Pending downgrade notice */}
+      {hasPendingDowngrade && (
+        <div style={{ padding: 12, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "var(--rd)", fontSize: 13 }}>
+          <strong style={{ color: "var(--ac)" }}>📅 Downgrade gepland:</strong> je abonnement wordt aan het einde van de huidige betaalperiode gewijzigd naar <strong>{PLANS[userProfile.pending_downgrade_plan]?.name}</strong>. Je houdt tot die tijd toegang tot je huidige plan.
+        </div>
+      )}
+
+      {/* Success message */}
+      {changeSuccess && (
+        <div style={{ padding: 12, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--gr)" }}>
+          ✓ {changeSuccess}
+        </div>
+      )}
+
+      {/* Plan wijzigen section — only for active paid plans */}
+      {!isFreeForever && !isPendingPayment && currentPlan && (
+        <div style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd-lg)", border: "1px solid var(--b1)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: changeOpen ? 16 : 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>📦 Plan wijzigen</div>
+            <Btn variant="ghost" size="sm" onClick={() => { setChangeOpen(v => !v); setSelectedPlan(null); setProrationInfo(null); setChangeError(""); }}>
+              {changeOpen ? "Inklappen ▲" : "Wijzigen ▼"}
+            </Btn>
+          </div>
+
+          {changeOpen && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }} className="fade-in">
+              {/* Plan tiles */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Pakket kiezen</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                  {PLAN_LIST.map(p => {
+                    const isCurrent = p.id === planKey;
+                    const isSelected = p.id === selectedPlan;
+                    return (
+                      <button key={p.id} onClick={() => setSelectedPlan(p.id)}
+                        style={{ padding: "12px 8px", borderRadius: "var(--rd)", border: `2px solid ${isSelected ? "var(--pr)" : isCurrent ? "var(--b2)" : "var(--b1)"}`, background: isSelected ? "var(--pr-l)" : isCurrent ? "rgba(255,255,255,0.03)" : "transparent", cursor: "pointer", textAlign: "center", position: "relative" }}>
+                        {isCurrent && <div style={{ position: "absolute", top: 4, right: 6, fontSize: 9, color: "var(--pr-h)", fontWeight: 700, textTransform: "uppercase" }}>huidig</div>}
+                        <div style={{ fontWeight: 700, fontSize: 13, color: isSelected ? "var(--pr-h)" : "var(--tx)" }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>€{(selectedBilling === "annual" ? p.annual_mo : p.monthly).toFixed(2).replace(".", ",")}/mo</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Billing period toggle */}
+              <div style={{ display: "flex", gap: 8 }}>
+                {["monthly", "annual"].map(bp => (
+                  <button key={bp} onClick={() => setSelectedBilling(bp)}
+                    style={{ flex: 1, padding: "8px 12px", borderRadius: "var(--rd)", border: `2px solid ${selectedBilling === bp ? "var(--pr)" : "var(--b1)"}`, background: selectedBilling === bp ? "var(--pr-l)" : "transparent", cursor: "pointer", fontSize: 12, fontWeight: selectedBilling === bp ? 700 : 400, color: selectedBilling === bp ? "var(--pr-h)" : "var(--mx)" }}>
+                    {bp === "monthly" ? "Maandelijks" : "Jaarlijks (10% korting)"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Proration info */}
+              {selectedPlan && !isSamePlan && (
+                <div style={{ padding: 14, background: isUpgrade ? "rgba(99,102,241,0.06)" : "rgba(245,158,11,0.06)", borderRadius: "var(--rd)", border: `1px solid ${isUpgrade ? "rgba(99,102,241,0.2)" : "rgba(245,158,11,0.2)"}` }}>
+                  {prorationLoading ? (
+                    <div style={{ fontSize: 13, color: "var(--dm)", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 12, height: 12, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                      Berekenen...
+                    </div>
+                  ) : prorationInfo?.error ? (
+                    <div style={{ fontSize: 13, color: "var(--re)" }}>⚠ {prorationInfo.error}</div>
+                  ) : prorationInfo?.same ? (
+                    <div style={{ fontSize: 13, color: "var(--mx)" }}>Dit is al je huidige plan en factureringsperiode.</div>
+                  ) : prorationInfo?.action === "upgrade" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--pr-h)" }}>⬆ Upgrade naar {PLANS[selectedPlan]?.name}</div>
+                      <div style={{ fontSize: 13, color: "var(--tx)" }}>
+                        {prorationInfo.days
+                          ? <>Je betaalt het verschil voor de resterende <strong>{prorationInfo.days} van {prorationInfo.daysInMonth} dagen</strong> van je huidige betaalperiode:</>
+                          : <>Eerste betaling:</>}
+                        <span style={{ marginLeft: 8, fontWeight: 800, fontSize: 15, color: "var(--pr-h)" }}>€{parseFloat(prorationInfo.amount).toFixed(2).replace(".", ",")}</span>
+                      </div>
+                      {prorationInfo.days && (
+                        <div style={{ fontSize: 11, color: "var(--dm)" }}>
+                          Dag {prorationInfo.daysElapsed} van {prorationInfo.daysInMonth} — dagprijs verschil: €{((parseFloat(prorationInfo.amount)) / prorationInfo.days).toFixed(4)} · Volgende volledige betaling {PLANS[selectedPlan]?.name}: €{getPlanPrice(selectedPlan, selectedBilling).toFixed(2).replace(".", ",")}
+                        </div>
+                      )}
+                    </div>
+                  ) : prorationInfo?.action === "downgrade" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ac)" }}>⬇ Downgrade naar {PLANS[selectedPlan]?.name}</div>
+                      <div style={{ fontSize: 13, color: "var(--tx)" }}>{prorationInfo.message}</div>
+                      <div style={{ fontSize: 11, color: "var(--dm)" }}>Er is geen restitutie voor de resterende dagen van de huidige betaalperiode. Je houdt toegang tot je huidige plan tot {prorationInfo.effectiveDate}.</div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {/* Payment method — only for upgrades */}
+              {selectedPlan && isUpgrade && !isSamePlan && !prorationLoading && prorationInfo && !prorationInfo.error && !prorationInfo.same && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Betaalmethode</div>
+                  {paymentMethods.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {paymentMethods.map(m => (
+                        <button key={m.id} onClick={() => setSelectedMethod(m.id)}
+                          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: "var(--rd)", border: `2px solid ${selectedMethod === m.id ? "var(--pr)" : "var(--b1)"}`, background: selectedMethod === m.id ? "var(--pr-l)" : "var(--s3)", cursor: "pointer", fontSize: 12, fontWeight: selectedMethod === m.id ? 700 : 400 }}>
+                          {m.image?.size1x && <img src={m.image.size1x} alt={m.description} style={{ width: 24, height: 16, objectFit: "contain" }} />}
+                          {m.description}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "var(--dm)" }}>Betaalmethoden laden…</div>
+                  )}
+                </div>
+              )}
+
+              {changeError && <div style={{ fontSize: 13, color: "var(--re)" }}>⚠ {changeError}</div>}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn variant="secondary" onClick={() => { setChangeOpen(false); setSelectedPlan(null); setProrationInfo(null); setChangeError(""); }}>Annuleren</Btn>
+                <Btn variant="primary" disabled={!selectedPlan || isSamePlan || prorationLoading || changeLoading || (isUpgrade && !selectedMethod && paymentMethods.length > 0)}
+                  onClick={handlePlanChange}>
+                  {changeLoading ? "Verwerken…" : isUpgrade ? `⬆ Upgrade bevestigen — €${prorationInfo?.amount ? parseFloat(prorationInfo.amount).toFixed(2).replace(".", ",") : "…"}` : "⬇ Downgrade inplannen"}
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payment history */}
       {!isFreeForever && (
         <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Betalingsgeschiedenis</div>
@@ -3620,9 +3926,9 @@ const BillingTab = ({ userProfile }) => {
             const statusLabel = { paid: "Geslaagd", pending: "In afwachting", open: "Open", failed: "Mislukt", canceled: "Geannuleerd", expired: "Verlopen" }[p.status] || p.status;
             const statusColor = { paid: "green", pending: "amber", open: "amber", failed: "red", canceled: "red", expired: "red" }[p.status] || "default";
             return (
-              <div key={p.id || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: i < payments.length - 1 ? "1px solid var(--b1)" : "none" }}>
+              <div key={p.id || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: i < payments.length - 1 ? "1px solid var(--b1)" : "none", flexWrap: "wrap", gap: 6 }}>
                 <span style={{ fontSize: 12, color: "var(--dm)" }}>{p.date}</span>
-                <span style={{ fontSize: 12, color: "var(--mx)", flex: 1, marginLeft: 12 }}>{p.description}</span>
+                <span style={{ fontSize: 12, color: "var(--mx)", flex: 1, marginLeft: 12, minWidth: 120 }}>{p.description}</span>
                 <span style={{ fontWeight: 600, fontSize: 13, marginRight: 12 }}>{p.amount}</span>
                 <Badge color={statusColor} size="sm">{statusLabel}</Badge>
                 {p.status === "paid" && (
@@ -3630,7 +3936,6 @@ const BillingTab = ({ userProfile }) => {
                     onClick={async () => {
                       const { data: { session } } = await supabase.auth.getSession();
                       const win = window.open("about:blank", "_blank");
-                      // Always try payment_id first; API creates invoice on demand if missing
                       const param = p.id ? `payment_id=${p.id}` : invoices.__all?.[0]?.id ? `id=${invoices.__all[0].id}` : null;
                       if (!param) { win.close(); return; }
                       const res = await fetch(`/api/get-invoice?${param}`, { headers: { "Authorization": `Bearer ${session?.access_token}` } });
