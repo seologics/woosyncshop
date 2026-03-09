@@ -4143,7 +4143,7 @@ const BillingTab = ({ userProfile }) => {
   );
 };
 
-const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDeleted }) => {
+const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDeleted, profileRefreshKey = 0 }) => {
   const [settingsTab, setSettingsTab] = useState("sites");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
@@ -4976,7 +4976,8 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             user={user} shops={shops}
             onShopAdded={handleShopAdded}
             onShopUpdated={handleShopUpdated}
-            onShopDeleted={handleShopDeleted} />
+            onShopDeleted={handleShopDeleted}
+            profileRefreshKey={profileRefreshKey} />
         )}
       </div>
 
