@@ -273,6 +273,7 @@ export default async (req) => {
         billing_cycle_start: newCycleStart,
         pending_downgrade_plan: null,
         pending_downgrade_billing_period: null,
+        payment_reminder_sent_at: null, // clear so no reminder fires after payment
       }).eq('id', userId)
 
       // Determine history event type

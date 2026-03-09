@@ -107,6 +107,7 @@ export default async (req) => {
       billing_cycle_start: now,
       pending_downgrade_plan: null,
       pending_downgrade_billing_period: null,
+      payment_reminder_sent_at: null, // clear so no reminder fires after payment
     }).eq('id', user.id)
 
     await supabase.from('user_plan_history').insert({
