@@ -4175,8 +4175,17 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const handleSaveProfile = async () => {
     setProfileSaving(true);
     try {
+      // Password change via backend (admin API) — avoids OTP confirmation and session disruption
       if (profileForm.password) {
-        await supabase.auth.updateUser({ password: profileForm.password });
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/update-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ password: profileForm.password }),
+        });
+        const result = await res.json();
+        if (!res.ok || result.error) throw new Error(result.error || "Wachtwoord wijzigen mislukt");
+        setProfileForm(f => ({ ...f, password: "" })); // clear field on success
       }
       const vatInfo = getVatInfo(profileForm.country, profileForm.vat_validated);
       await supabase.from("user_profiles").update({
@@ -6718,10 +6727,13 @@ const SystemLogsPanel = () => {
   const [fnFilter, setFnFilter] = useState("all");
   const [clearing, setClearing] = useState(false);
 
+  const [logsError, setLogsError] = useState("");
+
   const loadLogs = async (level, fn) => {
     const lvl = level !== undefined ? level : levelFilter;
     const f = fn !== undefined ? fn : fnFilter;
     setLoading(true);
+    setLogsError("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -6731,10 +6743,18 @@ const SystemLogsPanel = () => {
       const res = await fetch(`/api/system-logs?${params}`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
-      if (!res.ok) throw new Error("Laden mislukt");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const errorHint = res.headers.get("X-Logs-Error");
+      if (errorHint) setLogsError(`Tabel fout: ${errorHint} — voer system_logs_migration.sql uit in Supabase.`);
       const data = await res.json();
       setLogs(data);
-    } catch (e) { console.error("Failed to load logs:", e); }
+    } catch (e) {
+      setLogsError(e.message);
+      console.error("Failed to load logs:", e);
+    }
     finally { setLoading(false); }
   };
 
@@ -6791,6 +6811,11 @@ const SystemLogsPanel = () => {
       <div style={{ fontSize: 11, color: "var(--dm)" }}>
         Logs worden automatisch verwijderd na 7 dagen · {filteredLogs.length} van {logs.length} getoond
       </div>
+      {logsError && (
+        <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--re)", marginBottom: 8 }}>
+          ⚠ {logsError}
+        </div>
+      )}
       {loading ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "var(--mx)", fontSize: 13 }}>
           <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span> Logs laden...

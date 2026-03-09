@@ -32,7 +32,7 @@ export default async (req) => {
     await supabase.from('system_logs').delete().lt('created_at', cutoff)
 
     const url = new URL(req.url)
-    const level = url.searchParams.get('level') // error | warn | info | all
+    const level = url.searchParams.get('level')
     const fn = url.searchParams.get('fn')
     const limit = parseInt(url.searchParams.get('limit') || '200')
 
@@ -47,7 +47,9 @@ export default async (req) => {
 
     const { data, error } = await query
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      // Table may not exist yet — return empty array with header hint
+      console.error('system_logs query error:', error.message)
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json', 'X-Logs-Error': error.message } })
     }
 
     return new Response(JSON.stringify(data || []), { status: 200, headers: { 'Content-Type': 'application/json' } })
