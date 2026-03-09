@@ -203,7 +203,7 @@ export default async (req) => {
         </table>
       </div>
       <div style="text-align:center;margin:0 0 8px">
-        <a href="https://woosyncshop.com" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">Betaling afronden →</a>
+        <a href="https://woosyncshop.com/?pay=1" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">Betaling afronden →</a>
       </div>
       <p style="margin:8px 0 0;font-size:11px;color:#4b5563;text-align:center">🔒 Veilige betaling via Mollie</p>
     </td></tr>

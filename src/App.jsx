@@ -3157,7 +3157,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
               </div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
                 <Badge color={editUser.plan === "free_forever" ? "green" : editUser.plan === "suspended" ? "red" : "blue"}>
-                  {editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
+                  {editUser.plan === "free_forever" ? "🎁 Free forever" : editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.plan === "pending_payment" ? `${PLANS[editUser.chosen_plan]?.name || "pending"} €${PLANS[editUser.chosen_plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd` : `${PLANS[editUser.plan]?.name || editUser.plan} €${PLANS[editUser.plan]?.monthly?.toFixed(2).replace(".", ",") || "—"}/mnd`}
                 </Badge>
                 <Badge color={editUser.plan === "suspended" ? "red" : editUser.status === "active" ? "green" : "amber"}>{editUser.plan === "suspended" ? "Gesuspendeerd" : editUser.status === "active" ? "Actief" : "In afwachting"}</Badge>
               </div>
@@ -4624,6 +4624,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [accountCreated, setAccountCreated] = useState(false); // true once /api/register succeeded — skip re-registration on back+resubmit
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
@@ -4683,7 +4684,25 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
     try {
       const { user } = await signIn(form.email, form.password);
       onSuccess({ id: user.id, name: user.user_metadata?.full_name || form.email, email: user.email });
-    } catch (e) { setError(e.message); } finally { setLoading(false); }
+    } catch (e) {
+      // Check if this email has a pending_payment account — give a helpful nudge instead of a generic error
+      try {
+        const checkRes = await fetch("/api/check-pending", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email }),
+        });
+        if (checkRes.ok) {
+          const { pending } = await checkRes.json();
+          if (pending) {
+            setError("__PENDING__");
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {}
+      setError(e.message);
+    } finally { setLoading(false); }
   };
 
   const handleSignup = async () => {
@@ -4697,26 +4716,30 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
 
       const vi = getVatInfo(form.country, form.vat_validated, getPlanPrice(form.plan, form.billingPeriod));
 
-      // Register via server-side API — creates user pre-confirmed, no confirmation email sent
-      const res = await fetch("/api/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: form.email,
-          password: form.password,
-          metadata: {
-            full_name: form.name, business_name: form.business_name,
-            country: form.country, vat_number: form.vat_number,
-            vat_validated: form.vat_validated, address_street: form.address_street,
-            address_zip: form.address_zip, address_city: form.address_city,
-            plan: isFree ? "free_forever" : form.plan,
-            billing_period: form.billingPeriod,
-            price_total: vi.total, vat_rate: vi.rate,
-          },
-        }),
-      });
-      const result = await res.json();
-      if (!res.ok) { setError(result.error || "Registratie mislukt."); return; }
+      if (!accountCreated) {
+        // Register via server-side API — creates user pre-confirmed, no confirmation email sent
+        const res = await fetch("/api/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: form.email,
+            password: form.password,
+            metadata: {
+              full_name: form.name, business_name: form.business_name,
+              country: form.country, vat_number: form.vat_number,
+              vat_validated: form.vat_validated, address_street: form.address_street,
+              address_zip: form.address_zip, address_city: form.address_city,
+              plan: isFree ? "free_forever" : form.plan,
+              billing_period: form.billingPeriod,
+              price_total: vi.total, vat_rate: vi.rate,
+            },
+          }),
+        });
+        const result = await res.json();
+        // 409 = account already exists (user went back and resubmitted) — just sign in and proceed
+        if (!res.ok && res.status !== 409) { setError(result.error || "Registratie mislukt."); return; }
+        setAccountCreated(true);
+      }
 
       // Sign in to get session (always works — user is pre-confirmed)
       await signIn(form.email, form.password);
@@ -4777,9 +4800,18 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
     <Overlay open onClose={onClose} width={step === "plan" ? 700 : 440} title={null}>
       <div style={{ padding: 32 }}>
         {error && (
-          <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", marginBottom: 16, fontSize: 13, color: "#ef4444" }}>
-            {error}
-          </div>
+          error === "__PENDING__" ? (
+            <div style={{ padding: "12px 16px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--rd)", marginBottom: 16, fontSize: 13, color: "var(--pr-h)", lineHeight: 1.6 }}>
+              💳 <strong>Betaling nog niet afgerond.</strong> Check je e-mail voor de betaallink, of{" "}
+              <span style={{ textDecoration: "underline", cursor: "pointer" }} onClick={() => { setError(null); setStep("login"); }}>
+                log opnieuw in
+              </span>{" "}om direct naar betaling te gaan.
+            </div>
+          ) : (
+            <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", marginBottom: 16, fontSize: 13, color: "#ef4444" }}>
+              {error}
+            </div>
+          )
         )}
 
         {step === "plan" && <>
@@ -6893,15 +6925,35 @@ export default function App() {
   useEffect(() => {
     // If we landed on a static page directly, skip loading state
     if (initPage) return;
+    const payDeepLink = new URLSearchParams(window.location.search).get("pay") === "1";
+    if (payDeepLink) history.replaceState({}, "", "/"); // clean URL immediately
     const init = async () => {
       try {
         const session = await getSession();
         if (session) {
           const u = session.user;
           setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
-          setView("app");
+          // Check plan before deciding view — pending users must see paywall
+          if (payDeepLink || true) {
+            const { data: profile } = await supabase.from("user_profiles").select("plan,chosen_plan,billing_period,country,vat_validated").eq("id", u.id).single();
+            if (profile?.plan === "pending_payment") {
+              setView("app");
+              setPendingPaymentData({ chosenPlan: profile.chosen_plan || "growth", billingPeriod: profile.billing_period || "monthly", country: profile.country || "NL", vatValidated: profile.vat_validated || false });
+              setPendingPaymentWall(true);
+            } else {
+              setView("app");
+            }
+          } else {
+            setView("app");
+          }
         } else {
-          setView("landing");
+          // ?pay=1 but not logged in → open login modal, paywall triggers after login via Dashboard useEffect
+          if (payDeepLink) {
+            setView("landing");
+            setTimeout(() => setAuthModal({ mode: "login" }), 300);
+          } else {
+            setView("landing");
+          }
         }
         supabase.auth.onAuthStateChange((_event, session) => {
           if (session?.user) {

@@ -234,7 +234,7 @@ export default async (req) => {
           </p>
 
           <div style="text-align:center;margin:0 0 8px">
-            <a href="https://woosyncshop.com" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">
+            <a href="https://woosyncshop.com/?pay=1" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px">
               Betaling afronden →
             </a>
           </div>
