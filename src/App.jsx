@@ -5976,7 +5976,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           <Btn variant="ghost" onClick={onLogin}>Inloggen</Btn>
-          <Btn variant="primary" onClick={onSignup}>Start vandaag</Btn>
+          <Btn variant="primary" onClick={() => onSignup("growth", "monthly")}>Start vandaag</Btn>
         </div>
       </nav>
 
@@ -5991,7 +5991,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
           Stop met inloggen op elk afzonderlijk WooCommerce dashboard. Woo Sync Shop synchroniseert producten, voorraad en prijzen tussen al jouw shops.
         </p>
         <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-          <Btn variant="primary" size="lg" onClick={onSignup} style={{ fontSize: 15, padding: "13px 28px" }}>Start gratis →</Btn>
+          <Btn variant="primary" size="lg" onClick={() => onSignup("growth", "monthly")} style={{ fontSize: 15, padding: "13px 28px" }}>Start gratis →</Btn>
           <Btn variant="secondary" size="lg" style={{ fontSize: 15, padding: "13px 28px" }}>Bekijk demo</Btn>
         </div>
         <div style={{ marginTop: 60, display: "flex", justifyContent: "center" }}>
