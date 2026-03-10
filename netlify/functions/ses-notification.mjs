@@ -10,11 +10,13 @@ export default async (req) => {
     return new Response('Method not allowed', { status: 405 });
   }
 
+  // SNS may send as text/plain — parse manually
   let body;
   try {
-    body = await req.json();
+    const text = await req.text();
+    body = JSON.parse(text);
   } catch {
-    return new Response('Invalid JSON', { status: 400 });
+    return new Response('Invalid body', { status: 400 });
   }
 
   const messageType = req.headers.get('x-amz-sns-message-type') || body?.Type;
