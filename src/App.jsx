@@ -1755,7 +1755,7 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const [connectModal, setConnectModal] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // Use the imported getToken from supabase.js directly — do NOT shadow it here
+  // getToken is imported from supabase.js — no local wrapper needed
 
   useEffect(() => {
     const load = async () => {
@@ -5679,7 +5679,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   // Per-shop cache: attributes (with terms) + categories
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
 
-  // Use the imported getToken from supabase.js directly — do NOT shadow it here
+  // getToken is imported from supabase.js — no local wrapper needed
 
   const wooCall = async (shopId, endpoint, method = "GET", data = null) => {
     const token = await getToken();

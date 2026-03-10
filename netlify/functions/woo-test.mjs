@@ -1,8 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
+// Explicit path mapping — prevents 404 if netlify.toml redirect isn't matched
+export const config = { path: "/api/woo-test" };
+
 export default async (req) => {
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405, headers: { "Content-Type": "application/json" }
+    });
   }
 
   // Env vars must be read inside the handler, not at module level
@@ -14,12 +19,14 @@ export default async (req) => {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ ok: false, error: "Invalid JSON" }), { status: 400 });
+    return new Response(JSON.stringify({ ok: false, error: "Invalid JSON" }), {
+      status: 400, headers: { "Content-Type": "application/json" }
+    });
   }
 
   let { site_url, consumer_key, consumer_secret, shop_id } = body;
 
-  // If CK/CS are missing, look them up from Supabase by shop_id.
+  // If CK/CS are missing, look them up fresh from Supabase by shop_id.
   // Handles plugin-connected shops where local React state may not yet have
   // the credentials that plugin-register.mjs wrote to the DB.
   if (shop_id && (!consumer_key || !consumer_secret)) {
