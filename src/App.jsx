@@ -4434,11 +4434,12 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                       <div style={{ gridColumn: "1/-1" }}>
                         <Badge color="green">{"🔌 Verbonden via companion plugin" + (shop.plugin_connected_at ? " · " + new Date(shop.plugin_connected_at).toLocaleDateString("nl-NL") : "")}</Badge>
                       </div>
-                    ) : (
-                      <React.Fragment>
-                        <Field label="Consumer Key"><Inp value="ck_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
-                        <Field label="Consumer Secret"><Inp value="cs_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
-                      </React.Fragment>
+                    )}
+                    {!shop.plugin_connected && (
+                      <Field label="Consumer Key"><Inp value="ck_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
+                    )}
+                    {!shop.plugin_connected && (
+                      <Field label="Consumer Secret"><Inp value="cs_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
                     )}
                     <div style={{ gridColumn: "1/-1" }}>
                       <Field label="🔑 Companion Plugin Token">
