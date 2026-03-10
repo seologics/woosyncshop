@@ -4324,7 +4324,10 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
     if (!newShop.name || !newShop.site_url || !newShop.consumer_key || !newShop.consumer_secret) return alert("Vul alle verplichte velden in");
     setSavingShop(true);
     try {
-      const { data, error } = await supabase.from("shops").insert([{ ...newShop, user_id: user.id }]).select().single();
+      // Generate a secure random API token for the companion plugin
+      const apiToken = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+      const { data, error } = await supabase.from("shops").insert([{ ...newShop, user_id: user.id, api_token: apiToken }]).select().single();
       if (error) throw error;
       onShopAdded?.(data);
       setAddShopOpen(false);
@@ -4409,6 +4412,19 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                     <Field label="Taal / Locale"><Inp value={shop.locale || ""} onChange={() => {}} readOnly /></Field>
                     <Field label="Consumer Key"><Inp value="ck_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
                     <Field label="Consumer Secret"><Inp value="cs_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
+                    {shop.api_token && (
+                      <div style={{ gridColumn: "1/-1" }}>
+                        <Field label="🔑 Companion Plugin Token">
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <Inp value={shop.api_token} onChange={() => {}} readOnly style={{ fontFamily: "monospace", fontSize: 11, letterSpacing: "0.03em", flex: 1 }} />
+                            <Btn variant="secondary" size="sm" onClick={() => {
+                              navigator.clipboard.writeText(shop.api_token);
+                            }}>Kopiëren</Btn>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 4 }}>Plak dit token in de WooSyncShop Companion plugin op jouw WordPress site.</div>
+                        </Field>
+                      </div>
+                    )}
                     <div style={{ gridColumn: "1/-1", display: "flex", gap: 8, alignItems: "center" }}>
                       {tr && (
                         tr.ok
@@ -4547,24 +4563,22 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                     }} options={LOCALE_OPTIONS} />
                   </Field>
                   <Field label="Vlag">
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      {/* Shape selector */}
-                      {FLAG_SHAPES.map(shape => (
-                        <button key={shape} onClick={() => setNewShop(s => ({ ...s, flagShape: shape }))}
-                          style={{ padding: "4px 10px", borderRadius: "var(--rd)", border: `1px solid ${(newShop.flagShape||"emoji") === shape ? "var(--pr)" : "var(--b1)"}`, background: (newShop.flagShape||"emoji") === shape ? "var(--pr-l)" : "var(--s2)", cursor: "pointer", fontSize: 12, color: (newShop.flagShape||"emoji") === shape ? "var(--pr-h)" : "var(--mx)", fontWeight: (newShop.flagShape||"emoji") === shape ? 700 : 400 }}>
-                          {shape === "emoji" ? "🏳️ Emoji" : shape === "rect" ? "▬ Rechthoek" : "⬤ Cirkel"}
-                        </button>
-                      ))}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {/* Big preview */}
+                      <div style={{ fontSize: 32, lineHeight: 1, minWidth: 36, textAlign: "center" }}>
+                        {newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐"}
+                      </div>
+                      {/* Clickable flag grid — all flags from LOCALE_FLAG_MAP */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxWidth: 280 }}>
+                        {[...new Set(Object.values(LOCALE_FLAG_MAP))].concat(["🌐"]).map(f => (
+                          <button key={f} onClick={() => setNewShop(s => ({ ...s, flag: f }))}
+                            style={{ fontSize: 18, padding: "2px 4px", borderRadius: 4, border: `1px solid ${newShop.flag === f ? "var(--pr)" : "transparent"}`, background: newShop.flag === f ? "var(--pr-l)" : "transparent", cursor: "pointer", lineHeight: 1 }}>
+                            {f}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ fontSize: (newShop.flagShape||"emoji") === "emoji" ? 28 : 0, lineHeight: 1 }}>{(newShop.flagShape||"emoji") === "emoji" ? (newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐") : null}</div>
-                      {(newShop.flagShape||"emoji") !== "emoji" && (() => {
-                        const flagEmoji = newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐";
-                        const shape = newShop.flagShape || "emoji";
-                        return <div style={{ width: shape === "rect" ? 32 : 24, height: shape === "rect" ? 20 : 24, borderRadius: shape === "circle" ? "50%" : 4, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: shape === "rect" ? 20 : 18, background: "var(--s3)", border: "1px solid var(--b1)" }}>{flagEmoji}</div>;
-                      })()}
-                      <Inp value={newShop.flag} onChange={e => setNewShop(s => ({ ...s, flag: e.target.value }))} placeholder={LOCALE_FLAG_MAP[newShop.locale] || "🌐"} style={{ maxWidth: 80 }} />
-                    </div>
+                    <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 4 }}>Automatisch ingesteld op basis van taal. Klik om te wijzigen.</div>
                   </Field>
                   <Field label="Consumer Key" required><Inp value={newShop.consumer_key} onChange={e => setNewShop(s => ({ ...s, consumer_key: e.target.value }))} placeholder="ck_..." type="password" /></Field>
                   <Field label="Consumer Secret" required><Inp value={newShop.consumer_secret} onChange={e => setNewShop(s => ({ ...s, consumer_secret: e.target.value }))} placeholder="cs_..." type="password" /></Field>
