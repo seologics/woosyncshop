@@ -4192,6 +4192,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const [testingShop, setTestingShop] = useState(null); // shopId being tested
   const [testResults, setTestResults] = useState({}); // {shopId: {ok, wc_version, ...}}
   const [savingShop, setSavingShop] = useState(false);
+  const [newlyAddedToken, setNewlyAddedToken] = useState(null); // show token after shop creation
   const [expandedShop, setExpandedShop] = useState(null);
   const [shopGoogle, setShopGoogle] = useState({});
 
@@ -4330,8 +4331,9 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       const { data, error } = await supabase.from("shops").insert([{ ...newShop, user_id: user.id, api_token: apiToken }]).select().single();
       if (error) throw error;
       onShopAdded?.(data);
-      setAddShopOpen(false);
       setNewShop({ name: "", site_url: "", locale: "nl_NL", flag: "🌐", consumer_key: "", consumer_secret: "" });
+      setAddShopOpen(false);
+      if (data.api_token) setNewlyAddedToken(data.api_token);
     } catch (e) { alert("Shop toevoegen mislukt: " + e.message); }
     finally { setSavingShop(false); }
   };
@@ -4412,19 +4414,28 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                     <Field label="Taal / Locale"><Inp value={shop.locale || ""} onChange={() => {}} readOnly /></Field>
                     <Field label="Consumer Key"><Inp value="ck_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
                     <Field label="Consumer Secret"><Inp value="cs_••••••••••••••••" onChange={() => {}} type="password" readOnly /></Field>
-                    {shop.api_token && (
-                      <div style={{ gridColumn: "1/-1" }}>
-                        <Field label="🔑 Companion Plugin Token">
-                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <Inp value={shop.api_token} onChange={() => {}} readOnly style={{ fontFamily: "monospace", fontSize: 11, letterSpacing: "0.03em", flex: 1 }} />
-                            <Btn variant="secondary" size="sm" onClick={() => {
-                              navigator.clipboard.writeText(shop.api_token);
-                            }}>Kopiëren</Btn>
+                    <div style={{ gridColumn: "1/-1" }}>
+                      <Field label="🔑 Companion Plugin Token">
+                        {shop.api_token ? (
+                          <div>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <Inp value={shop.api_token} onChange={() => {}} readOnly style={{ fontFamily: "monospace", fontSize: 11, letterSpacing: "0.03em", flex: 1 }} />
+                              <Btn variant="secondary" size="sm" onClick={() => navigator.clipboard.writeText(shop.api_token)}>Kopiëren</Btn>
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 4 }}>Plak dit token in de WooSyncShop Companion plugin op jouw WordPress site onder <em>Instellingen → Verbinding instellen</em>.</div>
                           </div>
-                          <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 4 }}>Plak dit token in de WooSyncShop Companion plugin op jouw WordPress site.</div>
-                        </Field>
-                      </div>
-                    )}
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontSize: 12, color: "var(--mx)" }}>Nog geen token gegenereerd.</span>
+                            <Btn variant="secondary" size="sm" onClick={async () => {
+                              const token = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2,"0")).join("");
+                              await supabase.from("shops").update({ api_token: token }).eq("id", shop.id);
+                              onShopAdded?.({ ...shop, api_token: token }); // trigger refresh
+                            }}>Token genereren</Btn>
+                          </div>
+                        )}
+                      </Field>
+                    </div>
                     <div style={{ gridColumn: "1/-1", display: "flex", gap: 8, alignItems: "center" }}>
                       {tr && (
                         tr.ok
@@ -4555,7 +4566,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                 <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Nieuwe shop toevoegen</div>
                 <div className="settings-2col">
                   <Field label="Naam" required><Inp value={newShop.name} onChange={e => setNewShop(s => ({ ...s, name: e.target.value }))} placeholder="bijv. HaagDirect NL" /></Field>
-                  <Field label="Site URL" required><Inp value={newShop.site_url} onChange={e => setNewShop(s => ({ ...s, site_url: e.target.value.replace(/\/$/, "") }))} placeholder="https://mijnshop.nl" /></Field>
+                  <Field label="Site URL" required><Inp value={newShop.site_url} onChange={e => setNewShop(s => ({ ...s, site_url: e.target.value }))} onBlur={e => setNewShop(s => ({ ...s, site_url: e.target.value.replace(/\/$/, "") }))} placeholder="https://mijnshop.nl" /></Field>
                   <Field label="Taal / Locale" required>
                     <Sel value={newShop.locale} onChange={v => {
                       const autoFlag = LOCALE_FLAG_MAP[v] || "🌐";
@@ -4568,11 +4579,12 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                       <div style={{ fontSize: 32, lineHeight: 1, minWidth: 36, textAlign: "center" }}>
                         {newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐"}
                       </div>
-                      {/* Clickable flag grid — all flags from LOCALE_FLAG_MAP */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxWidth: 280 }}>
-                        {[...new Set(Object.values(LOCALE_FLAG_MAP))].concat(["🌐"]).map(f => (
+                      {/* Clickable flag grid — all unique flags from LOCALE_FLAG_MAP */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                        {["🌐", ...new Set(Object.values(LOCALE_FLAG_MAP))].map(f => (
                           <button key={f} onClick={() => setNewShop(s => ({ ...s, flag: f }))}
-                            style={{ fontSize: 18, padding: "2px 4px", borderRadius: 4, border: `1px solid ${newShop.flag === f ? "var(--pr)" : "transparent"}`, background: newShop.flag === f ? "var(--pr-l)" : "transparent", cursor: "pointer", lineHeight: 1 }}>
+                            title={f}
+                            style={{ fontSize: 22, width: 34, height: 30, borderRadius: 4, border: `1px solid ${(newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐") === f ? "var(--pr)" : "transparent"}`, background: (newShop.flag || LOCALE_FLAG_MAP[newShop.locale] || "🌐") === f ? "var(--pr-l)" : "transparent", cursor: "pointer", lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                             {f}
                           </button>
                         ))}
@@ -4589,7 +4601,20 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                 </div>
               </div>
             ) : (
-              <Btn variant="primary" icon="+" onClick={() => setAddShopOpen(true)}>Shop toevoegen</Btn>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {newlyAddedToken && (
+                  <div style={{ padding: 14, background: "rgba(34,197,94,0.08)", border: "1px solid var(--gr)", borderRadius: "var(--rd-lg)" }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "var(--gr)", marginBottom: 8 }}>✅ Shop toegevoegd! Kopieer je plugin token:</div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <Inp value={newlyAddedToken} onChange={() => {}} readOnly style={{ fontFamily: "monospace", fontSize: 11, flex: 1 }} />
+                      <Btn variant="secondary" size="sm" onClick={() => { navigator.clipboard.writeText(newlyAddedToken); }}>Kopiëren</Btn>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 6 }}>Plak dit token in de WooSyncShop Companion plugin op jouw WordPress site. Je kunt het altijd terugvinden in de shop-instellingen.</div>
+                    <Btn variant="ghost" size="sm" style={{ marginTop: 8 }} onClick={() => setNewlyAddedToken(null)}>Sluiten</Btn>
+                  </div>
+                )}
+                <Btn variant="primary" icon="+" onClick={() => setAddShopOpen(true)}>Shop toevoegen</Btn>
+              </div>
             )}
           </div>
         )}
