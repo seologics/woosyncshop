@@ -4430,7 +4430,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                   <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <Field label="Site URL"><Inp value={shop.site_url || ""} onChange={() => {}} readOnly /></Field>
                     <Field label="Taal / Locale"><Inp value={shop.locale || ""} onChange={() => {}} readOnly /></Field>
-                    {shop.plugin_connected ? (
+                    {shop.plugin_connected && (
                       <div style={{ gridColumn: "1/-1" }}>
                         <Badge color="green">{"🔌 Verbonden via companion plugin" + (shop.plugin_connected_at ? " · " + new Date(shop.plugin_connected_at).toLocaleDateString("nl-NL") : "")}</Badge>
                       </div>
