@@ -1916,6 +1916,20 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const otherSites = sites.filter(s => s.id !== activeSite?.id);
   const matchModeLabel = { sku: "🔑 SKU", attribute: "🏷 Attribuut", manual: "🔍 Handmatig", ai: "🤖 AI" };
 
+  // ── Connect CTA helper ──────────────────────────────────────────────────
+  const ConnectCTA = ({ service, icon, title, description }) => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 20px", textAlign: "center", gap: 10 }}>
+      <div style={{ fontSize: 32 }}>{icon}</div>
+      <div style={{ fontFamily: "var(--font-h)", fontSize: 14, fontWeight: 700, color: "var(--tx)" }}>{title}</div>
+      <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, maxWidth: 240 }}>{description}</div>
+      <a href="/#settings" onClick={() => window.location.hash = "settings"} style={{ textDecoration: "none" }}>
+        <button style={{ marginTop: 4, padding: "7px 16px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+          Koppelen in Instellingen →
+        </button>
+      </a>
+    </div>
+  );
+
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
       <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
@@ -4751,6 +4765,17 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 
 // ─── AnalyticsView ────────────────────────────────────────────────────────────
 function AnalyticsView({ shops, user }) {
+  const [googleConnections, setGoogleConnections] = React.useState({ ads: false, ga4: false, sc: false });
+
+  React.useEffect(() => {
+    // Fetch connection status from platform settings (superadmin-visible but read by all)
+    getToken().then(token => {
+      fetch("/api/platform-settings", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => setGoogleConnections({ ads: !!d.google_ads_connected, ga4: !!d.ga4_oauth_connected, sc: !!d.search_console_connected }))
+        .catch(() => {});
+    }).catch(() => {});
+  }, []);
   const RANGES = [
     { key: "7d",   label: "7 dagen" },
     { key: "30d",  label: "30 dagen" },
@@ -5136,33 +5161,49 @@ function AnalyticsView({ shops, user }) {
         </div>
       </div>
 
-      {/* Campaigns + Hourly */}
-      {((d.byCampaign?.length > 0) || (d.byHour?.length > 0)) && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-          {d.byCampaign?.length > 0 && (
-            <div style={S.card}>
-              <div style={S.cardTitle}>Google Ads campagnes</div>
-              <div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, padding: "0 0 7px", borderBottom: "1px solid var(--b1)", fontSize: 10, color: "var(--mx)", fontWeight: 600, textTransform: "uppercase", letterSpacing: .3 }}>
-                  <span>Campagne</span><span>Orders</span><span>Omzet</span>
-                </div>
-                {d.byCampaign.slice(0, 8).map((c, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, padding: "7px 0", borderBottom: i < d.byCampaign.length - 1 ? "1px solid var(--b1)" : "none", alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontSize: 12, color: "var(--tx)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.campaign}</div>
-                      {c.term && <div style={{ fontSize: 11, color: "var(--mx)" }}>🔑 {c.term}</div>}
-                    </div>
-                    <span style={{ fontSize: 12, color: "var(--mx)", textAlign: "right" }}>{c.orders}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, textAlign: "right" }}>{fmt(c.revenue)}</span>
-                  </div>
-                ))}
+      {/* Campaigns + Hourly + Search Console — always visible, CTA when not connected */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
+
+        {/* Google Ads campaigns */}
+        <div style={S.card}>
+          <div style={S.cardTitle}>
+            🎯 Google Ads campagnes
+            {googleConnections.ads && d.byCampaign?.length > 0 && (
+              <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 99, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 600 }}>● Live</span>
+            )}
+          </div>
+          {!googleConnections.ads ? (
+            <ConnectCTA service="ads" icon="🎯" title="Koppel Google Ads" description="Bekijk campagne ROAS, spend vs. omzet en zoekwoorden per bestelling." />
+          ) : d.byCampaign?.length > 0 ? (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, padding: "0 0 7px", borderBottom: "1px solid var(--b1)", fontSize: 10, color: "var(--mx)", fontWeight: 600, textTransform: "uppercase", letterSpacing: .3 }}>
+                <span>Campagne</span><span>Orders</span><span>Omzet</span>
               </div>
+              {d.byCampaign.slice(0, 8).map((c, i) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, padding: "7px 0", borderBottom: i < d.byCampaign.length - 1 ? "1px solid var(--b1)" : "none", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: "var(--tx)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.campaign}</div>
+                    {c.term && <div style={{ fontSize: 11, color: "var(--mx)" }}>🔑 {c.term}</div>}
+                  </div>
+                  <span style={{ fontSize: 12, color: "var(--mx)", textAlign: "right" }}>{c.orders}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, textAlign: "right" }}>{fmt(c.revenue)}</span>
+                </div>
+              ))}
             </div>
+          ) : (
+            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--mx)" }}>Geen campagnedata in WooCommerce order meta gevonden.<br/>Zorg dat UTM-parameters in je Ads-links staan.</div>
           )}
-          {d.byHour?.length > 0 && (
-            <div style={S.card}>
-              <div style={S.cardTitle}>Orders per uur</div>
-              <ResponsiveContainer width="100%" height={185}>
+        </div>
+
+        {/* Orders by hour */}
+        <div style={S.card}>
+          <div style={S.cardTitle}>
+            ⏰ Orders per uur
+            {googleConnections.ads && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 99, background: "rgba(99,102,241,0.12)", color: "var(--pr-h)", fontWeight: 600 }}>+ Ads spend overlay →</span>}
+          </div>
+          {d.byHour?.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={d.byHour.map(h => ({ label: `${h.hour}u`, orders: h.orders }))} margin={{ top: 5, right: 0, left: -24, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--b1)" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: "var(--dm)", fontSize: 10 }} axisLine={false} tickLine={false} interval={3} />
@@ -5175,10 +5216,33 @@ function AnalyticsView({ shops, user }) {
                 const peak = d.byHour.reduce((a, b) => b.orders > a.orders ? b : a, { hour: 0, orders: 0 });
                 return peak.orders > 0 ? <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 6, textAlign: "center" }}>Piekuur: <strong style={{ color: "var(--tx)" }}>{peak.hour}:00–{peak.hour + 1}:00</strong> · {peak.orders} orders</div> : null;
               })()}
+              {!googleConnections.ads && (
+                <div style={{ marginTop: 10, padding: "7px 10px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: "var(--rd)", fontSize: 11, color: "var(--mx)" }}>
+                  🎯 <a href="/#settings" onClick={() => window.location.hash="settings"} style={{ color: "var(--pr-h)", textDecoration: "none", fontWeight: 600 }}>Koppel Google Ads</a> om spend per uur te vergelijken met orders
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--mx)" }}>Geen orderdata beschikbaar voor dit bereik.</div>
+          )}
+        </div>
+
+        {/* Search Console */}
+        <div style={S.card}>
+          <div style={S.cardTitle}>
+            🔍 Organische zoekwoorden
+            {googleConnections.sc && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 99, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 600 }}>● Live</span>}
+          </div>
+          {!googleConnections.sc ? (
+            <ConnectCTA service="sc" icon="🔍" title="Koppel Search Console" description="Bekijk welke zoekwoorden organische bestellingen genereren, inclusief impressies, CTR en positie." />
+          ) : (
+            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--mx)" }}>
+              Search Console data wordt geladen in Phase 3.
             </div>
           )}
         </div>
-      )}
+
+      </div>
 
       {/* Per-shop comparison */}
       {selectedShop === "all" && data?.shops?.length > 1 && (
@@ -5202,6 +5266,32 @@ function AnalyticsView({ shops, user }) {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* GA4 panel */}
+      {!googleConnections.ga4 && (
+        <div style={{ ...S.card, marginBottom: 14 }}>
+          <div style={S.cardTitle}>📈 Google Analytics 4 — Klantpaden & Sessies</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+            {[
+              { icon: "🛤️", title: "Conversiepaden", desc: "Welk kanaalpad (bijv. Organisch → Direct) leidt tot de meeste conversies?" },
+              { icon: "👤", title: "Klant LTV per kanaal", desc: "Welke acquisitiekanalen leveren klanten met de hoogste lifetime value?" },
+              { icon: "📱", title: "Sessies per apparaat", desc: "Vergelijk mobiel vs. desktop sessieduur, bouncerates en conversieratio." },
+            ].map((item, i) => (
+              <div key={i} style={{ padding: "14px 16px", borderRadius: "var(--rd-lg)", background: "var(--bg)", border: "1px solid var(--b1)", opacity: .7 }}>
+                <div style={{ fontSize: 22, marginBottom: 8 }}>{item.icon}</div>
+                <div style={{ fontFamily: "var(--font-h)", fontSize: 13, fontWeight: 700, color: "var(--tx)", marginBottom: 4 }}>{item.title}</div>
+                <div style={{ fontSize: 11, color: "var(--mx)", lineHeight: 1.5 }}>{item.desc}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: "var(--rd)" }}>
+            <span style={{ fontSize: 16 }}>📈</span>
+            <span style={{ fontSize: 12, color: "var(--mx)" }}>
+              <a href="/#settings" onClick={() => window.location.hash="settings"} style={{ color: "var(--pr-h)", textDecoration: "none", fontWeight: 600 }}>Koppel Google Analytics 4</a> om klantpaden, sessiedata en LTV per acquisitiekanaal te bekijken
+            </span>
           </div>
         </div>
       )}
@@ -6920,6 +7010,9 @@ const TrackingSettings = () => {
     gads_conversion_id: "", gads_conversion_label: "",
     fb_pixel_id: "", tt_pixel_id: "",
     google_connected: false, google_connected_email: null,
+    google_ads_connected: false,
+    ga4_oauth_connected: false,
+    search_console_connected: false,
   });
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -6928,6 +7021,7 @@ const TrackingSettings = () => {
   const [googleData, setGoogleData] = useState(null); // { gtm:[], ga4:[], gads:[], gads_note }
   const [fetchError, setFetchError] = useState(null);
   const [gtmSetup, setGtmSetup] = useState({ running: false, result: null, error: null });
+  const [connectingService, setConnectingService] = useState(null);
 
   // Load current settings
   const load = async () => {
@@ -6944,6 +7038,9 @@ const TrackingSettings = () => {
         tt_pixel_id: d.tt_pixel_id || "",
         google_connected: !!d.google_connected,
         google_connected_email: d.google_connected_email || null,
+        google_ads_connected: !!d.google_ads_connected,
+        ga4_oauth_connected: !!d.ga4_oauth_connected,
+        search_console_connected: !!d.search_console_connected,
       });
     } catch {} finally { setLoading(false); }
   };
@@ -6983,7 +7080,7 @@ const TrackingSettings = () => {
     try {
       const session = { access_token: await getToken() };
       await fetch("/api/google-tracking-disconnect", { method: "POST", headers: { "Authorization": `Bearer ${session?.access_token}` } });
-      setTs(s => ({ ...s, google_connected: false, google_connected_email: null }));
+      setTs(s => ({ ...s, google_connected: false, google_connected_email: null, google_ads_connected: false, ga4_oauth_connected: false, search_console_connected: false }));
       setGoogleData(null);
     } catch (e) { alert(e.message); }
   };
@@ -7062,60 +7159,134 @@ const TrackingSettings = () => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 700 }}>
 
-      {/* ── Google OAuth Connect ── */}
-      <div style={{ padding: 16, borderRadius: "var(--rd-lg)", border: `2px solid ${ts.google_connected ? "rgba(34,197,94,0.4)" : "rgba(99,102,241,0.3)"}`, background: ts.google_connected ? "rgba(34,197,94,0.04)" : "rgba(99,102,241,0.04)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }}>
-              <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-            </div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>
-                {ts.google_connected ? "✓ Gekoppeld met Google" : "Koppel met Google"}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 2 }}>
-                {ts.google_connected
-                  ? <>Account: <strong style={{ color: "var(--tx)" }}>{ts.google_connected_email}</strong> · GTM, GA4 en Google Ads worden opgehaald</>
-                  : "Eenmalig inloggen → automatisch GTM containers, GA4 properties en Google Ads accounts ophalen"
-                }
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            {ts.google_connected ? (
-              <>
-                <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching}>
-                  {fetching ? "↻ Ophalen..." : "↻ Vernieuwen"}
-                </Btn>
-                <Btn variant="ghost" size="sm" onClick={disconnect} style={{ color: "var(--re)" }}>
-                  Ontkoppelen
-                </Btn>
-              </>
-            ) : (
-              <a href="/api/google-oauth-init" style={{ textDecoration: "none" }}>
-                <Btn variant="primary" size="sm" icon={
-                  <svg width="14" height="14" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/></svg>
-                }>
-                  Koppelen met Google
-                </Btn>
-              </a>
-            )}
-          </div>
-        </div>
-        {fetchError && <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>⚠ {fetchError}</div>}
-        {!ts.google_connected && (
-          <div style={{ marginTop: 10, fontSize: 11, color: "var(--dm)", lineHeight: 1.6 }}>
-            Vereist: <strong>GOOGLE_CLIENT_ID</strong> en <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify environment variables (Settings → Environment variables). Stel de OAuth Redirect URI in op <code style={{ background: "var(--s3)", padding: "1px 5px", borderRadius: 3 }}>https://woosyncshop.com/api/google-oauth-callback</code> in Google Cloud Console → APIs & Services → Credentials.
-            <span style={{ display: "inline-block", marginLeft: 8 }}>
-              <a href="/google-tracking-setup.pdf" target="_blank" rel="noopener noreferrer"
-                style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600,
-                  color: "var(--pr-h)", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)",
-                  borderRadius: "var(--rd)", padding: "3px 10px", textDecoration: "none", whiteSpace: "nowrap" }}>
-                📄 Bekijk setup handleiding ↗
-              </a>
+      {/* ── Google Services — 3 separate connections ── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" style={{flexShrink:0}}><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg> Google Koppelingen
+          {ts.google_connected && (
+            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 600 }}>
+              ● {ts.google_connected_email}
             </span>
-          </div>
-        )}
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)" }}>
+          Elke koppeling gebruik hetzelfde Google account. Koppel één keer in en activeer per service. Vereist: <strong>GOOGLE_CLIENT_ID</strong> + <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify env.
+        </div>
+
+        {/* Service cards grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+
+          {/* ── Google Ads ── */}
+          {(() => {
+            const connected = ts.google_ads_connected;
+            const isConnecting = connectingService === "ads";
+            return (
+              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
+                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ fontSize: 18 }}>🎯</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>Google Ads</div>
+                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
+                  Campagne ROAS, spend per uur, demografische data, concurrentie inzichten.
+                </div>
+                <div style={{ padding: "0 14px 12px" }}>
+                  {connected ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
+                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("Google Ads ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "ads" }) }); setTs(s => ({ ...s, google_ads_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
+                    </div>
+                  ) : (
+                    <a href="/api/google-oauth-init?service=ads" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("ads")}>
+                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
+                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
+                      </Btn>
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── GA4 ── */}
+          {(() => {
+            const connected = ts.ga4_oauth_connected;
+            const isConnecting = connectingService === "ga4";
+            return (
+              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
+                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ fontSize: 18 }}>📈</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>Google Analytics 4</div>
+                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
+                  Sessiedata per klant, kanaalgroepen, conversiepaden en user_id koppeling.
+                </div>
+                <div style={{ padding: "0 14px 12px" }}>
+                  {connected ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
+                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("GA4 ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "ga4" }) }); setTs(s => ({ ...s, ga4_oauth_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
+                    </div>
+                  ) : (
+                    <a href="/api/google-oauth-init?service=ga4" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("ga4")}>
+                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
+                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
+                      </Btn>
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Search Console ── */}
+          {(() => {
+            const connected = ts.search_console_connected;
+            const isConnecting = connectingService === "sc";
+            return (
+              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
+                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ fontSize: 18 }}>🔍</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>Search Console</div>
+                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
+                  Organische zoekwoorden, impressies, CTR en positie per landingspagina.
+                </div>
+                <div style={{ padding: "0 14px 12px" }}>
+                  {connected ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
+                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("Search Console ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "sc" }) }); setTs(s => ({ ...s, search_console_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
+                    </div>
+                  ) : (
+                    <a href="/api/google-oauth-init?service=sc" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("sc")}>
+                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
+                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
+                      </Btn>
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+        </div>
+
+        {fetchError && <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>⚠ {fetchError}</div>}
       </div>
 
       {/* ── GTM ── */}
@@ -7135,9 +7306,9 @@ const TrackingSettings = () => {
         {googleData?.gtm_error && <div style={{ fontSize: 11, color: "var(--am)" }}>⚠ GTM ophalen mislukt: {googleData.gtm_error}</div>}
       </TrackCard>
 
-      {/* ── GA4 ── */}
-      <TrackCard icon="📈" title="Google Analytics 4" active={!!ts.ga4_id}
-        hint="Directe GA4 integratie via gtag.js. Gebruik dit als je geen GTM gebruikt.">
+      {/* ── GA4 tag ID ── */}
+      <TrackCard icon="📈" title="Google Analytics 4 — Tag ID" active={!!ts.ga4_id}
+        hint="Measurement ID voor gtag.js integratie. Gebruik dit als je geen GTM gebruikt.">
         {googleData?.ga4?.length > 0 ? (
           <DropdownSelect
             label="GA4 Property" hint="Measurement ID wordt automatisch ingevuld"
@@ -7145,14 +7316,14 @@ const TrackingSettings = () => {
             options={googleData.ga4} placeholder="— Selecteer property —"
           />
         ) : (
-          <Field label="GA4 Measurement ID" hint="Bijv. G-XXXXXXXXXX — of koppel Google hierboven om properties op te halen">
+          <Field label="GA4 Measurement ID" hint="Bijv. G-XXXXXXXXXX — of koppel GA4 hierboven om properties op te halen">
             <Inp value={ts.ga4_id} onChange={e => setTs(s => ({ ...s, ga4_id: e.target.value }))} placeholder="G-XXXXXXXXXX" />
           </Field>
         )}
         {googleData?.ga4_error && <div style={{ fontSize: 11, color: "var(--am)" }}>⚠ GA4 ophalen mislukt: {googleData.ga4_error}</div>}
       </TrackCard>
 
-      {/* ── Google Ads ── */}
+      {/* ── Google Ads Conversies ── */}
       <TrackCard icon="🎯" title="Google Ads Conversies" active={!!(ts.gads_conversion_id && ts.gads_conversion_label)}
         hint="Conversie-event wordt gefired bij elke nieuwe registratie. Zorg dat GTM of GA4 ook ingesteld is.">
         {googleData?.gads?.length > 0 ? (
@@ -7190,7 +7361,7 @@ const TrackingSettings = () => {
       </TrackCard>
 
       {/* ── Zero-knowledge GTM Auto-setup ── */}
-      {ts.google_connected && ts.gtm_id && googleData?.gtm?.find(g => g.id === ts.gtm_id)?.path && (ts.ga4_id || ts.gads_conversion_id) && (
+      {ts.google_ads_connected && ts.gtm_id && googleData?.gtm?.find(g => g.id === ts.gtm_id)?.path && (ts.ga4_id || ts.gads_conversion_id) && (
         <div style={{ border: "1px solid rgba(99,102,241,0.35)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)", borderBottom: "1px solid rgba(99,102,241,0.2)", display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 20 }}>🚀</span>
@@ -7200,7 +7371,6 @@ const TrackingSettings = () => {
             </div>
           </div>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-            {/* What will be created */}
             {!gtmSetup.result && (
               <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.8 }}>
                 <div style={{ fontWeight: 600, color: "var(--tx)", marginBottom: 6 }}>Dit wordt automatisch aangemaakt in GTM container <strong style={{ color: "var(--pr-h)" }}>{ts.gtm_id}</strong>:</div>
@@ -7211,27 +7381,20 @@ const TrackingSettings = () => {
                   {ts.gads_conversion_id && (
                     <>
                       <div>✓ <strong>Conversion Linker tag</strong> — Google Ads koppeling</div>
-                      <div>✓ <strong>Trigger</strong> — <code style={{ background: "var(--s3)", padding: "0 4px", borderRadius: 3 }}>registration_complete</code> (custom event)</div>
+                      <div>✓ <strong>Trigger</strong> — <code style={{ background: "var(--s3)", padding: "0 4px", borderRadius: 3 }}>registration_complete</code></div>
                       <div>✓ <strong>Google Ads Conversie tag</strong> — <code style={{ background: "var(--s3)", padding: "0 4px", borderRadius: 3 }}>{ts.gads_conversion_id}/{ts.gads_conversion_label}</code></div>
                     </>
                   )}
                   <div>✓ <strong>Container versie aanmaken + publiceren</strong></div>
                 </div>
-                <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: "var(--rd)", fontSize: 11 }}>
-                  💡 De Google Ads conversie tag vuurde op het <code>registration_complete</code> event. Zorg dat jouw frontend dit event aanroept bij nieuwe registraties: <code>dataLayer.push(&#123;event: 'registration_complete'&#125;)</code>
-                </div>
               </div>
             )}
-
-            {/* Running state */}
             {gtmSetup.running && (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "rgba(99,102,241,0.06)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--mx)" }}>
                 <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span>
                 GTM instellen... tags aanmaken en publiceren
               </div>
             )}
-
-            {/* Success result */}
             {gtmSetup.result && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ padding: "10px 14px", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "var(--rd)" }}>
@@ -7239,36 +7402,23 @@ const TrackingSettings = () => {
                     {gtmSetup.result.published ? "✓ GTM ingericht en gepubliceerd!" : "✓ GTM ingericht (handmatig publiceren vereist)"}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--mx)", display: "flex", flexDirection: "column", gap: 2 }}>
-                    {gtmSetup.result.created.map((item, i) => (
-                      <div key={i}>✓ {item}</div>
-                    ))}
+                    {gtmSetup.result.created.map((item, i) => <div key={i}>✓ {item}</div>)}
                   </div>
                 </div>
-                {gtmSetup.result.warnings?.length > 0 && (
-                  <div style={{ padding: "8px 12px", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: "var(--rd)", fontSize: 11, color: "var(--am)" }}>
-                    {gtmSetup.result.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
-                  </div>
-                )}
                 {!gtmSetup.result.published && gtmSetup.result.publish_error && (
                   <div style={{ fontSize: 12, color: "var(--mx)" }}>
-                    Ga naar <a href="https://tagmanager.google.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)" }}>tagmanager.google.com ↗</a> om de workspace "{gtmSetup.result.workspace_name}" handmatig te publiceren.
+                    Ga naar <a href="https://tagmanager.google.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)" }}>tagmanager.google.com ↗</a> om de workspace handmatig te publiceren.
                   </div>
                 )}
-                <Btn variant="ghost" size="sm" onClick={() => setGtmSetup({ running: false, result: null, error: null })} style={{ alignSelf: "flex-start", fontSize: 11 }}>
-                  ↺ Opnieuw instellen
-                </Btn>
+                <Btn variant="ghost" size="sm" onClick={() => setGtmSetup({ running: false, result: null, error: null })} style={{ alignSelf: "flex-start", fontSize: 11 }}>↺ Opnieuw instellen</Btn>
               </div>
             )}
-
-            {/* Error state */}
             {gtmSetup.error && (
               <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>
                 ⚠ {gtmSetup.error}
                 <button onClick={() => setGtmSetup({ running: false, result: null, error: null })} style={{ marginLeft: 12, fontSize: 11, color: "var(--mx)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Opnieuw proberen</button>
               </div>
             )}
-
-            {/* Action button */}
             {!gtmSetup.result && (
               <Btn variant="primary" onClick={runGtmSetup} disabled={gtmSetup.running} style={{ alignSelf: "flex-start" }}>
                 {gtmSetup.running ? "↻ Bezig met instellen..." : "🚀 Automatisch instellen in GTM"}
