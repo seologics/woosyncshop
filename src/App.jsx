@@ -7341,135 +7341,18 @@ const TrackingSettings = () => {
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 700 }}>
 
       {/* ── Google Services — 3 separate connections ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" style={{flexShrink:0}}><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg> Google Koppelingen
-          {ts.google_connected && (
-            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 600 }}>
-              ● {ts.google_connected_email}
-            </span>
-          )}
+      {/* ── Google Services — per-shop in Settings ── */}
+      <div style={{ padding: "12px 16px", borderRadius: "var(--rd-lg)", background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.2)", display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Google Ads, GA4 &amp; Search Console worden per shop gekoppeld</div>
+          <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>
+            Ga naar <strong style={{ color: "var(--tx)" }}>Instellingen → Shops</strong> en klik op een shop om Google-services te koppelen.
+            Elke shop krijgt zijn eigen Google Ads-account, GA4-property en Search Console-site.
+            Vereist: <strong>GOOGLE_CLIENT_ID</strong> + <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify env.
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)" }}>
-          Elke koppeling gebruik hetzelfde Google account. Koppel één keer in en activeer per service. Vereist: <strong>GOOGLE_CLIENT_ID</strong> + <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify env.
-        </div>
-
-        {/* Service cards grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-
-          {/* ── Google Ads ── */}
-          {(() => {
-            const connected = ts.google_ads_connected;
-            const isConnecting = connectingService === "ads";
-            return (
-              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 18 }}>🎯</span>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Google Ads</div>
-                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
-                  Campagne ROAS, spend per uur, demografische data, concurrentie inzichten.
-                </div>
-                <div style={{ padding: "0 14px 12px" }}>
-                  {connected ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("Google Ads ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "ads" }) }); setTs(s => ({ ...s, google_ads_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
-                    </div>
-                  ) : (
-                    <a href="/api/google-oauth-init?service=ads" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("ads")}>
-                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
-                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
-                      </Btn>
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── GA4 ── */}
-          {(() => {
-            const connected = ts.ga4_oauth_connected;
-            const isConnecting = connectingService === "ga4";
-            return (
-              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 18 }}>📈</span>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Google Analytics 4</div>
-                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
-                  Sessiedata per klant, kanaalgroepen, conversiepaden en user_id koppeling.
-                </div>
-                <div style={{ padding: "0 14px 12px" }}>
-                  {connected ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("GA4 ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "ga4" }) }); setTs(s => ({ ...s, ga4_oauth_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
-                    </div>
-                  ) : (
-                    <a href="/api/google-oauth-init?service=ga4" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("ga4")}>
-                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
-                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
-                      </Btn>
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── Search Console ── */}
-          {(() => {
-            const connected = ts.search_console_connected;
-            const isConnecting = connectingService === "sc";
-            return (
-              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 18 }}>🔍</span>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Search Console</div>
-                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
-                  Organische zoekwoorden, impressies, CTR en positie per landingspagina.
-                </div>
-                <div style={{ padding: "0 14px 12px" }}>
-                  {connected ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("Search Console ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "sc" }) }); setTs(s => ({ ...s, search_console_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
-                    </div>
-                  ) : (
-                    <a href="/api/google-oauth-init?service=sc" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("sc")}>
-                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
-                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
-                      </Btn>
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-        </div>
-
-        {fetchError && <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>⚠ {fetchError}</div>}
       </div>
-
       {/* ── GTM ── */}
       <TrackCard icon="📊" title="Google Tag Manager" active={!!ts.gtm_id}
         hint="GTM is de aanbevolen aanpak. Alle andere Google tags (GA4, Ads) kun je dan via GTM beheren zonder code-aanpassingen.">
