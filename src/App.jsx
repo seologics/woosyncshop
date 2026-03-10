@@ -4329,7 +4329,9 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       // Generate a secure random API token for the companion plugin
       const apiToken = Array.from(crypto.getRandomValues(new Uint8Array(32)))
         .map(b => b.toString(16).padStart(2, "0")).join("");
-      const { data, error } = await supabase.from("shops").insert([{ ...newShop, user_id: user.id, api_token: apiToken }]).select().single();
+      // Strip UI-only fields before inserting
+      const { connectMode, flagShape, ...shopData } = newShop;
+      const { data, error } = await supabase.from("shops").insert([{ ...shopData, user_id: user.id, api_token: apiToken }]).select().single();
       if (error) throw error;
       onShopAdded?.(data);
       setNewShop({ name: "", site_url: "", locale: "nl_NL", flag: "🌐", consumer_key: "", consumer_secret: "" });
