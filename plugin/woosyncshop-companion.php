@@ -3,7 +3,7 @@
  * Plugin Name: WooSyncShop Companion
  * Plugin URI:  https://woosyncshop.com
  * Description: Connects this WooCommerce store to the WooSyncShop platform. Handles hreflang injection for synced products and pages, and exposes a secure REST endpoint for configuration pushes.
- * Version:     1.0.0
+ * Version:     1.1.0
  * Author:      WooSyncShop
  * Author URI:  https://woosyncshop.com
  * License:     GPL-2.0+
@@ -12,7 +12,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'WSS_VERSION',    '1.0.0' );
+define( 'WSS_VERSION',    '1.1.0' );
 define( 'WSS_OPTION_KEY', 'woosyncshop_config' );
 define( 'WSS_LOG_KEY',    'woosyncshop_log' );
 
@@ -29,6 +29,7 @@ add_action( 'rest_api_init', 'wss_register_rest_routes' );
 add_action( 'wp_head',       'wss_inject_hreflang', 1 );
 add_action( 'admin_menu',    'wss_admin_menu' );
 add_action( 'admin_init',    'wss_admin_settings' );
+add_action( 'wp_ajax_wss_ping_test', 'wss_ajax_ping_test' );
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -412,10 +413,44 @@ function wss_admin_page() {
           <hr />
           <h3>Verbinding testen</h3>
           <p>
-            <a href="<?php echo esc_url( $ping_url . '?X-WSS-Token=' . urlencode( $token ) ); ?>"
-               target="_blank" class="button button-secondary">Ping endpoint testen ↗</a>
+            <button type="button" id="wss-ping-btn" class="button button-secondary"
+                    <?php echo empty( $token ) ? 'disabled title="Sla eerst een token op."' : ''; ?>>
+              Verbinding testen
+            </button>
+            <span id="wss-ping-spinner" class="spinner" style="float:none;margin:0 6px;vertical-align:middle;visibility:hidden;"></span>
           </p>
-          <p style="color:#666;font-size:12px;">Let op: de ping vereist de token als query param voor browser-tests. De platform gebruikt altijd de header.</p>
+          <div id="wss-ping-result" style="display:none;margin-top:8px;"></div>
+          <script>
+          (function($){
+            $('#wss-ping-btn').on('click', function(){
+              var $btn     = $(this);
+              var $spinner = $('#wss-ping-spinner');
+              var $result  = $('#wss-ping-result');
+              $btn.prop('disabled', true);
+              $spinner.css('visibility','visible');
+              $result.hide().removeClass('notice-success notice-error').html('');
+              $.post(ajaxurl, {
+                action: 'wss_ping_test',
+                nonce:  <?php echo json_encode( wp_create_nonce( 'wss_ping_nonce' ) ); ?>
+              }, function(res){
+                $btn.prop('disabled', false);
+                $spinner.css('visibility','hidden');
+                if (res.success) {
+                  $result.addClass('notice notice-success inline')
+                    .html('<p>\u2705 ' + res.data.message + '</p>').show();
+                } else {
+                  $result.addClass('notice notice-error inline')
+                    .html('<p>\u274c ' + (res.data ? res.data.message : 'Onbekende fout.') + '</p>').show();
+                }
+              }).fail(function(){
+                $btn.prop('disabled', false);
+                $spinner.css('visibility','hidden');
+                $result.addClass('notice notice-error inline')
+                  .html('<p>\u274c Netwerkfout: kon WooSyncShop niet bereiken.</p>').show();
+              });
+            });
+          }(jQuery));
+          </script>
         </div>
       </div>
 
@@ -442,7 +477,52 @@ function wss_admin_page() {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5.  HELPERS
+// 5.  AJAX HANDLER  –  Inline ping test (no new tab)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function wss_ajax_ping_test() {
+    check_ajax_referer( 'wss_ping_nonce', 'nonce' );
+
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_send_json_error( [ 'message' => 'Geen rechten.' ], 403 );
+    }
+
+    $config = wss_get_config();
+    $token  = $config['api_token'] ?? '';
+
+    if ( empty( $token ) ) {
+        wp_send_json_error( [ 'message' => 'Geen API-token ingesteld. Sla eerst een token op.' ] );
+    }
+
+    $ping_url = rest_url( 'woosyncshop/v1/ping' );
+
+    $response = wp_remote_get( $ping_url, [
+        'timeout' => 10,
+        'headers' => [ 'X-WSS-Token' => $token ],
+    ] );
+
+    if ( is_wp_error( $response ) ) {
+        wp_send_json_error( [ 'message' => 'Verbindingsfout: ' . $response->get_error_message() ] );
+    }
+
+    $code = wp_remote_retrieve_response_code( $response );
+    $body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+    if ( $code === 200 && ( $body['status'] ?? '' ) === 'ok' ) {
+        $wc  = $body['wc']   ? ' · WooCommerce ' . esc_html( $body['wc'] ) : '';
+        $site = esc_html( $body['site'] ?? get_bloginfo( 'name' ) );
+        wp_send_json_success( [
+            'message' => 'Verbinding geslaagd! ' . $site . $wc . ' · token geaccepteerd.',
+        ] );
+    } else {
+        $err = $body['message'] ?? ( 'HTTP ' . $code );
+        wp_send_json_error( [ 'message' => 'Verbinding mislukt: ' . esc_html( $err ) ] );
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6.  HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
 function wss_get_config(): array {

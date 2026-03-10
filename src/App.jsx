@@ -4297,7 +4297,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       const res = await fetch("/api/woo-test", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ site_url: shop.site_url, consumer_key: shop.consumer_key, consumer_secret: shop.consumer_secret })
+        body: JSON.stringify({ shop_id: shop.id, site_url: shop.site_url, consumer_key: shop.consumer_key, consumer_secret: shop.consumer_secret })
       });
       const result = await res.json();
       setTestResults(r => ({ ...r, [shop.id]: result }));
