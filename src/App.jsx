@@ -4192,6 +4192,57 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const [testingShop, setTestingShop] = useState(null); // shopId being tested
   const [testResults, setTestResults] = useState({}); // {shopId: {ok, wc_version, ...}}
   const [savingShop, setSavingShop] = useState(false);
+  const [expandedShop, setExpandedShop] = useState(null); // shopId with Google section open
+  // Per-shop Google connection state: { [shopId]: { ads_connected, ads_account_id, ads_accounts[], ga4_connected, ga4_property_id, ga4_properties[], sc_connected, sc_site, sc_sites[], loading, error } }
+  const [shopGoogle, setShopGoogle] = useState({});
+  const [connectingGoogle, setConnectingGoogle] = useState(null); // shopId being connected
+
+  // Fetch Google data for a shop after OAuth connect
+  const fetchShopGoogleData = async (shopId) => {
+    setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), loading: true, error: null } }));
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/shop-google-data?shop_id=${shopId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Ophalen mislukt");
+      setShopGoogle(s => ({ ...s, [shopId]: { ...d, loading: false, error: null } }));
+    } catch (e) {
+      setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), loading: false, error: e.message } }));
+    }
+  };
+
+  // Save selected Google property for a shop
+  const saveShopGoogleProperty = async (shopId, field, value) => {
+    try {
+      const token = await getToken();
+      await fetch("/api/shop-google-save", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ shop_id: shopId, [field]: value }),
+      });
+      setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), [field]: value } }));
+      // Also update the parent shop object
+      const updatedShop = shops.find(sh => sh.id === shopId);
+      if (updatedShop) onShopUpdated?.({ ...updatedShop, [field]: value });
+    } catch (e) { alert(e.message); }
+  };
+
+  // Disconnect a Google service from a shop
+  const disconnectShopGoogle = async (shopId, service) => {
+    if (!confirm(\`Google \${service === "ads" ? "Ads" : service === "ga4" ? "Analytics 4" : "Search Console"} ontkoppelen van deze shop?\`)) return;
+    try {
+      const token = await getToken();
+      await fetch("/api/shop-google-disconnect", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ shop_id: shopId, service }),
+      });
+      const fieldMap = { ads: "google_ads_connected", ga4: "ga4_connected", sc: "sc_connected" };
+      setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), [fieldMap[service]]: false } }));
+      const updatedShop = shops.find(sh => sh.id === shopId);
+      if (updatedShop) onShopUpdated?.({ ...updatedShop, [fieldMap[service]]: false });
+    } catch (e) { alert(e.message); }
+  };
 
   useEffect(() => {
     if (!user?.id) return;
@@ -4219,6 +4270,32 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         }
       });
   }, [user?.id, profileRefreshKey]);
+
+  // Handle OAuth callback for per-shop Google connections
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthResult = params.get("google_oauth");
+    const shopId = params.get("shop_id");
+    const service = params.get("service");
+    if (oauthResult === "success" && shopId) {
+      window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+      setExpandedShop(shopId);
+      setSettingsTab("sites");
+      fetchShopGoogleData(shopId);
+    } else if (oauthResult === "error" && shopId) {
+      const reason = params.get("reason") || "Onbekende fout";
+      window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+      setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), error: `Koppeling mislukt: ${reason}` } }));
+      setExpandedShop(shopId);
+      setSettingsTab("sites");
+    }
+    // Also load google data for shops that are already connected
+    shops.forEach(sh => {
+      if (sh.google_ads_connected || sh.ga4_connected || sh.sc_connected) {
+        fetchShopGoogleData(sh.id);
+      }
+    });
+  }, []);
 
   const testConnection = async (shop) => {
     setTestingShop(shop.id);
@@ -4353,6 +4430,118 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                       </Btn>
                     </div>
                   </div>
+
+                  {/* ── Google Services per shop ── */}
+                  <div style={{ borderTop: "1px solid var(--b1)" }}>
+                    <button
+                      onClick={() => {
+                        const next = expandedShop === shop.id ? null : shop.id;
+                        setExpandedShop(next);
+                        if (next && !shopGoogle[shop.id]) fetchShopGoogleData(shop.id);
+                      }}
+                      style={{ width: "100%", padding: "10px 16px", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, color: "var(--mx)", fontSize: 12 }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" style={{flexShrink:0}}><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                      <span style={{ fontWeight: 600 }}>Google Services</span>
+                      {/* Connected badges */}
+                      {(shop.google_ads_connected || shopGoogle[shop.id]?.ads_connected) && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 700 }}>Ads</span>}
+                      {(shop.ga4_connected || shopGoogle[shop.id]?.ga4_connected) && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99, background: "rgba(99,102,241,0.12)", color: "var(--pr-h)", fontWeight: 700 }}>GA4</span>}
+                      {(shop.sc_connected || shopGoogle[shop.id]?.sc_connected) && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99, background: "rgba(96,165,250,0.12)", color: "#60A5FA", fontWeight: 700 }}>SC</span>}
+                      <span style={{ marginLeft: "auto", fontSize: 11 }}>{expandedShop === shop.id ? "▲" : "▼"}</span>
+                    </button>
+
+                    {expandedShop === shop.id && (() => {
+                      const sg = shopGoogle[shop.id] || {};
+                      const adsOk  = sg.ads_connected  || shop.google_ads_connected;
+                      const ga4Ok  = sg.ga4_connected  || shop.ga4_connected;
+                      const scOk   = sg.sc_connected   || shop.sc_connected;
+
+                      const ServiceCard = ({ id, icon, title, description, connected, oauthParam, accountLabel, accountValue, accountOptions, accountField, connecting }) => (
+                        <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.3)" : "var(--b1)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--bg)" }}>
+                          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 7 }}>
+                            <span style={{ fontSize: 16 }}>{icon}</span>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 12 }}>{title}</div>
+                              <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
+                            </div>
+                            {connected && (
+                              <button onClick={() => disconnectShopGoogle(shop.id, id)} style={{ fontSize: 10, color: "var(--re)", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: 4 }}>Ontkoppelen</button>
+                            )}
+                          </div>
+                          <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5 }}>{description}</div>
+                          <div style={{ padding: "0 12px 10px" }}>
+                            {connected ? (
+                              accountOptions?.length > 0 ? (
+                                <div>
+                                  <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 4, fontWeight: 600 }}>{accountLabel}</div>
+                                  <select
+                                    value={accountValue || ""}
+                                    onChange={e => saveShopGoogleProperty(shop.id, accountField, e.target.value)}
+                                    style={{ width: "100%", padding: "5px 8px", background: "var(--s2)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 12 }}
+                                  >
+                                    <option value="">— Selecteer {accountLabel} —</option>
+                                    {accountOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                                  </select>
+                                  {accountValue && <div style={{ marginTop: 4, fontSize: 10, color: "#22c55e" }}>✓ Geselecteerd: {accountOptions.find(o => o.id === accountValue)?.label || accountValue}</div>}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: 11, color: "var(--mx)" }}>
+                                  {sg.loading ? "Accounts ophalen..." : "Klik 'Vernieuwen' om beschikbare accounts op te halen"}
+                                  <button onClick={() => fetchShopGoogleData(shop.id)} style={{ marginLeft: 8, fontSize: 11, color: "var(--pr-h)", background: "none", border: "none", cursor: "pointer" }}>↻ Vernieuwen</button>
+                                </div>
+                              )
+                            ) : (
+                              <a href={`/api/google-oauth-init?service=${oauthParam}&shop_id=${shop.id}`} style={{ textDecoration: "none", display: "block" }}>
+                                <button style={{ width: "100%", padding: "6px 0", borderRadius: "var(--rd)", border: "1px solid var(--pr)", background: "var(--pr)", color: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 11 }}>
+                                  {connecting ? "↻ Bezig..." : "Koppelen →"}
+                                </button>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+
+                      return (
+                        <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10, background: "var(--s3)" }}>
+                          {sg.error && <div style={{ padding: "6px 10px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 11, color: "var(--re)" }}>⚠ {sg.error}</div>}
+                          {sg.loading && <div style={{ fontSize: 12, color: "var(--mx)", padding: "4px 0" }}>↻ Google data ophalen...</div>}
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                            <ServiceCard
+                              id="ads" icon="🎯" title="Google Ads" oauthParam="ads"
+                              description="Campagne ROAS, spend en conversiedata per bestelling."
+                              connected={adsOk}
+                              accountLabel="Ads account"
+                              accountValue={sg.ads_account_id || shop.google_ads_account_id}
+                              accountOptions={sg.ads_accounts || []}
+                              accountField="google_ads_account_id"
+                            />
+                            <ServiceCard
+                              id="ga4" icon="📈" title="Google Analytics 4" oauthParam="ga4"
+                              description="Sessies, conversiepaden en klant LTV per kanaal."
+                              connected={ga4Ok}
+                              accountLabel="GA4 property"
+                              accountValue={sg.ga4_property_id || shop.ga4_property_id}
+                              accountOptions={sg.ga4_properties || []}
+                              accountField="ga4_property_id"
+                            />
+                            <ServiceCard
+                              id="sc" icon="🔍" title="Search Console" oauthParam="sc"
+                              description="Zoekwoorden, impressies en CTR per landingspagina."
+                              connected={scOk}
+                              accountLabel="SC site"
+                              accountValue={sg.sc_site || shop.sc_site}
+                              accountOptions={sg.sc_sites || []}
+                              accountField="sc_site"
+                            />
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--dm)", lineHeight: 1.5 }}>
+                            💡 Na het koppelen kies je welk Google Ads-account, GA4-property en Search Console-site bij <strong style={{ color: "var(--mx)" }}>{shop.name}</strong> hoort.
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                 </div>
               );
             })}
@@ -4765,17 +4954,28 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 
 // ─── AnalyticsView ────────────────────────────────────────────────────────────
 function AnalyticsView({ shops, user }) {
-  const [googleConnections, setGoogleConnections] = React.useState({ ads: false, ga4: false, sc: false });
+  // googleConnections is derived from the currently selected shop's fields
+  // — no separate fetch needed; comes from the shops array loaded in Dashboard
+  const [selectedShopForConnections, setSelectedShopForConnections] = React.useState(null);
 
-  React.useEffect(() => {
-    // Fetch connection status from platform settings (superadmin-visible but read by all)
-    getToken().then(token => {
-      fetch("/api/platform-settings", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => setGoogleConnections({ ads: !!d.google_ads_connected, ga4: !!d.ga4_oauth_connected, sc: !!d.search_console_connected }))
-        .catch(() => {});
-    }).catch(() => {});
-  }, []);
+  const googleConnections = React.useMemo(() => {
+    const shop = selectedShopForConnections === "all" || !selectedShopForConnections
+      ? null  // "all shops" — show connected if ANY shop has a service
+      : (shops || []).find(s => s.id === selectedShopForConnections);
+
+    if (!shop) {
+      // All-shops view: true if at least one shop has that service connected
+      const anyAds = (shops || []).some(s => s.google_ads_connected);
+      const anyGa4 = (shops || []).some(s => s.ga4_connected);
+      const anySc  = (shops || []).some(s => s.sc_connected);
+      return { ads: anyAds, ga4: anyGa4, sc: anySc };
+    }
+    return {
+      ads: !!shop.google_ads_connected,
+      ga4: !!shop.ga4_connected,
+      sc:  !!shop.sc_connected,
+    };
+  }, [selectedShopForConnections, shops]);
   const RANGES = [
     { key: "7d",   label: "7 dagen" },
     { key: "30d",  label: "30 dagen" },
@@ -4796,6 +4996,12 @@ function AnalyticsView({ shops, user }) {
   const SHOP_COLORS = ["#6E6EF7", "#34D399", "#60A5FA", "#F59E0B", "#F472B6", "#A78BFA"];
 
   const [selectedShop, setSelectedShop]       = useState("all");
+
+  // Keep googleConnections in sync with shop selector
+  const selectShop = (id) => {
+    setSelectedShop(id);
+    setSelectedShopForConnections(id);
+  };
   const [range, setRange]                     = useState("30d");
   const [activeMetric, setActiveMetric]       = useState("revenue");
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
@@ -4999,11 +5205,11 @@ function AnalyticsView({ shops, user }) {
 
       {/* Shop selector */}
       <div style={{ display: "flex", gap: 7, marginBottom: 20, flexWrap: "wrap" }}>
-        <button style={S.pill(selectedShop === "all", "var(--pr)")} onClick={() => setSelectedShop("all")}>Alle shops</button>
+        <button style={S.pill(selectedShop === "all", "var(--pr)")} onClick={() => selectShop("all")}>Alle shops</button>
         {(shops || []).map((shop, i) => {
           const c = SHOP_COLORS[i + 1] || SHOP_COLORS[0];
           return (
-            <button key={shop.id} style={{ padding: "5px 13px", borderRadius: 99, border: `1.5px solid ${selectedShop === shop.id ? c : "var(--b2)"}`, background: selectedShop === shop.id ? c + "22" : "transparent", color: selectedShop === shop.id ? c : "var(--mx)", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap" }} onClick={() => setSelectedShop(shop.id)}>
+            <button key={shop.id} style={{ padding: "5px 13px", borderRadius: 99, border: `1.5px solid ${selectedShop === shop.id ? c : "var(--b2)"}`, background: selectedShop === shop.id ? c + "22" : "transparent", color: selectedShop === shop.id ? c : "var(--mx)", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap" }} onClick={() => selectShop(shop.id)}>
               <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: c, marginRight: 5, verticalAlign: "middle" }} />{shop.name}
             </button>
           );
@@ -7010,9 +7216,6 @@ const TrackingSettings = () => {
     gads_conversion_id: "", gads_conversion_label: "",
     fb_pixel_id: "", tt_pixel_id: "",
     google_connected: false, google_connected_email: null,
-    google_ads_connected: false,
-    ga4_oauth_connected: false,
-    search_console_connected: false,
   });
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -7021,7 +7224,6 @@ const TrackingSettings = () => {
   const [googleData, setGoogleData] = useState(null); // { gtm:[], ga4:[], gads:[], gads_note }
   const [fetchError, setFetchError] = useState(null);
   const [gtmSetup, setGtmSetup] = useState({ running: false, result: null, error: null });
-  const [connectingService, setConnectingService] = useState(null);
 
   // Load current settings
   const load = async () => {
@@ -7038,9 +7240,6 @@ const TrackingSettings = () => {
         tt_pixel_id: d.tt_pixel_id || "",
         google_connected: !!d.google_connected,
         google_connected_email: d.google_connected_email || null,
-        google_ads_connected: !!d.google_ads_connected,
-        ga4_oauth_connected: !!d.ga4_oauth_connected,
-        search_console_connected: !!d.search_console_connected,
       });
     } catch {} finally { setLoading(false); }
   };
@@ -7080,7 +7279,7 @@ const TrackingSettings = () => {
     try {
       const session = { access_token: await getToken() };
       await fetch("/api/google-tracking-disconnect", { method: "POST", headers: { "Authorization": `Bearer ${session?.access_token}` } });
-      setTs(s => ({ ...s, google_connected: false, google_connected_email: null, google_ads_connected: false, ga4_oauth_connected: false, search_console_connected: false }));
+      setTs(s => ({ ...s, google_connected: false, google_connected_email: null }));
       setGoogleData(null);
     } catch (e) { alert(e.message); }
   };
@@ -7159,137 +7358,20 @@ const TrackingSettings = () => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 700 }}>
 
-      {/* ── Google Services — 3 separate connections ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" style={{flexShrink:0}}><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg> Google Koppelingen
-          {ts.google_connected && (
-            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 600 }}>
-              ● {ts.google_connected_email}
-            </span>
-          )}
+      {/* ── Google Services — per-shop in Settings ── */}
+      <div style={{ padding: "12px 16px", borderRadius: "var(--rd-lg)", background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.2)", display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Google Ads, GA4 &amp; Search Console worden per shop gekoppeld</div>
+          <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>
+            Ga naar <strong style={{ color: "var(--tx)" }}>Instellingen → Shops</strong> en klik op een shop om Google-services te koppelen.
+            Elke shop krijgt zijn eigen Google Ads-account, GA4-property en Search Console-site gekoppeld.
+            Vereist: <strong>GOOGLE_CLIENT_ID</strong> + <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify environment variables.
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, padding: "8px 12px", background: "var(--s3)", borderRadius: "var(--rd)" }}>
-          Elke koppeling gebruik hetzelfde Google account. Koppel één keer in en activeer per service. Vereist: <strong>GOOGLE_CLIENT_ID</strong> + <strong>GOOGLE_CLIENT_SECRET</strong> in Netlify env.
-        </div>
-
-        {/* Service cards grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-
-          {/* ── Google Ads ── */}
-          {(() => {
-            const connected = ts.google_ads_connected;
-            const isConnecting = connectingService === "ads";
-            return (
-              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 18 }}>🎯</span>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Google Ads</div>
-                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
-                  Campagne ROAS, spend per uur, demografische data, concurrentie inzichten.
-                </div>
-                <div style={{ padding: "0 14px 12px" }}>
-                  {connected ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("Google Ads ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "ads" }) }); setTs(s => ({ ...s, google_ads_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
-                    </div>
-                  ) : (
-                    <a href="/api/google-oauth-init?service=ads" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("ads")}>
-                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
-                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
-                      </Btn>
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── GA4 ── */}
-          {(() => {
-            const connected = ts.ga4_oauth_connected;
-            const isConnecting = connectingService === "ga4";
-            return (
-              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 18 }}>📈</span>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Google Analytics 4</div>
-                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
-                  Sessiedata per klant, kanaalgroepen, conversiepaden en user_id koppeling.
-                </div>
-                <div style={{ padding: "0 14px 12px" }}>
-                  {connected ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("GA4 ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "ga4" }) }); setTs(s => ({ ...s, ga4_oauth_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
-                    </div>
-                  ) : (
-                    <a href="/api/google-oauth-init?service=ga4" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("ga4")}>
-                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
-                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
-                      </Btn>
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── Search Console ── */}
-          {(() => {
-            const connected = ts.search_console_connected;
-            const isConnecting = connectingService === "sc";
-            return (
-              <div style={{ border: `1.5px solid ${connected ? "rgba(34,197,94,0.35)" : "var(--b2)"}`, borderRadius: "var(--rd-lg)", overflow: "hidden", background: connected ? "rgba(34,197,94,0.03)" : "var(--s2)" }}>
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 18 }}>🔍</span>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Search Console</div>
-                      <div style={{ fontSize: 10, color: connected ? "#22c55e" : "var(--dm)", fontWeight: 600 }}>{connected ? "● Gekoppeld" : "Niet gekoppeld"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--mx)", lineHeight: 1.5, minHeight: 56 }}>
-                  Organische zoekwoorden, impressies, CTR en positie per landingspagina.
-                </div>
-                <div style={{ padding: "0 14px 12px" }}>
-                  {connected ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn variant="secondary" size="sm" onClick={fetchGoogleData} disabled={fetching} style={{ flex: 1, fontSize: 11 }}>{fetching ? "↻" : "↻ Sync"}</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => { if (!confirm("Search Console ontkoppelen?")) return; try { const t = await getToken(); await fetch("/api/google-disconnect", { method: "POST", headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ service: "sc" }) }); setTs(s => ({ ...s, search_console_connected: false })); } catch(e) { alert(e.message); } }} style={{ color: "var(--re)", fontSize: 11 }}>Ontkoppelen</Btn>
-                    </div>
-                  ) : (
-                    <a href="/api/google-oauth-init?service=sc" style={{ textDecoration: "none", display: "block" }} onClick={() => setConnectingService("sc")}>
-                      <Btn variant="primary" size="sm" style={{ width: "100%", fontSize: 11, justifyContent: "center" }} disabled={isConnecting}>
-                        {isConnecting ? "↻ Bezig..." : "Koppelen →"}
-                      </Btn>
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-        </div>
-
-        {fetchError && <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--re)" }}>⚠ {fetchError}</div>}
       </div>
 
-      {/* ── GTM ── */}
+      {/* ── GTM ── */}      {/* ── GTM ── */}
       <TrackCard icon="📊" title="Google Tag Manager" active={!!ts.gtm_id}
         hint="GTM is de aanbevolen aanpak. Alle andere Google tags (GA4, Ads) kun je dan via GTM beheren zonder code-aanpassingen.">
         {googleData?.gtm?.length > 0 ? (
@@ -7361,7 +7443,7 @@ const TrackingSettings = () => {
       </TrackCard>
 
       {/* ── Zero-knowledge GTM Auto-setup ── */}
-      {ts.google_ads_connected && ts.gtm_id && googleData?.gtm?.find(g => g.id === ts.gtm_id)?.path && (ts.ga4_id || ts.gads_conversion_id) && (
+      {ts.google_connected && ts.gtm_id && googleData?.gtm?.find(g => g.id === ts.gtm_id)?.path && (ts.ga4_id || ts.gads_conversion_id) && (
         <div style={{ border: "1px solid rgba(99,102,241,0.35)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)", borderBottom: "1px solid rgba(99,102,241,0.2)", display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 20 }}>🚀</span>
