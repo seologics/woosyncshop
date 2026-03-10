@@ -7668,16 +7668,24 @@ const AI_USE_CASES = [
 ];
 
 const GEMINI_MODELS = [
+  { value: "gemini-2.5-pro",        label: "gemini-2.5-pro (krachtigst)" },
+  { value: "gemini-2.5-flash",      label: "gemini-2.5-flash" },
   { value: "gemini-2.0-flash",      label: "gemini-2.0-flash (standaard)" },
   { value: "gemini-2.0-flash-lite", label: "gemini-2.0-flash-lite (snel/goedkoop)" },
-  { value: "gemini-1.5-pro",        label: "gemini-1.5-pro (krachtig)" },
+  { value: "gemini-1.5-pro",        label: "gemini-1.5-pro" },
   { value: "gemini-1.5-flash",      label: "gemini-1.5-flash" },
 ];
 const OPENAI_MODELS = [
-  { value: "gpt-4o-mini",   label: "gpt-4o-mini (standaard)" },
-  { value: "gpt-4o",        label: "gpt-4o (krachtig)" },
-  { value: "gpt-4-turbo",   label: "gpt-4-turbo" },
-  { value: "gpt-3.5-turbo", label: "gpt-3.5-turbo (snel/goedkoop)" },
+  { value: "gpt-5.4",              label: "gpt-5.4 (flagship)",          group: "GPT-5.4" },
+  { value: "gpt-5.4-pro",          label: "gpt-5.4-pro (pro reasoning)", group: "GPT-5.4" },
+  { value: "gpt-5.3-chat-latest",  label: "gpt-5.3 Instant (snel)",      group: "GPT-5.3" },
+  { value: "gpt-5.2",              label: "gpt-5.2 Thinking",            group: "GPT-5.2" },
+  { value: "gpt-5.2-chat-latest",  label: "gpt-5.2 Instant (snel)",      group: "GPT-5.2" },
+  { value: "gpt-5.2-pro",          label: "gpt-5.2 Pro",                 group: "GPT-5.2" },
+  { value: "gpt-5-mini",           label: "gpt-5-mini (budget)",         group: "GPT-5" },
+  { value: "gpt-5",                label: "gpt-5",                       group: "GPT-5" },
+  { value: "gpt-4o-mini",          label: "gpt-4o-mini",                 group: "Legacy" },
+  { value: "gpt-4o",               label: "gpt-4o",                      group: "Legacy" },
 ];
 
 const ProviderToggle = ({ value, onChange, geminiOnly = false }) => (
@@ -7693,19 +7701,30 @@ const ProviderToggle = ({ value, onChange, geminiOnly = false }) => (
   </div>
 );
 
-const ModelSelect = ({ provider, value, onChange, label, hint }) => {
+const ModelSelect = ({ provider, value, onChange, compact = false }) => {
   const models = provider === "openai" ? OPENAI_MODELS : GEMINI_MODELS;
+  const defaultLabel = provider === "openai" ? "gpt-5.3 Instant (standaard)" : "gemini-2.0-flash (standaard)";
+  // Group openai models
+  const groups = provider === "openai"
+    ? [...new Set(models.map(m => m.group))]
+    : null;
   return (
-    <Field label={label} hint={hint}>
-      <Sel
-        value={value || ""}
-        onChange={v => onChange(v)}
-        options={[
-          { value: "", label: `— Standaard (${provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash"}) —` },
-          ...models.map(m => ({ value: m.value, label: m.label })),
-        ]}
-      />
-    </Field>
+    <select
+      value={value || ""}
+      onChange={e => onChange(e.target.value)}
+      style={{ padding: compact ? "3px 6px" : "5px 8px", background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: "var(--rd)", color: "var(--tx)", fontSize: 11, minWidth: compact ? 160 : 200 }}
+    >
+      <option value="">— {defaultLabel} —</option>
+      {groups ? groups.map(grp => (
+        <optgroup key={grp} label={grp}>
+          {models.filter(m => m.group === grp).map(m => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </optgroup>
+      )) : models.map(m => (
+        <option key={m.value} value={m.value}>{m.label}</option>
+      ))}
+    </select>
   );
 };
 
@@ -7715,7 +7734,7 @@ const PlatformSettings = () => {
     openai_api_key: "",
     ai_provider_matching: "gemini", ai_provider_translation: "gemini",
     ai_provider_image: "gemini", ai_provider_normalization: "gemini",
-    ai_model_matching: "", ai_model_translation: "",
+    ai_model_matching: "", ai_model_translation: "", ai_model_image: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -7780,6 +7799,7 @@ const PlatformSettings = () => {
           ai_provider_normalization: d.ai_provider_normalization || "gemini",
           ai_model_matching: d.ai_model_matching || "",
           ai_model_translation: d.ai_model_translation || "",
+          ai_model_image: d.ai_model_image || "",
         }));
       } catch {}
       setLoading(false);
@@ -7904,49 +7924,44 @@ const PlatformSettings = () => {
       <div style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🧠 AI Provider per use-case</div>
         <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 14 }}>Kies per functionaliteit welk model wordt gebruikt. Grijs = betreffende key ontbreekt.</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {AI_USE_CASES.map(uc => {
-            const provKey = `ai_provider_${uc.id}`;
-            const current = ps[provKey] || "gemini";
+            const provKey  = "ai_provider_" + uc.id;
+            const modelKey = "ai_model_"    + uc.id;
+            const current  = ps[provKey]  || "gemini";
+            const model    = ps[modelKey] || "";
+            const missingKey = (current === "gemini" && !hasGemini) || (current === "openai" && !hasOpenAI);
             return (
-              <div key={uc.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{uc.label}</div>
-                  <div style={{ fontSize: 11, color: "var(--dm)" }}>{uc.hint}</div>
+              <div key={uc.id} style={{ padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+                {/* Row 1: label + provider toggle */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{uc.label}</div>
+                    <div style={{ fontSize: 11, color: "var(--dm)" }}>{uc.hint}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    {missingKey && (
+                      <span style={{ fontSize: 11, color: "var(--am)", background: "rgba(234,179,8,0.1)", padding: "2px 7px", borderRadius: 10 }}>⚠ key ontbreekt</span>
+                    )}
+                    <ProviderToggle value={current} onChange={v => setPs(p => ({ ...p, [provKey]: v, [modelKey]: "" }))} geminiOnly={uc.geminiOnly} />
+                  </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {current === "gemini" && !hasGemini && (
-                    <span style={{ fontSize: 11, color: "var(--am)", background: "rgba(234,179,8,0.1)", padding: "2px 7px", borderRadius: 10 }}>⚠ key ontbreekt</span>
+                {/* Row 2: model dropdown */}
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--dm)", flexShrink: 0 }}>Model:</span>
+                  <ModelSelect
+                    provider={current}
+                    value={model}
+                    onChange={v => setPs(p => ({ ...p, [modelKey]: v }))}
+                    compact
+                  />
+                  {model && (
+                    <button onClick={() => setPs(p => ({ ...p, [modelKey]: "" }))} style={{ fontSize: 10, color: "var(--dm)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px" }} title="Reset naar standaard">✕ reset</button>
                   )}
-                  {current === "openai" && !hasOpenAI && (
-                    <span style={{ fontSize: 11, color: "var(--am)", background: "rgba(234,179,8,0.1)", padding: "2px 7px", borderRadius: 10 }}>⚠ key ontbreekt</span>
-                  )}
-                  <ProviderToggle value={current} onChange={v => setPs(p => ({ ...p, [provKey]: v }))} geminiOnly={uc.geminiOnly} />
                 </div>
               </div>
             );
           })}
-        </div>
-
-        {/* Model overrides */}
-        <div style={{ marginTop: 14, padding: "12px 14px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "var(--mx)" }}>Model selectie <span style={{ fontWeight: 400 }}>(optioneel — standaard = snelste model per provider)</span></div>
-          <div className="settings-2col">
-            <ModelSelect
-              provider={ps.ai_provider_matching}
-              value={ps.ai_model_matching}
-              onChange={v => setPs(p => ({ ...p, ai_model_matching: v }))}
-              label="Matching model"
-              hint={`Provider: ${ps.ai_provider_matching}`}
-            />
-            <ModelSelect
-              provider={ps.ai_provider_translation}
-              value={ps.ai_model_translation}
-              onChange={v => setPs(p => ({ ...p, ai_model_translation: v }))}
-              label="Vertaling model"
-              hint={`Provider: ${ps.ai_provider_translation}`}
-            />
-          </div>
         </div>
       </div>
 
