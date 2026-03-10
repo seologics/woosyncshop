@@ -4414,14 +4414,9 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
               return (
                 <div key={shop.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
                   <div style={{ padding: "12px 16px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 8 }}>
-                    {(() => {
-                      const f = shop.flag || "🌐";
-                      const pts = f !== "🌐" ? [...f].map(c => c.codePointAt(0) - 0x1F1E6) : null;
-                      const code = pts && pts.length === 2 && pts[0] >= 0 ? (String.fromCharCode(65+pts[0])+String.fromCharCode(65+pts[1])).toLowerCase() : null;
-                      return code
-                        ? <img src={`https://flagcdn.com/w40/${code}.png`} alt={code.toUpperCase()} style={{ width: 24, height: 16, objectFit: "cover", borderRadius: 2, flexShrink: 0 }} />
-                        : <span style={{ fontSize: 18 }}>🌐</span>;
-                    })()}
+                    <span style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }}>{shop.flag || "🌐"}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{shop.name}</div>
                       <div style={{ fontSize: 11, color: "var(--dm)" }}>{shop.locale} · {shop.site_url?.replace("https://","").replace("http://","")}</div>
                     </div>
                     <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
