@@ -5935,7 +5935,21 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [accountCreated, setAccountCreated] = useState(false); // true once /api/register succeeded — skip re-registration on back+resubmit
+  const [emailError, setEmailError] = useState(null);
+  const [accountCreated, setAccountCreated] = useState(false);
+
+  const validateEmail = (email) => {
+    if (!email?.trim()) return "Vul je e-mailadres in.";
+    // Check for double dots, leading/trailing dots in local part, spaces
+    if (/\.{2,}/.test(email)) return "E-mailadres bevat dubbele punten.";
+    if (/\s/.test(email)) return "E-mailadres mag geen spaties bevatten.";
+    // RFC-ish regex: must have exactly one @, domain must have at least one dot
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return "Ongeldig e-mailadres formaat.";
+    // Local part can't start or end with a dot
+    const local = email.split("@")[0];
+    if (local.startsWith(".") || local.endsWith(".")) return "E-mailadres mag niet beginnen of eindigen met een punt.";
+    return null;
+  }; // true once /api/register succeeded — skip re-registration on back+resubmit
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
@@ -6020,7 +6034,8 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
     setLoading(true); setError(null);
     try {
       if (!form.name?.trim()) { setError("Vul je naam in."); return; }
-      if (!form.email?.trim()) { setError("Vul je e-mailadres in."); return; }
+      const emailErr = validateEmail(form.email);
+      if (emailErr) { setError(emailErr); setEmailError(emailErr); return; }
       if (!form.password || form.password.length < 8) { setError("Wachtwoord moet minimaal 8 tekens zijn."); return; }
       if (!form.address_city?.trim()) { setError("Vul je stad in."); return; }
       if (!form.country) { setError("Selecteer je land."); return; }
@@ -6236,7 +6251,29 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
               <Field label="Naam *"><Inp value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jouw naam" /></Field>
               <Field label="Bedrijfsnaam"><Inp value={form.business_name} onChange={e => setForm(f => ({ ...f, business_name: e.target.value }))} placeholder="Optioneel" /></Field>
             </div>
-            <Field label="E-mailadres *"><Inp value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} type="email" placeholder="jij@domein.nl" /></Field>
+            <div>
+              <Field label="E-mailadres *">
+                <Inp
+                  value={form.email}
+                  onChange={e => {
+                    setForm(f => ({ ...f, email: e.target.value }));
+                    setEmailError(null); // clear on change
+                  }}
+                  onBlur={e => {
+                    const err = validateEmail(e.target.value);
+                    setEmailError(err);
+                  }}
+                  type="email"
+                  placeholder="jij@domein.nl"
+                  style={emailError ? { borderColor: "var(--re)", background: "rgba(239,68,68,0.05)" } : {}}
+                />
+              </Field>
+              {emailError && (
+                <div style={{ marginTop: 4, fontSize: 11, color: "var(--re)", display: "flex", alignItems: "center", gap: 5 }}>
+                  <span>⚠</span> {emailError}
+                </div>
+              )}
+            </div>
             <Field label="Wachtwoord *"><Inp value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="Min. 8 tekens" /></Field>
             <Field label="Straat + huisnummer"><Inp value={form.address_street} onChange={e => setForm(f => ({ ...f, address_street: e.target.value }))} placeholder="Straatnaam 1" /></Field>
             <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
