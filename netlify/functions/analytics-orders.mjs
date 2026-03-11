@@ -74,8 +74,8 @@ function dateRange(range) {
   if (range === "90d")  from.setDate(now.getDate() - 90);
   if (range === "year") from.setFullYear(now.getFullYear(), 0, 1);
   return {
-    after:  from.toISOString().split("T")[0],
-    before: now.toISOString().split("T")[0],
+    after:  from.toISOString().split("T")[0] + "T00:00:00",
+    before: now.toISOString().split("T")[0] + "T23:59:59",
   };
 }
 
@@ -93,7 +93,7 @@ async function fetchAllOrders(shop, after, before) {
   let page = 1, allOrders = [];
   while (true) {
     const batch = await wooFetch(shop, "orders", {
-      after, before, status: "completed,processing,on-hold,cancelled,refunded",
+      after, before,
       per_page: "100", page: String(page), _fields: "id,status,total,date_created,line_items,meta_data",
     });
     if (!batch.length) break;
