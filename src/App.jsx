@@ -4198,8 +4198,11 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
     try {
       const token = await getToken();
       const res = await fetch(`/api/shop-google-data?shop_id=${shopId}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Google services ophalen mislukt (${res.status})` + (txt && !txt.includes("<!DOCTYPE") ? ": " + txt.slice(0, 100) : ""));
+      }
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Ophalen mislukt");
       setShopGoogle(s => ({ ...s, [shopId]: { ...d, loading: false, error: null } }));
     } catch (e) {
       setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), loading: false, error: e.message } }));
