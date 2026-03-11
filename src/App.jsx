@@ -692,7 +692,9 @@ const BASE_EDIT_TABS = [
 
 const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTermAdded, shopCache, sites, activeSite }) => {
   const hasWqm = activeSite?.installed_plugins?.includes("woocommerce-quantity-manager") || activeSite?.has_wqm;
-  const editTabs = hasWqm
+  // Also show WQM tab if product itself has WQM tiers (shop flag may not be set yet)
+  const productHasWqm = !!(product?.wqm_tiers?.length > 0 || product?.meta_data?.some?.(m => m.key === '_wqm_tiers'));
+  const editTabs = (hasWqm || productHasWqm)
     ? [...BASE_EDIT_TABS.slice(0, 3), { id: "quantity", label: "Hoeveelheid", icon: "🔢" }, ...BASE_EDIT_TABS.slice(3)]
     : BASE_EDIT_TABS;
   const [tab, setTab] = useState("general");
@@ -6294,6 +6296,12 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
           // PUT the main product
           await wooCall(shopId, `products/${updated.id}`, "PUT", payload);
 
+          // Dummy touch: trigger WooCommerce's full save pipeline so WQM recalculates _price
+          // (REST API saves skip woocommerce_process_product_meta; this extra PUT fires it)
+          if (updated.wqm_tiers !== undefined || updated.wqm_settings !== undefined) {
+            await wooCall(shopId, `products/${updated.id}`, "PUT", { status: updated.status || "publish" });
+          }
+
           // PUT variations if variable and variations changed
           if (updated.type === "variable" && updated.variations?.length > 0) {
             const varPromises = updated.variations.map(v => {
@@ -6321,7 +6329,14 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
                   { key: '_wqm_settings', value: vSettings },
                 ];
               }
-              return wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
+              const varSave = wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
+              // Dummy touch for WQM variation: fires woocommerce_process_product_meta to recalculate _price
+              if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
+                return varSave.then(() =>
+                  wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", { status: v.enabled === false ? "private" : "publish" })
+                );
+              }
+              return varSave;
             });
             await Promise.all(varPromises);
           }
