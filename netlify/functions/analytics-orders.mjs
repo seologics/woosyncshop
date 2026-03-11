@@ -80,7 +80,7 @@ function dateRange(range) {
 }
 
 async function wooFetch(shop, endpoint, params = {}) {
-  const base = shop.url.replace(/\/$/, "");
+  const base = shop.site_url.replace(/\/$/, "");
   const qs = new URLSearchParams({ per_page: "100", ...params }).toString();
   const url = `${base}/wp-json/wc/v3/${endpoint}?${qs}`;
   const auth = btoa(`${shop.consumer_key}:${shop.consumer_secret}`);
@@ -246,7 +246,7 @@ export default async function handler(req) {
     const { after, before } = dateRange(range);
 
     // Fetch shops for this user
-    let shopsQuery = supabase.from("shops").select("id, name, url, consumer_key, consumer_secret").eq("user_id", user.id);
+    let shopsQuery = supabase.from("shops").select("id, name, site_url, consumer_key, consumer_secret").eq("user_id", user.id);
     if (shopId) shopsQuery = shopsQuery.eq("id", shopId);
     const { data: shops, error: shopsErr } = await shopsQuery;
     if (shopsErr) throw shopsErr;
