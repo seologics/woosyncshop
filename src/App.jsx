@@ -1,5 +1,5 @@
 import { signIn, signUp, signOut, getSession, getUser, supabase, getToken, setCachedToken } from "./lib/supabase.js";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
