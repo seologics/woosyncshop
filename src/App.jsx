@@ -1,5 +1,5 @@
 import { signIn, signUp, signOut, getSession, getUser, supabase, getToken, setCachedToken } from "./lib/supabase.js";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
@@ -2491,19 +2491,38 @@ const CouponManager = ({ activeSite, user }) => {
     const checkPlugin = async () => {
       try {
         const token = await getToken();
+        // Try system_status first; fall back to plugins endpoint on 400/403
+        let plugins = null;
         const res = await fetch("/api/woo", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ shopId: activeSite.id, endpoint: "system_status", method: "GET" }),
+          body: JSON.stringify({ shop_id: activeSite.id, endpoint: "system_status", method: "GET" }),
         });
-        if (!res.ok) { setHasAdvCoupons(false); return; }
-        const d = await res.json();
-        const plugins = d.active_plugins || [];
-        const hasIt = plugins.some(p =>
-          (p.plugin || p.name || "").toLowerCase().includes("advanced-coupons") ||
-          (p.plugin || p.name || "").toLowerCase().includes("advanced_coupons")
-        );
-        setHasAdvCoupons(hasIt);
+        if (res.ok) {
+          const d = await res.json();
+          plugins = d.active_plugins || [];
+        } else {
+          // system_status requires manage_woocommerce; try plugins endpoint instead
+          const res2 = await fetch("/api/woo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ shop_id: activeSite.id, endpoint: "plugins?per_page=100&status=active", method: "GET" }),
+          });
+          if (res2.ok) {
+            const plugins2 = await res2.json();
+            plugins = Array.isArray(plugins2) ? plugins2.map(p => ({ plugin: p.plugin || p.textdomain || "" })) : [];
+          }
+        }
+        if (plugins !== null) {
+          const hasIt = plugins.some(p =>
+            (p.plugin || p.name || "").toLowerCase().includes("advanced-coupons") ||
+            (p.plugin || p.name || "").toLowerCase().includes("advanced_coupons") ||
+            (p.textdomain || "").toLowerCase().includes("advanced-coupons")
+          );
+          setHasAdvCoupons(hasIt);
+        } else {
+          setHasAdvCoupons(false);
+        }
       } catch { setHasAdvCoupons(false); }
       finally { setCheckingPlugin(false); }
     };
