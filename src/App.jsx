@@ -8285,11 +8285,20 @@ const PlatformSettings = () => {
       if (!savePayload.openai_api_key)  delete savePayload.openai_api_key;
       if (!savePayload.tinypng_api_key) delete savePayload.tinypng_api_key;
       if (!savePayload.mollie_api_key)  delete savePayload.mollie_api_key;
-      await fetch("/api/platform-settings", {
+      const saveRes = await fetch("/api/platform-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
         body: JSON.stringify(savePayload),
       });
+      if (!saveRes.ok) { const e = await saveRes.json().catch(() => ({})); throw new Error(e.error || `HTTP ${saveRes.status}`); }
+      // After save: mark keys as set and clear the input fields
+      setPs(prev => ({
+        ...prev,
+        gemini_api_key: "",  gemini_api_key_set:  !!(savePayload.gemini_api_key  || prev.gemini_api_key_set),
+        openai_api_key: "",  openai_api_key_set:  !!(savePayload.openai_api_key  || prev.openai_api_key_set),
+        tinypng_api_key: "", tinypng_api_key_set: !!(savePayload.tinypng_api_key || prev.tinypng_api_key_set),
+        mollie_api_key: "",  mollie_api_key_set:  !!(savePayload.mollie_api_key  || prev.mollie_api_key_set),
+      }));
       setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
     finally { setSaving(false); }
