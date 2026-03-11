@@ -60,6 +60,11 @@ export default async (req) => {
   const startDate = new Date(now.getTime() - 60 * 1000)
   const expiryDate = use_schedule && expiry_hours ? new Date(now.getTime() + expiry_hours * 60 * 60 * 1000) : null
 
+  // Format a Date as a local datetime string in Europe/Amsterdam (no timezone suffix)
+  // WooCommerce date_expires and acfw_schedule expect local site time, not UTC
+  const toAmsterdam = (d) =>
+    d.toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }).replace('T', ' ').slice(0, 16).replace(' ', ' ')
+
   const couponPayload = {
     code: code.toUpperCase(),
     discount_type: discount_type || 'percent',
@@ -68,14 +73,15 @@ export default async (req) => {
   }
   if (usage_limit) couponPayload.usage_limit = usage_limit
   if (usage_limit_per_user) couponPayload.usage_limit_per_user = usage_limit_per_user
-  if (expiryDate) couponPayload.date_expires = expiryDate.toISOString()
+  // Use date_expires_gmt so WooCommerce stores the correct UTC moment regardless of site timezone
+  if (expiryDate) couponPayload.date_expires_gmt = expiryDate.toISOString().replace('.000Z', '')
   if (use_schedule && has_adv_coupons) {
     couponPayload.meta_data = [{
       key: 'acfw_schedule',
       value: {
         enabled: true,
-        start_date: startDate.toISOString().slice(0, 16).replace('T', ' '),
-        end_date: expiryDate ? expiryDate.toISOString().slice(0, 16).replace('T', ' ') : '',
+        start_date: toAmsterdam(startDate),
+        end_date: expiryDate ? toAmsterdam(expiryDate) : '',
         date_type: 'date_range',
       }
     }]
