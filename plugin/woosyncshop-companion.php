@@ -3,7 +3,7 @@
  * Plugin Name: WooSyncShop Companion
  * Plugin URI:  https://woosyncshop.com
  * Description: Connects this WooCommerce store to the WooSyncShop platform. Handles hreflang injection for synced products and pages, and exposes a secure REST endpoint for configuration pushes.
- * Version:     1.1.0
+ * Version:     1.2.0
  * Author:      WooSyncShop
  * Author URI:  https://woosyncshop.com
  * License:     GPL-2.0+
@@ -12,7 +12,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'WSS_VERSION',    '1.1.0' );
+define( 'WSS_VERSION',    '1.2.0' );
 define( 'WSS_OPTION_KEY', 'woosyncshop_config' );
 define( 'WSS_LOG_KEY',    'woosyncshop_log' );
 
@@ -29,7 +29,8 @@ add_action( 'rest_api_init', 'wss_register_rest_routes' );
 add_action( 'wp_head',       'wss_inject_hreflang', 1 );
 add_action( 'admin_menu',    'wss_admin_menu' );
 add_action( 'admin_init',    'wss_admin_settings' );
-add_action( 'wp_ajax_wss_ping_test', 'wss_ajax_ping_test' );
+add_action( 'wp_ajax_wss_ping_test',     'wss_ajax_ping_test' );
+add_action( 'wp_ajax_wss_register',       'wss_ajax_register' );
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,11 +331,110 @@ function wss_admin_settings() {
 }
 
 function wss_sanitize_options( $input ) {
-    $config = wss_get_config();
-    if ( ! empty( $input['api_token'] ) ) {
-        $config['api_token'] = sanitize_text_field( $input['api_token'] );
+    $config    = wss_get_config();
+    $old_token = $config['api_token'] ?? '';
+    $new_token = sanitize_text_field( $input['api_token'] ?? '' );
+
+    if ( ! empty( $new_token ) ) {
+        $config['api_token'] = $new_token;
     }
+
+    // Auto-register with WooSyncShop whenever a (new) token is saved
+    if ( ! empty( $new_token ) ) {
+        $result = wss_do_register( $new_token );
+        if ( is_wp_error( $result ) ) {
+            add_settings_error( 'wss_settings', 'wss_register_fail', 'Token opgeslagen, maar registratie bij WooSyncShop mislukt: ' . $result->get_error_message(), 'warning' );
+        } else {
+            $config['registered_at'] = current_time( 'c' );
+            wss_log( 'Auto-geregistreerd bij WooSyncShop: ' . get_site_url() );
+        }
+    }
+
     return $config;
+}
+
+/**
+ * Generate (or reuse) a WooCommerce REST API key for WooSyncShop,
+ * then POST token + credentials to the platform's plugin-register endpoint.
+ *
+ * @return true|WP_Error
+ */
+function wss_do_register( string $token ) {
+    if ( ! function_exists( 'wc_rand_hash' ) ) {
+        return new WP_Error( 'woo_missing', 'WooCommerce is niet actief op deze site.' );
+    }
+
+    global $wpdb;
+
+    // Check if we already created a key for WooSyncShop — reuse it
+    $existing = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT consumer_key, consumer_secret FROM {$wpdb->prefix}woocommerce_api_keys WHERE description = %s LIMIT 1",
+            'WooSyncShop Auto'
+        )
+    );
+
+    // consumer_key in DB is hashed; we need the raw version.
+    // If a key already exists we can't recover the raw ck_ — generate a fresh one.
+    $consumer_key    = 'ck_' . wc_rand_hash();
+    $consumer_secret = 'cs_' . wc_rand_hash();
+
+    if ( $existing ) {
+        // Delete the old one; we'll insert a fresh pair whose raw key we know
+        $wpdb->delete(
+            $wpdb->prefix . 'woocommerce_api_keys',
+            [ 'description' => 'WooSyncShop Auto' ],
+            [ '%s' ]
+        );
+    }
+
+    $inserted = $wpdb->insert(
+        $wpdb->prefix . 'woocommerce_api_keys',
+        [
+            'user_id'         => get_current_user_id() ?: 1,
+            'description'     => 'WooSyncShop Auto',
+            'permissions'     => 'read_write',
+            'consumer_key'    => wc_api_hash( $consumer_key ),
+            'consumer_secret' => $consumer_secret,
+            'truncated_key'   => substr( $consumer_key, -7 ),
+            'last_access'     => null,
+        ],
+        [ '%d', '%s', '%s', '%s', '%s', '%s', '%s' ]
+    );
+
+    if ( ! $inserted ) {
+        return new WP_Error( 'db_error', 'Kon geen WooCommerce API-sleutel aanmaken.' );
+    }
+
+    // Register with WooSyncShop platform
+    $response = wp_remote_post(
+        'https://woosyncshop.com/api/plugin-register',
+        [
+            'timeout'     => 15,
+            'headers'     => [ 'Content-Type' => 'application/json' ],
+            'body'        => wp_json_encode( [
+                'api_token'       => $token,
+                'site_url'        => get_site_url(),
+                'consumer_key'    => $consumer_key,
+                'consumer_secret' => $consumer_secret,
+                'locale'          => get_locale(),
+            ] ),
+        ]
+    );
+
+    if ( is_wp_error( $response ) ) {
+        return $response;
+    }
+
+    $code = wp_remote_retrieve_response_code( $response );
+    $body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+    if ( $code !== 200 || empty( $body['success'] ) ) {
+        $err = $body['error'] ?? ( 'HTTP ' . $code );
+        return new WP_Error( 'platform_error', $err );
+    }
+
+    return true;
 }
 
 function wss_admin_page() {
@@ -411,29 +511,38 @@ function wss_admin_page() {
           </form>
 
           <hr />
-          <h3>Verbinding testen</h3>
+          <h3>Verbinding met WooSyncShop</h3>
+          <p style="color:#666">
+            Klik <strong>Verbinden</strong> om WooCommerce API-sleutels automatisch aan te maken
+            en deze site te registreren bij het WooSyncShop platform.
+            Gebruik <strong>Verbinding testen</strong> om te controleren of de verbinding actief is.
+          </p>
           <p>
+            <button type="button" id="wss-register-btn" class="button button-primary"
+                    <?php echo empty( $token ) ? 'disabled title="Sla eerst een token op."' : ''; ?>>
+              🔗 Verbinden met WooSyncShop
+            </button>
+            &nbsp;
             <button type="button" id="wss-ping-btn" class="button button-secondary"
                     <?php echo empty( $token ) ? 'disabled title="Sla eerst een token op."' : ''; ?>>
               Verbinding testen
             </button>
-            <span id="wss-ping-spinner" class="spinner" style="float:none;margin:0 6px;vertical-align:middle;visibility:hidden;"></span>
+            <span id="wss-action-spinner" class="spinner" style="float:none;margin:0 6px;vertical-align:middle;visibility:hidden;"></span>
           </p>
-          <div id="wss-ping-result" style="display:none;margin-top:8px;"></div>
+          <div id="wss-action-result" style="display:none;margin-top:8px;"></div>
           <script>
           (function($){
-            $('#wss-ping-btn').on('click', function(){
-              var $btn     = $(this);
-              var $spinner = $('#wss-ping-spinner');
-              var $result  = $('#wss-ping-result');
+            var nonce = <?php echo json_encode( wp_create_nonce( 'wss_ping_nonce' ) ); ?>;
+
+            function wssDoAction(action, $btn) {
+              var $spinner = $('#wss-action-spinner');
+              var $result  = $('#wss-action-result');
               $btn.prop('disabled', true);
+              $('#wss-register-btn, #wss-ping-btn').prop('disabled', true);
               $spinner.css('visibility','visible');
-              $result.hide().removeClass('notice-success notice-error').html('');
-              $.post(ajaxurl, {
-                action: 'wss_ping_test',
-                nonce:  <?php echo json_encode( wp_create_nonce( 'wss_ping_nonce' ) ); ?>
-              }, function(res){
-                $btn.prop('disabled', false);
+              $result.hide().removeClass('notice-success notice-error notice-warning').html('');
+              $.post(ajaxurl, { action: action, nonce: nonce }, function(res){
+                $('#wss-register-btn, #wss-ping-btn').prop('disabled', false);
                 $spinner.css('visibility','hidden');
                 if (res.success) {
                   $result.addClass('notice notice-success inline')
@@ -443,12 +552,15 @@ function wss_admin_page() {
                     .html('<p>\u274c ' + (res.data ? res.data.message : 'Onbekende fout.') + '</p>').show();
                 }
               }).fail(function(){
-                $btn.prop('disabled', false);
+                $('#wss-register-btn, #wss-ping-btn').prop('disabled', false);
                 $spinner.css('visibility','hidden');
                 $result.addClass('notice notice-error inline')
                   .html('<p>\u274c Netwerkfout: kon WooSyncShop niet bereiken.</p>').show();
               });
-            });
+            }
+
+            $('#wss-register-btn').on('click', function(){ wssDoAction('wss_register', $(this)); });
+            $('#wss-ping-btn').on('click',     function(){ wssDoAction('wss_ping_test', $(this)); });
           }(jQuery));
           </script>
         </div>
@@ -522,7 +634,31 @@ function wss_ajax_ping_test() {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6.  HELPERS
+// 6.  AJAX HANDLER  –  Manual register / re-register
+// ─────────────────────────────────────────────────────────────────────────────
+
+function wss_ajax_register() {
+    check_ajax_referer( 'wss_ping_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_send_json_error( [ 'message' => 'Geen rechten.' ], 403 );
+    }
+
+    $config = wss_get_config();
+    $token  = $config['api_token'] ?? '';
+    if ( empty( $token ) ) {
+        wp_send_json_error( [ 'message' => 'Sla eerst een API-token op.' ] );
+    }
+
+    $result = wss_do_register( $token );
+    if ( is_wp_error( $result ) ) {
+        wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+    }
+    wp_send_json_success( [ 'message' => 'Verbinding geslaagd! WooCommerce API-sleutels aangemaakt en doorgestuurd naar WooSyncShop.' ] );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7.  HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
 function wss_get_config(): array {
