@@ -728,10 +728,16 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
     let wqmSettingsRaw = getMeta('_wqm_settings');
 
     console.log("[WQM applyWqmMeta] meta keys:", metaArr.map(m => m.key));
-    console.log("[WQM applyWqmMeta] _wqm_tiers parsed:", wqmTiersRaw);
+    console.log("[WQM applyWqmMeta] _wqm_tiers FULL:", JSON.stringify(wqmTiersRaw));
+    console.log("[WQM applyWqmMeta] _wqm_settings FULL:", JSON.stringify(wqmSettingsRaw));
 
-    if (wqmTiersRaw && typeof wqmTiersRaw === 'object' && Array.isArray(wqmTiersRaw.tiers)) {
-      fresh.wqm_tiers     = wqmTiersRaw.tiers.map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') }));
+    // tiers may be a real array OR a PHP-indexed object {0:{…},1:{…}} — normalise both
+    const tiersArr = wqmTiersRaw?.tiers
+      ? (Array.isArray(wqmTiersRaw.tiers) ? wqmTiersRaw.tiers : Object.values(wqmTiersRaw.tiers))
+      : [];
+
+    if (wqmTiersRaw && typeof wqmTiersRaw === 'object' && tiersArr.length > 0) {
+      fresh.wqm_tiers     = tiersArr.map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') }));
       fresh.wqm_tier_type = wqmTiersRaw.type || 'fixed';
     } else {
       // Do NOT overwrite if already populated (e.g. from a prior applyWqmMeta call)
@@ -782,9 +788,8 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
           });
           const full = await res.json();
           // ── DEBUG: log what meta_data comes back ──────────────────────────────
-          console.log("[WQM debug] full product meta_data:", full?.meta_data);
           const wqmRaw = (full?.meta_data || []).find(m => m.key === '_wqm_tiers');
-          console.log("[WQM debug] _wqm_tiers raw:", wqmRaw);
+          console.log("[WQM debug] _wqm_tiers FULL:", JSON.stringify(wqmRaw));
           // ─────────────────────────────────────────────────────────────────────
           if (full && full.id) {
             const merged = { ...fresh, ...full, pending_changes: fresh.pending_changes || {} };
