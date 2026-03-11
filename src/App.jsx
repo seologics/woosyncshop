@@ -5118,8 +5118,11 @@ function AnalyticsView({ shops, user }) {
       const res = await fetch(`/api/analytics-orders?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error("Analytics ophalen mislukt (" + res.status + ")" + (txt && !txt.includes("<!DOCTYPE") ? ": " + txt.slice(0, 100) : ""));
+      }
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Fout bij ophalen data");
       setData(json);
     } catch (e) {
       setError(e.message);
@@ -5140,8 +5143,11 @@ function AnalyticsView({ shops, user }) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
       });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error("Insights ophalen mislukt (" + res.status + ")");
+      }
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
       setInsights(json.insights);
     } catch (e) {
       console.error("Insights error:", e);

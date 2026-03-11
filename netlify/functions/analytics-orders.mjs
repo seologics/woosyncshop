@@ -1,10 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = Netlify.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const SUPERADMIN_EMAIL = "leadingvation@gmail.com";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 function writeLog(level, message, meta = {}) {
   return supabase.from("system_logs").insert({
@@ -224,6 +219,11 @@ function mergeShopData(shopResults) {
 }
 
 export default async function handler(req) {
+  const SUPABASE_URL = Netlify.env.get("SUPABASE_URL");
+  const SUPABASE_SERVICE_ROLE_KEY = Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const SUPERADMIN_EMAIL = "leadingvation@gmail.com";
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
