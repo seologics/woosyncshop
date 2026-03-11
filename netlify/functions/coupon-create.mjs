@@ -91,14 +91,18 @@ export default async (req) => {
   // Use date_expires_gmt so WooCommerce stores the correct UTC moment regardless of site timezone
   if (expiryDate) couponPayload.date_expires_gmt = expiryDate.toISOString().replace('.000Z', '')
   if (use_schedule && has_adv_coupons) {
+    // Advanced Coupons reads acfw_schedule from wp_postmeta as a serialized PHP array.
+    // The WooCommerce REST API must receive the value as a JSON *string* — not a nested
+    // object — otherwise WP stores it as a plain object which ACFW can't unserialize,
+    // leaving the Scheduler checkbox unchecked with no dates.
     couponPayload.meta_data = [{
       key: 'acfw_schedule',
-      value: {
-        enabled: true,
+      value: JSON.stringify({
+        enabled: '1',
         start_date: toShopTime(startDate),
         end_date: expiryDate ? toShopTime(expiryDate) : '',
         date_type: 'date_range',
-      }
+      })
     }]
   }
 
