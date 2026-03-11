@@ -30,7 +30,7 @@ async function wooPut(shop, endpoint, data) {
 }
 
 // Translate a term via Gemini
-async function translateTerm(geminiKey, sourceTerm, sourceLocale, targetLocale, existingTerms, model = 'gemini-2.0-flash') {
+async function translateTerm(geminiKey, sourceTerm, sourceLocale, targetLocale, existingTerms, model = 'gemini-2.0-flash-lite') {
   const prompt = `You are a WooCommerce product taxonomy translator.
 Source locale: ${sourceLocale}
 Target locale: ${targetLocale}
@@ -93,7 +93,7 @@ export default async (req) => {
     // Get user profile for AI settings
     const { data: profile } = await supabase.from('user_profiles').select('ai_taxonomy_enabled, ai_taxonomy_model, ai_taxonomy_threshold').eq('id', user.id).single()
     const aiEnabled = profile?.ai_taxonomy_enabled && geminiKey
-    const aiModel = profile?.ai_taxonomy_model || 'gemini-2.0-flash'
+    const aiModel = profile?.ai_taxonomy_model || 'gemini-2.0-flash-lite'
     const aiThreshold = profile?.ai_taxonomy_threshold || 0.85
 
     // Fetch source product from WooCommerce
