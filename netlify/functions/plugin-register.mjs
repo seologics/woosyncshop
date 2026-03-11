@@ -76,9 +76,9 @@ export default async (req) => {
   // Log it
   await supabase.from('system_logs').insert({
     level: 'info',
-    action: 'plugin-register',
+    function_name: 'plugin-register',
     message: `Companion plugin connected for shop "${shop.name}" (${site_url})`,
-    details: JSON.stringify({ shop_id: shop.id, user_id: shop.user_id, site_url }),
+    metadata: { shop_id: shop.id, user_id: shop.user_id, site_url },
   }).catch(() => {});
 
   return new Response(JSON.stringify({
