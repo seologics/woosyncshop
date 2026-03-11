@@ -72,10 +72,10 @@ export default async (req) => {
         updated_at: new Date().toISOString()
       };
       // Only overwrite API keys if a real value was provided
-      if (gemini_api_key)  upsertData.gemini_api_key  = gemini_api_key;
-      if (openai_api_key)  upsertData.openai_api_key  = openai_api_key;
-      if (tinypng_api_key) upsertData.tinypng_api_key = tinypng_api_key;
-      if (mollie_api_key)  upsertData.mollie_api_key  = mollie_api_key;
+      if (gemini_api_key?.trim())  upsertData.gemini_api_key  = gemini_api_key.trim();
+      if (openai_api_key?.trim())  upsertData.openai_api_key  = openai_api_key.trim();
+      if (tinypng_api_key?.trim()) upsertData.tinypng_api_key = tinypng_api_key.trim();
+      if (mollie_api_key?.trim())  upsertData.mollie_api_key  = mollie_api_key.trim();
       const { error: upsertErr } = await supabase.from('platform_settings').upsert(upsertData)
 
       if (upsertErr) {

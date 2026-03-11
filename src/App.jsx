@@ -8251,15 +8251,11 @@ const PlatformSettings = () => {
         const d = await res.json();
         setPs(p => ({
           ...p,
-          gemini_api_key: "",  // never load masked value — re-enter to change
-          gemini_api_key_set: !!(d.gemini_api_key),
-          tinypng_api_key: "",
-          tinypng_api_key_set: !!(d.tinypng_api_key),
-          mollie_api_key: "",
-          mollie_api_key_set: !!(d.mollie_api_key),
+          gemini_api_key: d.gemini_api_key || "",
+          tinypng_api_key: d.tinypng_api_key || "",
+          mollie_api_key: d.mollie_api_key || "",
           contact_notification_email: d.contact_notification_email || "",
-          openai_api_key: "",  // never load masked value
-          openai_api_key_set: !!(d.openai_api_key),
+          openai_api_key: d.openai_api_key || "",
           ai_provider_matching: d.ai_provider_matching || "gemini",
           ai_provider_translation: d.ai_provider_translation || "gemini",
           ai_provider_image: d.ai_provider_image || "gemini",
@@ -8279,12 +8275,7 @@ const PlatformSettings = () => {
     setSaving(true);
     try {
       const session = { access_token: await getToken() };
-      // Don't send empty API key fields — empty = "don't change existing value"
       const savePayload = { ...ps };
-      if (!savePayload.gemini_api_key)  delete savePayload.gemini_api_key;
-      if (!savePayload.openai_api_key)  delete savePayload.openai_api_key;
-      if (!savePayload.tinypng_api_key) delete savePayload.tinypng_api_key;
-      if (!savePayload.mollie_api_key)  delete savePayload.mollie_api_key;
       const saveRes = await fetch("/api/platform-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
@@ -8292,13 +8283,7 @@ const PlatformSettings = () => {
       });
       if (!saveRes.ok) { const e = await saveRes.json().catch(() => ({})); throw new Error(e.error || `HTTP ${saveRes.status}`); }
       // After save: mark keys as set and clear the input fields
-      setPs(prev => ({
-        ...prev,
-        gemini_api_key: "",  gemini_api_key_set:  !!(savePayload.gemini_api_key  || prev.gemini_api_key_set),
-        openai_api_key: "",  openai_api_key_set:  !!(savePayload.openai_api_key  || prev.openai_api_key_set),
-        tinypng_api_key: "", tinypng_api_key_set: !!(savePayload.tinypng_api_key || prev.tinypng_api_key_set),
-        mollie_api_key: "",  mollie_api_key_set:  !!(savePayload.mollie_api_key  || prev.mollie_api_key_set),
-      }));
+      // Keep fields as-is after save (values are already trimmed on server)
       setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
     finally { setSaving(false); }
@@ -8379,8 +8364,8 @@ const PlatformSettings = () => {
     } finally { setEanThresholdSaving(false); }
   };
 
-  const hasGemini = !!(ps.gemini_api_key || ps.gemini_api_key_set);
-  const hasOpenAI = !!(ps.openai_api_key || ps.openai_api_key_set);
+  const hasGemini = !!ps.gemini_api_key;
+  const hasOpenAI = !!ps.openai_api_key;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -8390,14 +8375,32 @@ const PlatformSettings = () => {
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🔑 AI API Keys</div>
         <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 14 }}>Voeg één of beide toe. Je kiest per use-case welke je gebruikt.</div>
         <div className="settings-2col">
-          <Field label="Google Gemini API Key" hint={ps.gemini_api_key ? "✓ Wordt opgeslagen" : ps.gemini_api_key_set ? "✓ Opgeslagen — voer opnieuw in om te wijzigen" : "Geen key → Gemini uitgeschakeld"}>
-            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder={ps.gemini_api_key_set ? "••••••••••• (ongewijzigd)" : "AIzaSy..."} />
+          <Field label="Google Gemini API Key" hint={hasGemini ? "✓ Ingesteld" : "Geen key → Gemini uitgeschakeld"}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="text" autoComplete="off" spellCheck={false} placeholder="AIzaSy..." style={{ fontFamily: "monospace", fontSize: 12 }} />
+              <Btn variant="ghost" size="sm" onClick={async () => {
+                if (!ps.gemini_api_key) return alert("Voer eerst een API key in");
+                const token = await getToken();
+                const r = await fetch("/api/test-api-key", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }, body: JSON.stringify({ provider: "gemini", key: ps.gemini_api_key.trim() }) });
+                const d = await r.json();
+                alert(d.ok ? "✅ " + d.message : "❌ " + d.error);
+              }}>🔌 Test</Btn>
+            </div>
           </Field>
           <Field label="OpenAI API Key" hint={hasOpenAI ? "✓ Ingesteld" : "Geen key → OpenAI use-cases uitgeschakeld"}>
-            <Inp value={ps.openai_api_key} onChange={e => setPs(p => ({ ...p, openai_api_key: e.target.value }))} type="password" placeholder="sk-..." />
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <Inp value={ps.openai_api_key} onChange={e => setPs(p => ({ ...p, openai_api_key: e.target.value }))} type="text" autoComplete="off" spellCheck={false} placeholder="sk-..." style={{ fontFamily: "monospace", fontSize: 12 }} />
+              <Btn variant="ghost" size="sm" onClick={async () => {
+                if (!ps.openai_api_key) return alert("Voer eerst een API key in");
+                const token = await getToken();
+                const r = await fetch("/api/test-api-key", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }, body: JSON.stringify({ provider: "openai", key: ps.openai_api_key.trim() }) });
+                const d = await r.json();
+                alert(d.ok ? "✅ " + d.message : "❌ " + d.error);
+              }}>🔌 Test</Btn>
+            </div>
           </Field>
-          <Field label="TinyPNG API Key" hint="Gebruikt voor afbeelding compressie na Gemini resize">
-            <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="password" placeholder="abcdef..." />
+          <Field label="TinyPNG API Key" hint={ps.tinypng_api_key ? "✓ Ingesteld" : "Gebruikt voor afbeelding compressie na Gemini resize"}>
+            <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="text" autoComplete="off" spellCheck={false} placeholder="abcdef..." style={{ fontFamily: "monospace", fontSize: 12 }} />
           </Field>
         </div>
       </div>
@@ -8453,8 +8456,8 @@ const PlatformSettings = () => {
       <div style={{ padding: 16, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>🔌 Mollie configuratie</div>
         <div className="settings-2col">
-          <Field label="Mollie API Key (Live)">
-            <Inp value={ps.mollie_api_key} onChange={e => setPs(p => ({ ...p, mollie_api_key: e.target.value }))} type="password" placeholder="live_..." />
+          <Field label="Mollie API Key (Live)" hint={ps.mollie_api_key ? "✓ Ingesteld" : ""}>
+            <Inp value={ps.mollie_api_key} onChange={e => setPs(p => ({ ...p, mollie_api_key: e.target.value }))} type="text" autoComplete="off" spellCheck={false} placeholder="live_..." style={{ fontFamily: "monospace", fontSize: 12 }} />
           </Field>
           <Field label="Webhook URL" hint="Automatisch ingesteld per betaling">
             <Inp value="https://woosyncshop.com/api/mollie-webhook" onChange={() => {}} style={{ opacity: 0.6 }} />
