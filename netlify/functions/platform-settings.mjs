@@ -21,7 +21,7 @@ export default async (req) => {
       }
       // Public fields (needed by TrackingInjector on frontend without auth)
       const publicFields = 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, fb_pixel_id, tt_pixel_id'
-      const adminFields = `${publicFields}, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email, openai_api_key, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation`
+      const adminFields = `${publicFields}, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email, openai_api_key, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization`
       const { data, error } = await supabase.from('platform_settings').select(isAdmin ? adminFields : publicFields).eq('id', 1).single()
       if (error) return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
       return new Response(JSON.stringify(data || {}), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -40,7 +40,7 @@ export default async (req) => {
         gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email,
         openai_api_key,
         ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
-        ai_model_matching, ai_model_translation,
+        ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization,
       } = body
 
       const changed = Object.entries({
@@ -52,7 +52,7 @@ export default async (req) => {
         openai_api_key: openai_api_key ? '***' : null,
         contact_notification_email,
         ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
-        ai_model_matching, ai_model_translation,
+        ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization,
       }).filter(([, v]) => v !== undefined).map(([k]) => k)
 
       // Build upsert payload — only include API key fields if explicitly provided
@@ -69,6 +69,8 @@ export default async (req) => {
         ai_provider_normalization: ai_provider_normalization || 'gemini',
         ai_model_matching: ai_model_matching || null,
         ai_model_translation: ai_model_translation || null,
+        ai_model_image: ai_model_image || null,
+        ai_model_normalization: ai_model_normalization || null,
         updated_at: new Date().toISOString()
       };
       // Only overwrite API keys if a real value was provided

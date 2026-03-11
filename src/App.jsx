@@ -8133,9 +8133,7 @@ const AI_USE_CASES = [
 const GEMINI_MODELS = [
   { value: "gemini-2.5-pro",        label: "gemini-2.5-pro (krachtigst)" },
   { value: "gemini-2.5-flash",      label: "gemini-2.5-flash (aanbevolen)" },
-  { value: "gemini-2.5-flash", label: "gemini-2.5-flash (standaard/snel)" },
-  { value: "gemini-2.5-pro",        label: "gemini-2.5-pro" },
-  { value: "gemini-2.5-flash",      label: "gemini-2.5-flash" },
+  { value: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite (snel/goedkoop)" },
 ];
 const OPENAI_MODELS = [
   { value: "gpt-5.4",              label: "gpt-5.4 (flagship)",          group: "GPT-5.4" },
@@ -8165,7 +8163,7 @@ const ProviderToggle = ({ value, onChange, geminiOnly = false }) => (
 
 const ModelSelect = ({ provider, value, onChange, compact = false }) => {
   const models = provider === "openai" ? OPENAI_MODELS : GEMINI_MODELS;
-  const defaultLabel = provider === "openai" ? "gpt-5.3 Instant (standaard)" : "gemini-2.0-flash (standaard)";
+  const defaultLabel = provider === "openai" ? "gpt-5.3 Instant (standaard)" : "gemini-2.5-flash (standaard)";
   // Group openai models
   const groups = provider === "openai"
     ? [...new Set(models.map(m => m.group))]
