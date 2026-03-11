@@ -3,15 +3,14 @@
 // Returns: { ads_connected, ads_accounts[], ga4_connected, ga4_properties[], sc_connected, sc_sites[], ... }
 
 import { createClient } from '@supabase/supabase-js';
-import jwt from 'jsonwebtoken';
 
-async function getUserFromToken(req) {
+async function getUserFromToken(req, supabase) {
   const auth  = req.headers.get('authorization') || '';
   const token = auth.replace('Bearer ', '');
   if (!token) throw new Error('No token');
-  const decoded = jwt.decode(token);
-  if (!decoded?.sub) throw new Error('Invalid token');
-  return decoded.sub; // user_id
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) throw new Error('Invalid token');
+  return user.id;
 }
 
 async function refreshToken(clientId, clientSecret, refreshToken) {
@@ -146,7 +145,6 @@ async function fetchSCSites(accessToken) {
 
 export default async (req) => {
   try {
-    const userId = await getUserFromToken(req);
     const url    = new URL(req.url);
     const shopId = url.searchParams.get('shop_id');
     if (!shopId) return new Response(JSON.stringify({ error: 'Missing shop_id' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -155,6 +153,8 @@ export default async (req) => {
       Netlify.env.get('SUPABASE_URL'),
       Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY'),
     );
+
+    const userId = await getUserFromToken(req, supabase);
 
     // Verify shop belongs to user
     const { data: shop, error: shopErr } = await supabase
