@@ -709,17 +709,36 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
 
   // ── Helper: apply WQM normalization to a product object ──────────────────────
   const applyWqmMeta = (fresh) => {
-    const metaArr = fresh.meta_data || [];
-    const getMeta = (key) => metaArr.find(m => m.key === key)?.value;
-    const wqmTiersRaw    = getMeta('_wqm_tiers');
-    const wqmSettingsRaw = getMeta('_wqm_settings');
+    const metaArr = Array.isArray(fresh.meta_data) ? fresh.meta_data : [];
+
+    // Helper: parse value - handles object, JSON string, or PHP serialized (best-effort)
+    const parseMetaValue = (raw) => {
+      if (!raw) return null;
+      if (typeof raw === 'object') return raw;
+      if (typeof raw === 'string') {
+        try { return JSON.parse(raw); } catch {}
+        // PHP serialized: a:2:{s:4:"type";s:5:"fixed";s:5:"tiers";a:1:{...}}
+        // We can't easily parse PHP serialized in JS, so return null
+      }
+      return null;
+    };
+
+    const getMeta = (key) => parseMetaValue(metaArr.find(m => m.key === key)?.value);
+    let wqmTiersRaw    = getMeta('_wqm_tiers');
+    let wqmSettingsRaw = getMeta('_wqm_settings');
+
+    console.log("[WQM applyWqmMeta] meta keys:", metaArr.map(m => m.key));
+    console.log("[WQM applyWqmMeta] _wqm_tiers parsed:", wqmTiersRaw);
 
     if (wqmTiersRaw && typeof wqmTiersRaw === 'object' && Array.isArray(wqmTiersRaw.tiers)) {
       fresh.wqm_tiers     = wqmTiersRaw.tiers.map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') }));
       fresh.wqm_tier_type = wqmTiersRaw.type || 'fixed';
     } else {
-      fresh.wqm_tiers     = Array.isArray(fresh.wqm_tiers) ? fresh.wqm_tiers : [];
-      fresh.wqm_tier_type = 'fixed';
+      // Do NOT overwrite if already populated (e.g. from a prior applyWqmMeta call)
+      if (!Array.isArray(fresh.wqm_tiers) || fresh.wqm_tiers.length === 0) {
+        fresh.wqm_tiers = [];
+      }
+      fresh.wqm_tier_type = fresh.wqm_tier_type || 'fixed';
     }
 
     if (wqmSettingsRaw && typeof wqmSettingsRaw === 'object') {
@@ -732,8 +751,8 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
     } else {
       fresh.wqm_settings = {
         ...(fresh.wqm_settings || {}),
-        step: '',
-        dyo_rows: [],
+        step: fresh.wqm_settings?.step || '',
+        dyo_rows: fresh.wqm_settings?.dyo_rows || [],
         tiered_pricing_type: fresh.wqm_tier_type || 'fixed',
       };
     }
@@ -762,8 +781,12 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
             body: JSON.stringify({ shop_id: activeSite.id, endpoint: `products/${product.id}`, method: "GET" }),
           });
           const full = await res.json();
+          // ── DEBUG: log what meta_data comes back ──────────────────────────────
+          console.log("[WQM debug] full product meta_data:", full?.meta_data);
+          const wqmRaw = (full?.meta_data || []).find(m => m.key === '_wqm_tiers');
+          console.log("[WQM debug] _wqm_tiers raw:", wqmRaw);
+          // ─────────────────────────────────────────────────────────────────────
           if (full && full.id) {
-            // Merge full product data (has meta_data) over the list snapshot
             const merged = { ...fresh, ...full, pending_changes: fresh.pending_changes || {} };
             setP(prev => prev ? applyWqmMeta({ ...prev, ...merged }) : applyWqmMeta(merged));
           }
