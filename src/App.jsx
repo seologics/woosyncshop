@@ -6276,9 +6276,17 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             delete settingsToSave.dyo_rows;
             delete settingsToSave.tiered_pricing_type;
 
+            // WQM's woocommerce_process_product_meta hook (admin-only, doesn't fire on REST)
+            // sets _price = first tier amt so its frontend JS can use it as the base price
+            // for dynamic qty-based price updates. We must replicate this here manually.
+            const firstTierPrice = tiersToSave.length > 0
+              ? [...tiersToSave].sort((a, b) => a.qty - b.qty)[0].amt
+              : null;
+
             payload.meta_data = [
               { key: '_wqm_tiers',    value: tiersToSave.length > 0 ? { type: tierType, tiers: tiersToSave } : null },
               { key: '_wqm_settings', value: settingsToSave },
+              ...(firstTierPrice !== null && tierType === 'fixed' ? [{ key: '_price', value: firstTierPrice }] : []),
             ];
 
           }
