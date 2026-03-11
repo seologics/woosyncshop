@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
+export const config = { path: '/api/analytics-insights' };
+
 
 function writeLog(supabase, level, message, meta = {}) {
   try { supabase.from("system_logs").insert({
@@ -156,7 +158,7 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ insights }), { headers });
 
   } catch (err) {
-    await writeLog(supabase, "error", "analytics-insights failed", { error: err.message });
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
+    console.error("analytics-insights error:", err.message);
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
