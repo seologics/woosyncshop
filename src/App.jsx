@@ -5049,6 +5049,16 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
   const [pushing, setPushing] = useState(false);
   const [noShopModal, setNoShopModal] = useState(null); // "sync"|"push"|null
 
+  // Close all dropdowns when user alt-tabs away and returns.
+  // avatarOpen creates a fixed inset:0 invisible backdrop — if left open on alt-tab,
+  // it silently blocks all clicks when the user comes back (no console errors).
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!document.hidden) { setAvatarOpen(false); setSiteOpen(false); }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
   const handleSync = async () => {
     if (!sites?.length) { setNoShopModal("sync"); return; }
     setSyncing(true);
