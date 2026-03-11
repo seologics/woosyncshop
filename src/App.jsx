@@ -2266,7 +2266,7 @@ const CouponManager = ({ activeSite, user }) => {
         const res = await fetch("/api/woo", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ shopId: activeSite.id, endpoint: "system_status", method: "GET" }),
+          body: JSON.stringify({ shop_id: activeSite.id, endpoint: "system_status", method: "GET" }),
         });
         if (!res.ok) { setHasAdvCoupons(false); return; }
         const d = await res.json();
@@ -5052,9 +5052,9 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 
 // ─── AnalyticsView ────────────────────────────────────────────────────────────
 function AnalyticsView({ shops, user }) {
-  const [selectedShopForConnections, setSelectedShopForConnections] = React.useState("all");
+  const [selectedShopForConnections, setSelectedShopForConnections] = useState("all");
 
-  const googleConnections = React.useMemo(() => {
+  const googleConnections = useMemo(() => {
     if (selectedShopForConnections === "all") {
       return {
         ads: (shops || []).some(s => s.google_ads_connected),
@@ -5152,13 +5152,13 @@ function AnalyticsView({ shops, user }) {
 
   useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
 
-  const displayData = React.useMemo(() => {
+  const displayData = useMemo(() => {
     if (!data) return null;
     if (selectedShop === "all") return data.merged;
     return data.shops?.find(s => s.shopId === selectedShop) || data.merged;
   }, [data, selectedShop]);
 
-  const chartData = React.useMemo(() => {
+  const chartData = useMemo(() => {
     if (!displayData?.byDate) return [];
     return displayData.byDate.map(d => ({
       label: new Date(d.date).toLocaleDateString("nl-NL", { day: "numeric", month: "short" }),
@@ -5167,7 +5167,7 @@ function AnalyticsView({ shops, user }) {
     }));
   }, [displayData]);
 
-  const sourceDonutData = React.useMemo(() => {
+  const sourceDonutData = useMemo(() => {
     if (!displayData?.bySource) return [];
     const grouped = {};
     for (const s of displayData.bySource) {
@@ -5181,7 +5181,7 @@ function AnalyticsView({ shops, user }) {
       .map(g => ({ ...g, ...(SOURCE_GROUPS[g.group] || SOURCE_GROUPS.other) }));
   }, [displayData]);
 
-  const filteredSources = React.useMemo(() => {
+  const filteredSources = useMemo(() => {
     if (!displayData?.bySource) return [];
     if (!selectedSourceGroup) return displayData.bySource;
     return displayData.bySource.filter(s => s.group === selectedSourceGroup);

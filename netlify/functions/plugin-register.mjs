@@ -9,12 +9,10 @@ export default async (req) => {
     });
   }
 
-  // Top-level try/catch — no unhandled exceptions → no 502s
   try {
     let body;
     try {
-      const text = await req.text();
-      body = JSON.parse(text);
+      body = JSON.parse(await req.text());
     } catch {
       return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
         status: 400, headers: { 'Content-Type': 'application/json' },
@@ -34,7 +32,7 @@ export default async (req) => {
       Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY'),
     );
 
-    // Find the shop by token
+    // Find shop by token
     const { data: shop, error: findError } = await supabase
       .from('shops')
       .select('id, user_id, name, site_url')
@@ -47,12 +45,12 @@ export default async (req) => {
       });
     }
 
-    // Update the shop with the info the plugin provides
+    // Build updates
     const updates = {
       plugin_connected:    true,
       plugin_connected_at: new Date().toISOString(),
+      site_url:            site_url.replace(/\/$/, ''),
     };
-    if (site_url)        updates.site_url        = site_url.replace(/\/$/, '');
     if (consumer_key)    updates.consumer_key    = consumer_key;
     if (consumer_secret) updates.consumer_secret = consumer_secret;
     if (site_id)         updates.site_id         = site_id;
@@ -69,13 +67,15 @@ export default async (req) => {
       });
     }
 
-    // Log it — correct column names, swallow any log failure
-    await supabase.from('system_logs').insert({
-      level:         'info',
-      function_name: 'plugin-register',
-      message:       `Companion plugin connected for shop "${shop.name}" (${site_url})`,
-      metadata:      { shop_id: shop.id, user_id: shop.user_id, site_url },
-    }).catch(() => {});
+    // Log — use try/catch, NOT .catch() (Supabase v2 returns a thenable, not a real Promise)
+    try {
+      await supabase.from('system_logs').insert({
+        level:         'info',
+        function_name: 'plugin-register',
+        message:       `Companion plugin connected for shop "${shop.name}" (${site_url})`,
+        metadata:      { shop_id: shop.id, user_id: shop.user_id, site_url },
+      });
+    } catch { /* log failures are non-fatal */ }
 
     return new Response(JSON.stringify({
       success:   true,
@@ -87,7 +87,6 @@ export default async (req) => {
     });
 
   } catch (err) {
-    // Catch-all — return the actual error message instead of Netlify 502
     return new Response(JSON.stringify({ error: 'Internal error: ' + err.message }), {
       status: 500, headers: { 'Content-Type': 'application/json' },
     });
