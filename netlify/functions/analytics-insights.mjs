@@ -1,13 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 
-export const config = { path: '/api/analytics-insights' };
-
-
 function writeLog(supabase, level, message, meta = {}) {
   try { supabase.from("system_logs").insert({
     level, message, function_name: "analytics-insights",
     metadata: meta, created_at: new Date().toISOString(),
-  }); } catch {} 
+  }); } catch {}
 }
 
 function buildPrompt(data) {
@@ -89,10 +86,7 @@ Antwoord ALLEEN met de JSON array, geen tekst eromheen.`;
 }
 
 export default async function handler(req) {
-  const SUPABASE_URL = Netlify.env.get("SUPABASE_URL");
-  const SUPABASE_SERVICE_ROLE_KEY = Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
+  const supabase = createClient(Netlify.env.get("SUPABASE_URL"), Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY"));
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
@@ -158,7 +152,7 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ insights }), { headers });
 
   } catch (err) {
-    console.error("analytics-insights error:", err.message);
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+    writeLog(supabase, "error", "analytics-insights failed", { error: err.message });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
   }
 }
