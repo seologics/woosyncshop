@@ -8753,11 +8753,10 @@ export default function App() {
         }
         let signOutTimer = null;
         supabase.auth.onAuthStateChange(async (_event, session) => {
-          // Always update token cache immediately — all handlers rely on this
-          setCachedToken(session?.access_token || null);
-
           if (session?.user) {
-            // Cancel any pending sign-out (tab switch fires SIGNED_OUT then TOKEN_REFRESHED)
+            // Real session — update token cache and cancel any pending sign-out
+            // (tab switch fires SIGNED_OUT then TOKEN_REFRESHED within ~200ms)
+            setCachedToken(session.access_token || null);
             if (signOutTimer) { clearTimeout(signOutTimer); signOutTimer = null; }
             const u = session.user;
             setUser({ id: u.id, name: u.user_metadata?.full_name || u.email, email: u.email });
@@ -8778,10 +8777,12 @@ export default function App() {
             } catch {}
             setView("app");
           } else {
-            // Debounce SIGNED_OUT by 1 second — Supabase v2 fires SIGNED_OUT during token
-            // refresh and on tab switch. If TOKEN_REFRESHED arrives within 1s, cancel the sign-out.
+            // SIGNED_OUT — do NOT clear the token cache yet. Supabase fires SIGNED_OUT during
+            // tab switch and token refresh; TOKEN_REFRESHED will arrive within ~1s and cancel this.
+            // Clearing the cache immediately causes getToken() to hang on the lock and freeze buttons.
             signOutTimer = setTimeout(() => {
               signOutTimer = null;
+              setCachedToken(null); // only clear cache once we're sure it's a real sign-out
               setUser(null);
               setView("landing");
             }, 1000);
