@@ -1,5 +1,5 @@
 import { signIn, signUp, signOut, getSession, getUser, supabase, getToken, setCachedToken } from "./lib/supabase.js";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
@@ -733,7 +733,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               <div key={v.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
                 <div style={{ padding: "10px 14px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 10 }}>
                   <Badge color="default">#{v.id}</Badge>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes || {}).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
                   <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dm)" }}>SKU: {v.sku}</span>
                 </div>
                 <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -829,7 +829,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                    {attr.terms.map(term => (
+                    {(attr.terms || []).map(term => (
                       <button key={term} onClick={() => {
                         const newVals = pa.values.includes(term) ? pa.values.filter(v => v !== term) : [...pa.values, term];
                         setAttr({ ...pa, values: newVals });
@@ -5052,9 +5052,9 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 
 // ─── AnalyticsView ────────────────────────────────────────────────────────────
 function AnalyticsView({ shops, user }) {
-  const [selectedShopForConnections, setSelectedShopForConnections] = useState("all");
+  const [selectedShopForConnections, setSelectedShopForConnections] = React.useState("all");
 
-  const googleConnections = useMemo(() => {
+  const googleConnections = React.useMemo(() => {
     if (selectedShopForConnections === "all") {
       return {
         ads: (shops || []).some(s => s.google_ads_connected),
@@ -5084,7 +5084,6 @@ function AnalyticsView({ shops, user }) {
     ai:       { label: "AI zoekmachines", color: "#F472B6", icon: "🤖" },
     email:    { label: "E-mail",          color: "#A78BFA", icon: "📧" },
     other:    { label: "Overig",          color: "#94A3B8", icon: "❓" },
-    admin:    { label: "Intern / Admin",   color: "#CBD5E1", icon: "🖥️" },
   };
 
   const SHOP_COLORS = ["#6E6EF7", "#34D399", "#60A5FA", "#F59E0B", "#F472B6", "#A78BFA"];
@@ -5100,7 +5099,6 @@ function AnalyticsView({ shops, user }) {
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
   const [loading, setLoading]                 = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
-  const [insightsUnavailable, setInsightsUnavailable] = useState(false);
   const [error, setError]                     = useState(null);
   const [data, setData]                       = useState(null);
   const [insights, setInsights]               = useState(null);
@@ -5133,7 +5131,7 @@ function AnalyticsView({ shops, user }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const fetchInsights = useCallback(async () => {
-    if (!data || insightsUnavailable) return;
+    if (!data) return;
     setInsightsLoading(true);
     try {
       const token = await getToken();
@@ -5142,11 +5140,6 @@ function AnalyticsView({ shops, user }) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
       });
-      if (res.status === 400) {
-        // Gemini key not configured — silently disable, no console spam
-        setInsightsUnavailable(true);
-        return;
-      }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setInsights(json.insights);
@@ -5155,17 +5148,17 @@ function AnalyticsView({ shops, user }) {
     } finally {
       setInsightsLoading(false);
     }
-  }, [data, range, insightsUnavailable]);
+  }, [data, range]);
 
-  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data]);
+  useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
 
-  const displayData = useMemo(() => {
+  const displayData = React.useMemo(() => {
     if (!data) return null;
     if (selectedShop === "all") return data.merged;
     return data.shops?.find(s => s.shopId === selectedShop) || data.merged;
   }, [data, selectedShop]);
 
-  const chartData = useMemo(() => {
+  const chartData = React.useMemo(() => {
     if (!displayData?.byDate) return [];
     return displayData.byDate.map(d => ({
       label: new Date(d.date).toLocaleDateString("nl-NL", { day: "numeric", month: "short" }),
@@ -5174,7 +5167,7 @@ function AnalyticsView({ shops, user }) {
     }));
   }, [displayData]);
 
-  const sourceDonutData = useMemo(() => {
+  const sourceDonutData = React.useMemo(() => {
     if (!displayData?.bySource) return [];
     const grouped = {};
     for (const s of displayData.bySource) {
@@ -5188,7 +5181,7 @@ function AnalyticsView({ shops, user }) {
       .map(g => ({ ...g, ...(SOURCE_GROUPS[g.group] || SOURCE_GROUPS.other) }));
   }, [displayData]);
 
-  const filteredSources = useMemo(() => {
+  const filteredSources = React.useMemo(() => {
     if (!displayData?.bySource) return [];
     if (!selectedSourceGroup) return displayData.bySource;
     return displayData.bySource.filter(s => s.group === selectedSourceGroup);
