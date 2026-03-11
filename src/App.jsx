@@ -1926,7 +1926,7 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const otherSites = sites.filter(s => s.id !== activeSite?.id);
   const matchModeLabel = { sku: "🔑 SKU", attribute: "🏷 Attribuut", manual: "🔍 Handmatig", ai: "🤖 AI" };
 
-  // ConnectCTA is defined at module level below
+  // ConnectCTA defined at module level
 
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
@@ -2289,17 +2289,11 @@ const CouponManager = ({ activeSite, user }) => {
     if (!activeSite) return;
     setHistoryLoading(true);
     try {
-      const { data } = await supabase
-        .from("coupons")
-        .select("*")
-        .eq("shop_id", activeSite.id)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const { data } = await supabase.from("coupons").select("*").eq("shop_id", activeSite.id).order("created_at", { ascending: false }).limit(20);
       setHistory(data || []);
-    } catch { /* non-fatal */ }
+    } catch {}
     finally { setHistoryLoading(false); }
   };
-
   useEffect(() => { loadHistory(); }, [activeSite?.id]);
 
   const deleteCoupon = async (c) => {
@@ -2311,7 +2305,7 @@ const CouponManager = ({ activeSite, user }) => {
         body: JSON.stringify({ coupon_db_id: c.id, woo_coupon_id: c.woo_coupon_id, shop_id: c.shop_id }),
       });
       setHistory(h => h.filter(x => x.id !== c.id));
-    } catch { /* non-fatal */ }
+    } catch {}
   };
 
   const generateCode = () => {
@@ -2424,8 +2418,6 @@ const CouponManager = ({ activeSite, user }) => {
           ✗ {result.error}
         </div>
       )}
-
-      {/* Coupon history */}
       {(history.length > 0 || historyLoading) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 8 }}>
@@ -2441,17 +2433,14 @@ const CouponManager = ({ activeSite, user }) => {
                   {c.discount_type === "percent" ? `${c.amount}%` : `€${c.amount}`} korting
                   {c.expires_at && <> · {expired ? "Verlopen" : "Vervalt"} {new Date(c.expires_at).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
                 </span>
-                {c.coupon_url && !expired && (
-                  <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.coupon_url).catch(() => {})}>📋 URL</Btn>
-                )}
+                {c.coupon_url && !expired && <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.coupon_url).catch(() => {})}>📋 URL</Btn>}
                 <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.code).catch(() => {})}>📋</Btn>
-                <Btn variant="ghost" size="sm" style={{ color: "var(--re)", opacity: 0.7 }} onClick={() => { if (window.confirm(`Kortingscode ${c.code} verwijderen uit WooCommerce?`)) deleteCoupon(c); }}>🗑</Btn>
+                <Btn variant="ghost" size="sm" style={{ color: "var(--re)", opacity: 0.7 }} onClick={() => { if (window.confirm(`Kortingscode ${c.code} verwijderen?`)) deleteCoupon(c); }}>🗑</Btn>
               </div>
             );
           })}
         </div>
       )}
-
       {/* Coupon form */}
       {!result?.ok && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -5330,10 +5319,13 @@ function AnalyticsView({ shops, user }) {
   if (!d) return null;
 
   const kpis = [
-    { label: "Omzet",            value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
-    { label: "Bestellingen",     value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
-    { label: "Gem. orderwaarde", value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
-    { label: "Terugboekingen",   value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
+    { label: "Omzet (excl. btw)",  value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
+    { label: "Bestellingen",       value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
+    { label: "Gem. orderwaarde",   value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
+    { label: "Terugboekingen",     value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
+    { label: "Kortingen toegepast", value: fmt(d.summary.totalDiscount || 0), icon: "🏷", color: "var(--am)" },
+    { label: "Totaal btw",         value: fmt(d.summary.totalTax || 0),      icon: "🧾", color: "var(--mx)" },
+    { label: "Verzendkosten",      value: fmt(d.summary.totalShipping || 0), icon: "🚚", color: "#60A5FA" },
   ];
 
   const insightTypeStyle = {
@@ -5511,7 +5503,7 @@ function AnalyticsView({ shops, user }) {
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.revenue)}</div>
-                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders} orders</div>
+                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders}x verkocht</div>
                     </div>
                   </div>
                   <div style={{ height: 3, borderRadius: 99, background: "var(--b1)", overflow: "hidden" }}>

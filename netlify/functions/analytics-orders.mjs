@@ -43,6 +43,9 @@ function parseSource(meta) {
   } else if (sourceType === "email" || medium === "email") {
     sourceLabel = "E-mail";
     sourceGroup = "email";
+  } else if (sourceType === "admin" || sourceType === "typein") {
+    sourceLabel = "Intern / Admin";
+    sourceGroup = "admin";
   } else if (utmSource) {
     sourceLabel = `Bron: ${capitalise(utmSource)}`;
     sourceGroup = isAiEngine(utmSource) ? "ai" : "other";
@@ -94,7 +97,8 @@ async function fetchAllOrders(shop, after, before) {
   while (true) {
     const batch = await wooFetch(shop, "orders", {
       after, before,
-      per_page: "100", page: String(page), _fields: "id,status,total,date_created,line_items,meta_data",
+      per_page: "100", page: String(page),
+      _fields: "id,status,total,total_tax,discount_total,shipping_total,date_created,line_items,meta_data",
     });
     if (!batch.length) break;
     allOrders = allOrders.concat(batch);
@@ -107,16 +111,29 @@ async function fetchAllOrders(shop, after, before) {
 
 function aggregateOrders(orders, shopId, shopName) {
   const byDate = {}, bySource = {}, byProduct = {}, byCampaign = {}, byHour = {};
-  let totalRevenue = 0, totalOrders = 0, totalRefunds = 0;
+  let totalRevenue = 0, totalOrders = 0, totalRefunds = 0,
+      totalDiscount = 0, totalTax = 0, totalShipping = 0;
 
+  const PAID = new Set(["completed", "processing"]);
   for (const order of orders) {
-    const revenue = parseFloat(order.total) || 0;
+    if (!PAID.has(order.status)) continue; // skip unpaid/cancelled/refunded
+
+    // Revenue = order total excluding tax (net revenue customer paid)
+    const total    = parseFloat(order.total)          || 0;
+    const tax      = parseFloat(order.total_tax)      || 0;
+    const discount = parseFloat(order.discount_total) || 0;
+    const shipping = parseFloat(order.shipping_total) || 0;
+    const revenue  = total - tax; // excl. tax
+
     const date = order.date_created.split("T")[0];
     const hour = parseInt(order.date_created.split("T")[1]?.split(":")[0] || "0");
     const src = parseSource(order.meta_data || []);
     const isRefund = order.status === "refunded";
     if (isRefund) totalRefunds++;
-    totalRevenue += revenue;
+    totalRevenue  += revenue;
+    totalDiscount += discount;
+    totalTax      += tax;
+    totalShipping += shipping;
     totalOrders++;
 
     // By date
@@ -139,10 +156,10 @@ function aggregateOrders(orders, shopId, shopName) {
     for (const item of order.line_items || []) {
       const pname = item.name;
       const prev = bySource[sk].products[pname] || { revenue: 0, orders: 0 };
-      bySource[sk].products[pname] = { revenue: prev.revenue + parseFloat(item.subtotal || 0), orders: prev.orders + item.quantity };
+      bySource[sk].products[pname] = { revenue: prev.revenue + parseFloat(item.total || 0), orders: prev.orders + item.quantity };
 
       if (!byProduct[pname]) byProduct[pname] = { name: pname, revenue: 0, orders: 0, sources: {} };
-      byProduct[pname].revenue += parseFloat(item.subtotal || 0);
+      byProduct[pname].revenue += parseFloat(item.total || 0);
       byProduct[pname].orders += item.quantity;
       byProduct[pname].sources[src.sourceGroup] = (byProduct[pname].sources[src.sourceGroup] || 0) + 1;
     }
@@ -157,7 +174,8 @@ function aggregateOrders(orders, shopId, shopName) {
 
   return {
     shopId, shopName,
-    summary: { totalRevenue, totalOrders, totalRefunds, avgOrderValue: totalOrders ? totalRevenue / totalOrders : 0 },
+    summary: { totalRevenue, totalOrders, totalRefunds, totalDiscount, totalTax, totalShipping,
+               avgOrderValue: totalOrders ? totalRevenue / totalOrders : 0 },
     byDate:     Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)),
     bySource:   Object.values(bySource).sort((a, b) => b.revenue - a.revenue),
     byProduct:  Object.values(byProduct).sort((a, b) => b.revenue - a.revenue).slice(0, 20),
@@ -169,7 +187,7 @@ function aggregateOrders(orders, shopId, shopName) {
 function mergeShopData(shopResults) {
   const merged = {
     shopId: "all", shopName: "Alle shops",
-    summary: { totalRevenue: 0, totalOrders: 0, totalRefunds: 0, avgOrderValue: 0 },
+    summary: { totalRevenue: 0, totalOrders: 0, totalRefunds: 0, totalDiscount: 0, totalTax: 0, totalShipping: 0, avgOrderValue: 0 },
     byDate: {}, bySource: {}, byProduct: {}, byCampaign: {}, byHour: {},
   };
 
@@ -177,6 +195,9 @@ function mergeShopData(shopResults) {
     merged.summary.totalRevenue  += r.summary.totalRevenue;
     merged.summary.totalOrders   += r.summary.totalOrders;
     merged.summary.totalRefunds  += r.summary.totalRefunds;
+    merged.summary.totalDiscount += r.summary.totalDiscount || 0;
+    merged.summary.totalTax      += r.summary.totalTax      || 0;
+    merged.summary.totalShipping += r.summary.totalShipping || 0;
 
     for (const d of r.byDate) {
       merged.byDate[d.date] = merged.byDate[d.date]
