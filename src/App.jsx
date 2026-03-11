@@ -6258,19 +6258,26 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
           // WQM meta_data (save if shop has WQM)
           if (updated.wqm_tiers !== undefined || updated.wqm_settings !== undefined) {
             const tierType = updated.wqm_settings?.tiered_pricing_type || updated.wqm_tier_type || 'fixed';
+            // Normalise price: accept both "16,89" (Dutch) and "16.89" before converting to Number
+            const parseWqmPrice = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
             const tiersToSave = (updated.wqm_tiers || [])
               .filter(t => t.qty)
-              .map(t => ({ qty: Number(t.qty), amt: Number(t.price) }));
+              .map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price) }));
+
+            // Preserve ALL original _wqm_settings fields — only override the ones we explicitly manage.
+            // Writing only a fixed subset would silently delete any WQM field we don't know about,
+            // and converting absent values to '' can corrupt max_qty / min_qty enforcement.
+            const origSettings = updated.wqm_settings || {};
             const settingsToSave = {
-              min_qty:         updated.wqm_settings?.min_qty || '',
-              max_qty:         updated.wqm_settings?.max_qty || '',
-              default_qty:     updated.wqm_settings?.default_qty || '',
-              step_interval:   updated.wqm_settings?.step || '',
-              qty_design:      updated.wqm_settings?.qty_design || '',
-              title:           updated.wqm_settings?.title || '',
-              variant_selector: updated.wqm_settings?.variant_selector || false,
-              qty_design_tiers: updated.wqm_settings?.dyo_rows || [],
+              ...origSettings,                           // keep every original key intact
+              step_interval: updated.wqm_settings?.step || origSettings.step_interval || '',
+              qty_design_tiers: updated.wqm_settings?.dyo_rows ?? origSettings.qty_design_tiers ?? [],
             };
+            // Remove UI-only aliases that must NOT be written to WooCommerce meta
+            delete settingsToSave.step;
+            delete settingsToSave.dyo_rows;
+            delete settingsToSave.tiered_pricing_type;
+
             payload.meta_data = [
               { key: '_wqm_tiers',    value: tiersToSave.length > 0 ? { type: tierType, tiers: tiersToSave } : null },
               { key: '_wqm_settings', value: settingsToSave },
@@ -6297,10 +6304,14 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
               // WQM variation meta
               if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
                 const vTierType = v.wqm_settings?.tiered_pricing_type || v.wqm_tier_type || 'fixed';
-                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: Number(t.price) }));
+                const parseWqmPrice = (val) => parseFloat(String(val ?? '').replace(',', '.')) || 0;
+                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price) }));
+                const vOrigSettings = v.wqm_settings || {};
+                const vSettings = { ...vOrigSettings, step_interval: v.wqm_settings?.step || vOrigSettings.step_interval || '', qty_design_tiers: v.wqm_settings?.dyo_rows ?? vOrigSettings.qty_design_tiers ?? [] };
+                delete vSettings.step; delete vSettings.dyo_rows; delete vSettings.tiered_pricing_type;
                 varPayload.meta_data = [
                   { key: '_wqm_tiers', value: vTiers.length > 0 ? { type: vTierType, tiers: vTiers } : null },
-                  { key: '_wqm_settings', value: { min_qty: v.wqm_settings?.min_qty || '', max_qty: v.wqm_settings?.max_qty || '', default_qty: v.wqm_settings?.default_qty || '', step_interval: v.wqm_settings?.step || '' } },
+                  { key: '_wqm_settings', value: vSettings },
                 ];
               }
               return wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
