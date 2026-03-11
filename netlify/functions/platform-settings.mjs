@@ -55,14 +55,14 @@ export default async (req) => {
         ai_model_matching, ai_model_translation,
       }).filter(([, v]) => v !== undefined).map(([k]) => k)
 
-      const { error: upsertErr } = await supabase.from('platform_settings').upsert({
+      // Build upsert payload — only include API key fields if explicitly provided
+      // (empty/missing = preserve existing value in DB)
+      const upsertData = {
         id: 1,
         gtm_id: gtm_id || null, ga4_id: ga4_id || null,
         gads_conversion_id: gads_conversion_id || null, gads_conversion_label: gads_conversion_label || null,
         fb_pixel_id: fb_pixel_id || null, tt_pixel_id: tt_pixel_id || null,
-        gemini_api_key: gemini_api_key || null, tinypng_api_key: tinypng_api_key || null,
-        mollie_api_key: mollie_api_key || null, contact_notification_email: contact_notification_email || null,
-        openai_api_key: openai_api_key || null,
+        contact_notification_email: contact_notification_email || null,
         ai_provider_matching: ai_provider_matching || 'gemini',
         ai_provider_translation: ai_provider_translation || 'gemini',
         ai_provider_image: ai_provider_image || 'gemini',
@@ -70,7 +70,13 @@ export default async (req) => {
         ai_model_matching: ai_model_matching || null,
         ai_model_translation: ai_model_translation || null,
         updated_at: new Date().toISOString()
-      })
+      };
+      // Only overwrite API keys if a real value was provided
+      if (gemini_api_key)  upsertData.gemini_api_key  = gemini_api_key;
+      if (openai_api_key)  upsertData.openai_api_key  = openai_api_key;
+      if (tinypng_api_key) upsertData.tinypng_api_key = tinypng_api_key;
+      if (mollie_api_key)  upsertData.mollie_api_key  = mollie_api_key;
+      const { error: upsertErr } = await supabase.from('platform_settings').upsert(upsertData)
 
       if (upsertErr) {
         await log(supabase, 'error', 'Platform settings save failed', { error: upsertErr.message })

@@ -727,9 +727,6 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
     let wqmTiersRaw    = getMeta('_wqm_tiers');
     let wqmSettingsRaw = getMeta('_wqm_settings');
 
-    console.log("[WQM applyWqmMeta] meta keys:", metaArr.map(m => m.key));
-    console.log("[WQM applyWqmMeta] _wqm_tiers FULL:", JSON.stringify(wqmTiersRaw));
-    console.log("[WQM applyWqmMeta] _wqm_settings FULL:", JSON.stringify(wqmSettingsRaw));
 
     // tiers may be a real array OR a PHP-indexed object {0:{…},1:{…}} — normalise both
     const tiersArr = wqmTiersRaw?.tiers
@@ -5344,6 +5341,7 @@ function AnalyticsView({ shops, user }) {
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
   const [loading, setLoading]                 = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsUnavailable, setInsightsUnavailable] = useState(false);
   const [error, setError]                     = useState(null);
   const [data, setData]                       = useState(null);
   const [insights, setInsights]               = useState(null);
@@ -5356,6 +5354,7 @@ function AnalyticsView({ shops, user }) {
     setLoading(true);
     setError(null);
     setInsights(null);
+    setInsightsUnavailable(false);
     try {
       const token = await getToken();
       const params = new URLSearchParams({ range });
@@ -5396,12 +5395,16 @@ function AnalyticsView({ shops, user }) {
       setInsights(json.insights);
     } catch (e) {
       console.error("Insights error:", e);
+      // If the key is invalid, stop retrying automatically
+      if (e.message?.includes("not valid") || e.message?.includes("API_KEY_INVALID") || e.message?.includes("niet geconfigureerd")) {
+        setInsightsUnavailable(true);
+      }
     } finally {
       setInsightsLoading(false);
     }
   }, [data, range]);
 
-  useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
+  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data, insightsUnavailable]);
 
   const displayData = useMemo(() => {
     if (!data) return null;
@@ -5969,8 +5972,12 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ shop_id: shopId, endpoint, method, data }),
     });
-    if (!res.ok) throw new Error(`WooCommerce ${method} ${endpoint} failed: HTTP ${res.status}`);
-    return res.json();
+    if (!res.ok) {
+      let errMsg = `WooCommerce ${method} ${endpoint} mislukt: HTTP ${res.status}`;
+      try { const e = await res.json(); errMsg = e?.message || e?.error || errMsg; } catch {}
+      throw new Error(errMsg);
+    }
+    try { return await res.json(); } catch { return {}; }
   };
 
   const notify = (msg, type = "success") => {
@@ -6032,13 +6039,16 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
         const attrs = Array.isArray(rawAttrs) ? rawAttrs : [];
         const cats = Array.isArray(rawCats) ? rawCats : [];
 
-        // Fetch terms for each attribute in parallel
-        const attrTermsPromises = attrs.map(attr =>
-          wooCall(shopId, `products/attributes/${attr.id}/terms?per_page=100`)
-            .then(terms => ({ ...attr, terms: Array.isArray(terms) ? terms.map(t => t.name) : [] }))
-            .catch(() => ({ ...attr, terms: [] }))
-        );
-        const attrsWithTerms = await Promise.all(attrTermsPromises);
+        // Fetch terms for each attribute sequentially to avoid overwhelming WooCommerce
+        const attrsWithTerms = [];
+        for (const attr of attrs) {
+          try {
+            const terms = await wooCall(shopId, `products/attributes/${attr.id}/terms?per_page=100`);
+            attrsWithTerms.push({ ...attr, terms: Array.isArray(terms) ? terms.map(t => t.name) : [] });
+          } catch {
+            attrsWithTerms.push({ ...attr, terms: [] });
+          }
+        }
 
         setShopCache(prev => ({
           ...prev,
@@ -8241,11 +8251,15 @@ const PlatformSettings = () => {
         const d = await res.json();
         setPs(p => ({
           ...p,
-          gemini_api_key: d.gemini_api_key || "",
-          tinypng_api_key: d.tinypng_api_key || "",
-          mollie_api_key: d.mollie_api_key || "",
+          gemini_api_key: "",  // never load masked value — re-enter to change
+          gemini_api_key_set: !!(d.gemini_api_key),
+          tinypng_api_key: "",
+          tinypng_api_key_set: !!(d.tinypng_api_key),
+          mollie_api_key: "",
+          mollie_api_key_set: !!(d.mollie_api_key),
           contact_notification_email: d.contact_notification_email || "",
-          openai_api_key: d.openai_api_key || "",
+          openai_api_key: "",  // never load masked value
+          openai_api_key_set: !!(d.openai_api_key),
           ai_provider_matching: d.ai_provider_matching || "gemini",
           ai_provider_translation: d.ai_provider_translation || "gemini",
           ai_provider_image: d.ai_provider_image || "gemini",
@@ -8265,10 +8279,16 @@ const PlatformSettings = () => {
     setSaving(true);
     try {
       const session = { access_token: await getToken() };
+      // Don't send empty API key fields — empty = "don't change existing value"
+      const savePayload = { ...ps };
+      if (!savePayload.gemini_api_key)  delete savePayload.gemini_api_key;
+      if (!savePayload.openai_api_key)  delete savePayload.openai_api_key;
+      if (!savePayload.tinypng_api_key) delete savePayload.tinypng_api_key;
+      if (!savePayload.mollie_api_key)  delete savePayload.mollie_api_key;
       await fetch("/api/platform-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
-        body: JSON.stringify(ps),
+        body: JSON.stringify(savePayload),
       });
       setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (e) { alert("Opslaan mislukt: " + e.message); }
@@ -8350,8 +8370,8 @@ const PlatformSettings = () => {
     } finally { setEanThresholdSaving(false); }
   };
 
-  const hasGemini = !!ps.gemini_api_key;
-  const hasOpenAI = !!ps.openai_api_key;
+  const hasGemini = !!(ps.gemini_api_key || ps.gemini_api_key_set);
+  const hasOpenAI = !!(ps.openai_api_key || ps.openai_api_key_set);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -8361,8 +8381,8 @@ const PlatformSettings = () => {
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🔑 AI API Keys</div>
         <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 14 }}>Voeg één of beide toe. Je kiest per use-case welke je gebruikt.</div>
         <div className="settings-2col">
-          <Field label="Google Gemini API Key" hint={hasGemini ? "✓ Ingesteld" : "Geen key → Gemini use-cases uitgeschakeld"}>
-            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder="AIzaSy..." />
+          <Field label="Google Gemini API Key" hint={ps.gemini_api_key ? "✓ Wordt opgeslagen" : ps.gemini_api_key_set ? "✓ Opgeslagen — voer opnieuw in om te wijzigen" : "Geen key → Gemini uitgeschakeld"}>
+            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder={ps.gemini_api_key_set ? "••••••••••• (ongewijzigd)" : "AIzaSy..."} />
           </Field>
           <Field label="OpenAI API Key" hint={hasOpenAI ? "✓ Ingesteld" : "Geen key → OpenAI use-cases uitgeschakeld"}>
             <Inp value={ps.openai_api_key} onChange={e => setPs(p => ({ ...p, openai_api_key: e.target.value }))} type="password" placeholder="sk-..." />
