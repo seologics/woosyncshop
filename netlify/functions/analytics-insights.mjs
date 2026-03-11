@@ -116,7 +116,7 @@ export default async function handler(req) {
 
     // Get user's own Gemini model preference
     const { data: profile } = await supabase.from("user_profiles").select("gemini_model, plan").eq("id", user.id).single();
-    const model = profile?.gemini_model || settings?.gemini_model || "gemini-2.0-flash-lite";
+    const model = profile?.gemini_model || settings?.gemini_model || "gemini-2.5-flash";
 
     const body = await req.json();
     const prompt = buildPrompt(body);

@@ -28,10 +28,10 @@ const NON_EU_COUNTRIES = [
 const ALL_COUNTRIES = [...EU_COUNTRIES, ...NON_EU_COUNTRIES];
 // ─── Pricing Plans ────────────────────────────────────────────────────────────
 const PLANS = {
-  starter:      { id: "starter",      name: "Starter",      sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19,  img_max_kb: 300,  img_quality: 80, img_max_width: 1200, gemini_model: "gemini-2.0-flash-lite" },
-  growth:       { id: "growth",       name: "Growth",       sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79, img_max_kb: 400,  img_quality: 85, img_max_width: 1600, gemini_model: "gemini-2.0-flash-lite"      },
+  starter:      { id: "starter",      name: "Starter",      sites: 2,  connected_products: 500,   monthly: 7.99,  annual_mo: 7.19,  img_max_kb: 300,  img_quality: 80, img_max_width: 1200, gemini_model: "gemini-2.5-flash" },
+  growth:       { id: "growth",       name: "Growth",       sites: 5,  connected_products: 2000,  monthly: 11.99, annual_mo: 10.79, img_max_kb: 400,  img_quality: 85, img_max_width: 1600, gemini_model: "gemini-2.5-flash"      },
   pro:          { id: "pro",          name: "Pro",          sites: 10, connected_products: 10000, monthly: 19.99, annual_mo: 17.99, img_max_kb: 600,  img_quality: 90, img_max_width: 2400, gemini_model: "gemini-2.5-flash-image" },
-  free_forever: { id: "free_forever", name: "Free Forever", sites: 2,  connected_products: 500,   monthly: 0,     annual_mo: 0,     img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: "gemini-2.0-flash-lite" },
+  free_forever: { id: "free_forever", name: "Free Forever", sites: 2,  connected_products: 500,   monthly: 0,     annual_mo: 0,     img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: "gemini-2.5-flash" },
 };
 const PLAN_LIST = [PLANS.starter, PLANS.growth, PLANS.pro];
 const ANNUAL_DISCOUNT = 10; // % off monthly
@@ -3468,8 +3468,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                     <div className="settings-2col">
                       <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
                         <Sel value={createUser.gemini_model || limits.gemini_model} onChange={e => setCreateUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
-                          { value: "gemini-2.0-flash-lite",  label: "Flash Lite — zuinig (Starter/Free)" },
-                          { value: "gemini-2.0-flash-lite",       label: "Flash — gebalanceerd (Growth)" },
+                          { value: "gemini-2.5-flash",  label: "Flash Lite — zuinig (Starter/Free)" },
+                          { value: "gemini-2.5-flash",       label: "Flash — gebalanceerd (Growth)" },
                           { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
                           { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
                         ]} />
@@ -3593,8 +3593,8 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       <div className="settings-2col">
                         <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
                           <Sel value={editUser.gemini_model || planLimits.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
-                            { value: "gemini-2.0-flash-lite", label: "Flash Lite — zuinig (Starter/Free)" },
-                            { value: "gemini-2.0-flash-lite",      label: "Flash — gebalanceerd (Growth)" },
+                            { value: "gemini-2.5-flash", label: "Flash Lite — zuinig (Starter/Free)" },
+                            { value: "gemini-2.5-flash",      label: "Flash — gebalanceerd (Growth)" },
                             { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
                             { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
                           ]} />
@@ -3629,11 +3629,11 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                   {(editUser.ai_taxonomy_enabled) && <>
                     <Divider my={4} />
                     <Field label="Gemini model voor taxonomie" hint="Kan afwijken van image pipeline model">
-                      <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.0-flash-lite"}
+                      <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.5-flash"}
                         onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_model: e.target.value }))}
                         options={[
-                          { value: "gemini-2.0-flash-lite", label: "Flash Lite – zuinig, geschikt voor eenvoudige vertalingen" },
-                          { value: "gemini-2.0-flash-lite",      label: "Flash – gebalanceerd (aanbevolen)" },
+                          { value: "gemini-2.5-flash", label: "Flash Lite – zuinig, geschikt voor eenvoudige vertalingen" },
+                          { value: "gemini-2.5-flash",      label: "Flash – gebalanceerd (aanbevolen)" },
                           { value: "gemini-2.5-pro",        label: "2.5 Pro – hoogste kwaliteit, meer tokens" },
                         ]} />
                     </Field>
@@ -4979,8 +4979,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
               const quality   = userProfile.img_quality    ?? planLimits.img_quality;
               const maxWidth  = userProfile.img_max_width  ?? planLimits.img_max_width;
               const modelLabel = {
-                "gemini-2.0-flash-lite":  "Flash Lite",
-                "gemini-2.0-flash-lite":       "Flash",
+                "gemini-2.5-flash":  "Flash Lite",
+                "gemini-2.5-flash":       "Flash",
                 "gemini-2.5-flash-image": "Flash Image",
                 "gemini-2.5-pro":         "Pro",
               }[model] || model;
@@ -8133,9 +8133,9 @@ const AI_USE_CASES = [
 const GEMINI_MODELS = [
   { value: "gemini-2.5-pro",        label: "gemini-2.5-pro (krachtigst)" },
   { value: "gemini-2.5-flash",      label: "gemini-2.5-flash (aanbevolen)" },
-  { value: "gemini-2.0-flash-lite", label: "gemini-2.0-flash-lite (standaard/snel)" },
-  { value: "gemini-1.5-pro",        label: "gemini-1.5-pro" },
-  { value: "gemini-1.5-flash",      label: "gemini-1.5-flash" },
+  { value: "gemini-2.5-flash", label: "gemini-2.5-flash (standaard/snel)" },
+  { value: "gemini-2.5-pro",        label: "gemini-2.5-pro" },
+  { value: "gemini-2.5-flash",      label: "gemini-2.5-flash" },
 ];
 const OPENAI_MODELS = [
   { value: "gpt-5.4",              label: "gpt-5.4 (flagship)",          group: "GPT-5.4" },

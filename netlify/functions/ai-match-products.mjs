@@ -32,7 +32,7 @@ async function callAI({ provider, geminiKey, openaiKey, model }, systemPrompt, u
 
   // Default: Gemini
   if (!geminiKey) throw new Error('No Gemini API key configured')
-  const mdl = model || 'gemini-2.0-flash-lite'
+  const mdl = model || 'gemini-2.5-flash'
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mdl}:generateContent?key=${geminiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

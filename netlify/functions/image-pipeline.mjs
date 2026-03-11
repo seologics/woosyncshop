@@ -48,7 +48,7 @@ Preserve all product details, colors, and sharpness. Output as a clean JPEG suit
 Return ONLY the image data, nothing else.`
 
         const geminiImageRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${geminiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

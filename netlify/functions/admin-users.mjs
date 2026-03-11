@@ -141,10 +141,10 @@ export default async (req) => {
 
       // Determine plan limits for defaults
       const PLAN_LIMITS = {
-        starter:      { sites: 2,  connected_products: 500,   img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: 'gemini-2.0-flash-lite' },
-        growth:       { sites: 5,  connected_products: 2000,  img_max_kb: 400,  img_quality: 85, img_max_width: 1600, gemini_model: 'gemini-2.0-flash-lite' },
+        starter:      { sites: 2,  connected_products: 500,   img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: 'gemini-2.5-flash' },
+        growth:       { sites: 5,  connected_products: 2000,  img_max_kb: 400,  img_quality: 85, img_max_width: 1600, gemini_model: 'gemini-2.5-flash' },
         pro:          { sites: 10, connected_products: 10000, img_max_kb: 600,  img_quality: 90, img_max_width: 2400, gemini_model: 'gemini-2.5-flash-image' },
-        free_forever: { sites: 2,  connected_products: 500,   img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: 'gemini-2.0-flash-lite' },
+        free_forever: { sites: 2,  connected_products: 500,   img_max_kb: 200,  img_quality: 75, img_max_width: 1000, gemini_model: 'gemini-2.5-flash' },
       }
       const limits = PLAN_LIMITS[chosenPlan || 'free_forever'] || PLAN_LIMITS.growth
 

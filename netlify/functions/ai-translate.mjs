@@ -36,7 +36,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: 'term, source_locale, target_locale required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     }
 
-    const model = profile?.ai_taxonomy_model || 'gemini-2.0-flash-lite'
+    const model = profile?.ai_taxonomy_model || 'gemini-2.5-flash'
     const threshold = profile?.ai_taxonomy_threshold || 0.85
     const cacheKey = `${source_locale}:${target_locale}:${field}:${term}`
 
