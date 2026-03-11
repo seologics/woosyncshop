@@ -6097,15 +6097,6 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 
   const pendingCount = products.reduce((sum, p) => sum + Object.keys(p.pending_changes || {}).length, 0);
 
-  if (shopsLoading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16 }}>
-        <div style={{ width: 32, height: 32, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-        <span style={{ color: "var(--mx)", fontSize: 13 }}>Shops laden...</span>
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
       <TopNav
@@ -6158,7 +6149,12 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
           }
         }} />
       <div className="dashboard-content">
-        {shops.length === 0 && activeView !== "settings" ? (
+        {shopsLoading ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", flexDirection: "column", gap: 16 }}>
+            <div style={{ width: 32, height: 32, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+            <span style={{ color: "var(--mx)", fontSize: 13 }}>Shops laden...</span>
+          </div>
+        ) : shops.length === 0 && activeView !== "settings" ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 16, textAlign: "center" }}>
             <div style={{ fontSize: 48 }}>🏪</div>
             <h2 style={{ fontSize: 20, fontWeight: 700 }}>Nog geen shops toegevoegd</h2>

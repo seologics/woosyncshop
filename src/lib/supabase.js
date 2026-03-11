@@ -20,39 +20,19 @@ let _cachedToken = null
 
 export const setCachedToken = (token) => { _cachedToken = token }
 
-// Read token directly from localStorage — bypasses Supabase's IndexedDB lock.
-// Key fix for alt-tab freeze: when Supabase is mid-refresh and holds the lock,
-// we can still get a valid token from storage instantly (no await needed).
-function getTokenFromStorage() {
-  try {
-    const raw = localStorage.getItem('sb-pwrtuqybtvgiiyghqxiw-auth-token')
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    return parsed?.access_token || null
-  } catch { return null }
-}
-
-export const getToken = async () => {
-  // 1. In-memory cache (hot path — zero I/O)
-  if (_cachedToken) return _cachedToken
-
-  // 2. localStorage — instant, no lock, works even while Supabase is mid-refresh
-  const storageToken = getTokenFromStorage()
-  if (storageToken) { _cachedToken = storageToken; return storageToken }
-
-  // 3. Fall back to getSession() with 3-second timeout
-  try {
-    const result = await Promise.race([
-      supabase.auth.getSession(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('getSession timeout')), 3000)),
-    ])
-    const token = result?.data?.session?.access_token || null
-    if (token) _cachedToken = token
-    return token
-  } catch {
-    // 4. Last resort: re-read storage (may have just been written by the refresh)
-    return getTokenFromStorage()
-  }
+export const getToken = () => {
+  if (_cachedToken) return Promise.resolve(_cachedToken)
+  // Fallback: ask Supabase, but never wait more than 3 seconds
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 3000)
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        clearTimeout(timer)
+        _cachedToken = session?.access_token || null
+        resolve(_cachedToken)
+      })
+      .catch(() => { clearTimeout(timer); resolve(null) })
+  })
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
@@ -70,8 +50,18 @@ export const signIn = async (email, password) => {
 
 export const signOut = async () => {
   _cachedToken = null
-  const { error } = await supabase.auth.signOut()
-  if (error) throw error
+  // Don't let supabase.auth.signOut() hang if it can't acquire the IndexedDB lock
+  // (happens right after alt-tab when the token refresher holds the lock).
+  // We clear the token cache above, so the app will treat the user as logged out
+  // regardless of whether the Supabase call completes.
+  try {
+    await Promise.race([
+      supabase.auth.signOut(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('signOut timeout')), 2000)),
+    ])
+  } catch {
+    // Intentionally ignored — local state already cleared above
+  }
 }
 
 export const getSession = async () => {
