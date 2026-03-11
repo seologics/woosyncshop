@@ -733,7 +733,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               <div key={v.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
                 <div style={{ padding: "10px 14px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 10 }}>
                   <Badge color="default">#{v.id}</Badge>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes || {}).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
                   <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dm)" }}>SKU: {v.sku}</span>
                 </div>
                 <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -829,7 +829,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                    {(attr.terms || []).map(term => (
+                    {attr.terms.map(term => (
                       <button key={term} onClick={() => {
                         const newVals = pa.values.includes(term) ? pa.values.filter(v => v !== term) : [...pa.values, term];
                         setAttr({ ...pa, values: newVals });
@@ -5052,9 +5052,9 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 
 // ─── AnalyticsView ────────────────────────────────────────────────────────────
 function AnalyticsView({ shops, user }) {
-  const [selectedShopForConnections, setSelectedShopForConnections] = React.useState("all");
+  const [selectedShopForConnections, setSelectedShopForConnections] = useState("all");
 
-  const googleConnections = React.useMemo(() => {
+  const googleConnections = useMemo(() => {
     if (selectedShopForConnections === "all") {
       return {
         ads: (shops || []).some(s => s.google_ads_connected),
@@ -5099,6 +5099,7 @@ function AnalyticsView({ shops, user }) {
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
   const [loading, setLoading]                 = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsUnavailable, setInsightsUnavailable] = useState(false);
   const [error, setError]                     = useState(null);
   const [data, setData]                       = useState(null);
   const [insights, setInsights]               = useState(null);
@@ -5131,7 +5132,7 @@ function AnalyticsView({ shops, user }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const fetchInsights = useCallback(async () => {
-    if (!data) return;
+    if (!data || insightsUnavailable) return;
     setInsightsLoading(true);
     try {
       const token = await getToken();
@@ -5140,25 +5141,33 @@ function AnalyticsView({ shops, user }) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
       });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        // Only permanently disable if Gemini key is truly not configured
+        if (res.status === 400 && (json.error || "").includes("niet geconfigureerd")) {
+          setInsightsUnavailable(true);
+          return;
+        }
+        throw new Error(json.error || `Insights fout (${res.status})`);
+      }
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
       setInsights(json.insights);
     } catch (e) {
       console.error("Insights error:", e);
     } finally {
       setInsightsLoading(false);
     }
-  }, [data, range]);
+  }, [data, range, insightsUnavailable]);
 
-  useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
+  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data]);
 
-  const displayData = React.useMemo(() => {
+  const displayData = useMemo(() => {
     if (!data) return null;
     if (selectedShop === "all") return data.merged;
     return data.shops?.find(s => s.shopId === selectedShop) || data.merged;
   }, [data, selectedShop]);
 
-  const chartData = React.useMemo(() => {
+  const chartData = useMemo(() => {
     if (!displayData?.byDate) return [];
     return displayData.byDate.map(d => ({
       label: new Date(d.date).toLocaleDateString("nl-NL", { day: "numeric", month: "short" }),
@@ -5167,7 +5176,7 @@ function AnalyticsView({ shops, user }) {
     }));
   }, [displayData]);
 
-  const sourceDonutData = React.useMemo(() => {
+  const sourceDonutData = useMemo(() => {
     if (!displayData?.bySource) return [];
     const grouped = {};
     for (const s of displayData.bySource) {
@@ -5181,7 +5190,7 @@ function AnalyticsView({ shops, user }) {
       .map(g => ({ ...g, ...(SOURCE_GROUPS[g.group] || SOURCE_GROUPS.other) }));
   }, [displayData]);
 
-  const filteredSources = React.useMemo(() => {
+  const filteredSources = useMemo(() => {
     if (!displayData?.bySource) return [];
     if (!selectedSourceGroup) return displayData.bySource;
     return displayData.bySource.filter(s => s.group === selectedSourceGroup);
@@ -8046,6 +8055,23 @@ const PlatformSettings = () => {
 
   const hasGemini = !!ps.gemini_api_key;
   const hasOpenAI = !!ps.openai_api_key;
+  const [keyTest, setKeyTest] = useState({}); // { gemini: 'ok'|'fail'|'loading', openai: ... }
+
+  const testApiKey = async (provider) => {
+    setKeyTest(t => ({ ...t, [provider]: 'loading' }));
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/test-api-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider, key: provider === 'gemini' ? ps.gemini_api_key : ps.openai_api_key }),
+      });
+      const d = await res.json();
+      setKeyTest(t => ({ ...t, [provider]: d.ok ? 'ok' : 'fail', [provider + '_msg']: d.error || '' }));
+    } catch (e) {
+      setKeyTest(t => ({ ...t, [provider]: 'fail', [provider + '_msg']: e.message }));
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -8056,10 +8082,22 @@ const PlatformSettings = () => {
         <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 14 }}>Voeg één of beide toe. Je kiest per use-case welke je gebruikt.</div>
         <div className="settings-2col">
           <Field label="Google Gemini API Key" hint={hasGemini ? "✓ Ingesteld" : "Geen key → Gemini use-cases uitgeschakeld"}>
-            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder="AIzaSy..." />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Inp value={ps.gemini_api_key} onChange={e => { setPs(p => ({ ...p, gemini_api_key: e.target.value })); setKeyTest(t => ({ ...t, gemini: null })); }} type="password" placeholder="AIzaSy..." style={{ flex: 1 }} />
+              <button onClick={() => testApiKey('gemini')} disabled={!ps.gemini_api_key || keyTest.gemini === 'loading'} style={{ flexShrink: 0, padding: "7px 12px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", opacity: !ps.gemini_api_key ? 0.4 : 1 }}>
+                {keyTest.gemini === 'loading' ? '⏳' : keyTest.gemini === 'ok' ? '✅ OK' : keyTest.gemini === 'fail' ? '❌ Fout' : '🔌 Test'}
+              </button>
+            </div>
+            {keyTest.gemini === 'fail' && keyTest.gemini_msg && <div style={{ fontSize: 11, color: "var(--re)", marginTop: 4 }}>{keyTest.gemini_msg}</div>}
           </Field>
           <Field label="OpenAI API Key" hint={hasOpenAI ? "✓ Ingesteld" : "Geen key → OpenAI use-cases uitgeschakeld"}>
-            <Inp value={ps.openai_api_key} onChange={e => setPs(p => ({ ...p, openai_api_key: e.target.value }))} type="password" placeholder="sk-..." />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Inp value={ps.openai_api_key} onChange={e => { setPs(p => ({ ...p, openai_api_key: e.target.value })); setKeyTest(t => ({ ...t, openai: null })); }} type="password" placeholder="sk-..." style={{ flex: 1 }} />
+              <button onClick={() => testApiKey('openai')} disabled={!ps.openai_api_key || keyTest.openai === 'loading'} style={{ flexShrink: 0, padding: "7px 12px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", opacity: !ps.openai_api_key ? 0.4 : 1 }}>
+                {keyTest.openai === 'loading' ? '⏳' : keyTest.openai === 'ok' ? '✅ OK' : keyTest.openai === 'fail' ? '❌ Fout' : '🔌 Test'}
+              </button>
+            </div>
+            {keyTest.openai === 'fail' && keyTest.openai_msg && <div style={{ fontSize: 11, color: "var(--re)", marginTop: 4 }}>{keyTest.openai_msg}</div>}
           </Field>
           <Field label="TinyPNG API Key" hint="Gebruikt voor afbeelding compressie na Gemini resize">
             <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="password" placeholder="abcdef..." />
