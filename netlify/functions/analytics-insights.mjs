@@ -1,11 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 
 
-function writeLog(level, message, meta = {}) {
-  return supabase.from("system_logs").insert({
+function writeLog(supabase, level, message, meta = {}) {
+  try { supabase.from("system_logs").insert({
     level, message, function_name: "analytics-insights",
     metadata: meta, created_at: new Date().toISOString(),
-  });
+  }); } catch {} 
 }
 
 function buildPrompt(data) {
@@ -151,12 +151,12 @@ export default async function handler(req) {
     // Sort by priority
     insights.sort((a, b) => (a.priority || 5) - (b.priority || 5));
 
-    await writeLog("info", `AI insights generated for user ${user.id}`, { model, insightCount: insights.length });
+    await writeLog(supabase, "info", `AI insights generated for user ${user.id}`, { model, insightCount: insights.length });
 
     return new Response(JSON.stringify({ insights }), { headers });
 
   } catch (err) {
-    await writeLog("error", "analytics-insights failed", { error: err.message });
+    await writeLog(supabase, "error", "analytics-insights failed", { error: err.message });
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
   }
 }

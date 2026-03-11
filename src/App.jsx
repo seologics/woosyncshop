@@ -2284,7 +2284,6 @@ const CouponManager = ({ activeSite, user }) => {
     checkPlugin();
   }, [activeSite?.id]);
 
-  // Load coupon history for this shop
   const loadHistory = async () => {
     if (!activeSite) return;
     setHistoryLoading(true);
@@ -2301,6 +2300,18 @@ const CouponManager = ({ activeSite, user }) => {
   };
 
   useEffect(() => { loadHistory(); }, [activeSite?.id]);
+
+  const deleteCoupon = async (c) => {
+    try {
+      const token = await getToken();
+      await fetch("/api/coupon-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ coupon_db_id: c.id, woo_coupon_id: c.woo_coupon_id, shop_id: c.shop_id }),
+      });
+      setHistory(h => h.filter(x => x.id !== c.id));
+    } catch { /* non-fatal */ }
+  };
 
   const generateCode = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -2434,6 +2445,7 @@ const CouponManager = ({ activeSite, user }) => {
                   <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.coupon_url).catch(() => {})}>📋 URL</Btn>
                 )}
                 <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.code).catch(() => {})}>📋</Btn>
+                <Btn variant="ghost" size="sm" style={{ color: "var(--re)", opacity: 0.7 }} onClick={() => { if (window.confirm(`Kortingscode ${c.code} verwijderen uit WooCommerce?`)) deleteCoupon(c); }}>🗑</Btn>
               </div>
             );
           })}

@@ -1,11 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 
 
-function writeLog(level, message, meta = {}) {
-  return supabase.from("system_logs").insert({
+function writeLog(supabase, level, message, meta = {}) {
+  try { supabase.from("system_logs").insert({
     level, message, function_name: "analytics-orders",
     metadata: meta, created_at: new Date().toISOString(),
-  });
+  }); } catch {} 
 }
 
 function parseSource(meta) {
@@ -270,12 +270,12 @@ export default async function handler(req) {
 
     const merged = fulfilled.length === 1 ? fulfilled[0] : mergeShopData(fulfilled);
 
-    await writeLog("info", `Analytics fetched: ${fulfilled.length} shops, range=${range}`, { userId: user.id });
+    await writeLog(supabase, "info", `Analytics fetched: ${fulfilled.length} shops, range=${range}`, { userId: user.id });
 
     return new Response(JSON.stringify({ shops: fulfilled, merged, failed, range, after, before }), { headers });
 
   } catch (err) {
-    await writeLog("error", "analytics-orders failed", { error: err.message });
+    await writeLog(supabase, "error", "analytics-orders failed", { error: err.message });
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
   }
 }
