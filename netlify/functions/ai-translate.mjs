@@ -26,7 +26,7 @@ export default async (req) => {
   }
 
   // Get Gemini API key
-  const { data: settings } = await supabase.from('platform_settings').select('gemini_api_key').eq('id', 1).single()
+  const { data: settings } = await supabase.from('platform_settings').select('gemini_api_key, openai_api_key, ai_model_translation, ai_provider_translation').eq('id', 1).single()
   const geminiKey = settings?.gemini_api_key
   if (!geminiKey) return new Response(JSON.stringify({ error: 'Geen Gemini API key geconfigureerd' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
 
@@ -36,7 +36,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: 'term, source_locale, target_locale required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     }
 
-    const model = profile?.ai_taxonomy_model || 'gemini-2.5-flash'
+    const model = settings?.ai_model_translation || profile?.ai_taxonomy_model || 'gemini-2.5-flash'
     const threshold = profile?.ai_taxonomy_threshold || 0.85
     const cacheKey = `${source_locale}:${target_locale}:${field}:${term}`
 

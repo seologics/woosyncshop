@@ -87,13 +87,13 @@ export default async (req) => {
     }
 
     // Get platform settings (API keys)
-    const { data: settings } = await supabase.from('platform_settings').select('gemini_api_key').eq('id', 1).single()
+    const { data: settings } = await supabase.from('platform_settings').select('gemini_api_key, ai_model_translation').eq('id', 1).single()
     const geminiKey = settings?.gemini_api_key
 
     // Get user profile for AI settings
     const { data: profile } = await supabase.from('user_profiles').select('ai_taxonomy_enabled, ai_taxonomy_model, ai_taxonomy_threshold').eq('id', user.id).single()
     const aiEnabled = profile?.ai_taxonomy_enabled && geminiKey
-    const aiModel = profile?.ai_taxonomy_model || 'gemini-2.5-flash'
+    const aiModel = settings?.ai_model_translation || profile?.ai_taxonomy_model || 'gemini-2.5-flash'
     const aiThreshold = profile?.ai_taxonomy_threshold || 0.85
 
     // Fetch source product from WooCommerce

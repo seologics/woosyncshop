@@ -28,9 +28,10 @@ export default async (req) => {
     if (!base64 || !shop_id) return new Response(JSON.stringify({ error: 'base64 and shop_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
 
     // Get API keys from platform settings
-    const { data: settings } = await supabase.from('platform_settings').select('tinypng_api_key, gemini_api_key').eq('id', 1).single()
+    const { data: settings } = await supabase.from('platform_settings').select('tinypng_api_key, gemini_api_key, ai_model_image').eq('id', 1).single()
     const tinypngKey = settings?.tinypng_api_key
     const geminiKey = settings?.gemini_api_key
+    const geminiModel = settings?.ai_model_image || 'gemini-2.5-flash'
 
     let processedBase64 = base64
     let processedMimeType = media_type
@@ -48,7 +49,7 @@ Preserve all product details, colors, and sharpness. Output as a clean JPEG suit
 Return ONLY the image data, nothing else.`
 
         const geminiImageRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
