@@ -6258,7 +6258,9 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             const parseWqmPrice = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
             const tiersToSave = (updated.wqm_tiers || [])
               .filter(t => t.qty)
-              .map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price) }));
+              // amt must be a string with dot decimal (e.g. "16.79") — WQM PHP stores via
+              // wc_format_decimal() which returns strings. WQM's JS breaks with number types.
+              .map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price).toFixed(2) }));
 
             // Preserve ALL original _wqm_settings fields — only override the ones we explicitly manage.
             // Writing only a fixed subset would silently delete any WQM field we don't know about,
@@ -6302,7 +6304,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
               if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
                 const vTierType = v.wqm_settings?.tiered_pricing_type || v.wqm_tier_type || 'fixed';
                 const parseWqmPrice = (val) => parseFloat(String(val ?? '').replace(',', '.')) || 0;
-                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price) }));
+                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price).toFixed(2) }));
                 const vOrigSettings = v.wqm_settings || {};
                 const vSettings = { ...vOrigSettings, step_interval: v.wqm_settings?.step || vOrigSettings.step_interval || '', qty_design_tiers: v.wqm_settings?.dyo_rows ?? vOrigSettings.qty_design_tiers ?? [] };
                 delete vSettings.step; delete vSettings.dyo_rows; delete vSettings.tiered_pricing_type;
