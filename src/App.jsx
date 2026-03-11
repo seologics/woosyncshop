@@ -6278,6 +6278,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
               { key: '_wqm_tiers',    value: tiersToSave.length > 0 ? { type: tierType, tiers: tiersToSave } : null },
               { key: '_wqm_settings', value: settingsToSave },
             ];
+
           }
 
           // PUT the main product
