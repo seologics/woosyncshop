@@ -6278,9 +6278,9 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             delete settingsToSave.dyo_rows;
             delete settingsToSave.tiered_pricing_type;
 
-            // WQM's woocommerce_process_product_meta hook (admin-only, doesn't fire on REST)
-            // sets _price = first tier amt so its frontend JS can use it as the base price
-            // for dynamic qty-based price updates. We must replicate this here manually.
+            // Step 1: write tiers + settings only — do NOT include _price here.
+            // Step 2 (dummy touch below) calls WC_Product::save() which resets _price = regular_price.
+            // Step 3 (after dummy touch) writes _price = firstTierPrice so it wins last.
             const firstTierPrice = tiersToSave.length > 0
               ? [...tiersToSave].sort((a, b) => a.qty - b.qty)[0].amt
               : null;
@@ -6288,18 +6288,33 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             payload.meta_data = [
               { key: '_wqm_tiers',    value: tiersToSave.length > 0 ? { type: tierType, tiers: tiersToSave } : null },
               { key: '_wqm_settings', value: settingsToSave },
-              ...(firstTierPrice !== null && tierType === 'fixed' ? [{ key: '_price', value: firstTierPrice }] : []),
+              // _price intentionally omitted here — written in step 3 after dummy touch
             ];
 
           }
 
-          // PUT the main product
+          // PUT the main product (step 1: writes _wqm_tiers + _wqm_settings)
           await wooCall(shopId, `products/${updated.id}`, "PUT", payload);
 
-          // Dummy touch: trigger WooCommerce's full save pipeline so WQM recalculates _price
-          // (REST API saves skip woocommerce_process_product_meta; this extra PUT fires it)
+          // Step 2: dummy touch — triggers WC_Product::save() → clears transients, but also
+          // resets _price = regular_price (which is wrong for WQM dynamic pricing).
+          // Step 3: immediately overwrite _price with first tier amount so it wins.
           if (updated.wqm_tiers !== undefined || updated.wqm_settings !== undefined) {
+            const tierType2 = updated.wqm_settings?.tiered_pricing_type || updated.wqm_tier_type || 'fixed';
+            const parseP = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
+            const tiersForPrice = (updated.wqm_tiers || []).filter(t => t.qty)
+              .map(t => ({ qty: Number(t.qty), amt: parseP(t.price).toFixed(2) }));
+            const firstTierAmt = tiersForPrice.length > 0
+              ? [...tiersForPrice].sort((a, b) => a.qty - b.qty)[0].amt
+              : null;
+            // Step 2: dummy touch (clears transients + WC save pipeline)
             await wooCall(shopId, `products/${updated.id}`, "PUT", { status: updated.status || "publish" });
+            // Step 3: force _price = first tier amt (WQM JS uses _price as base for qty-based updates)
+            if (firstTierAmt !== null && tierType2 === 'fixed') {
+              await wooCall(shopId, `products/${updated.id}`, "PUT", {
+                meta_data: [{ key: '_price', value: firstTierAmt }],
+              });
+            }
           }
 
           // PUT variations if variable and variations changed
@@ -6316,7 +6331,9 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
               };
               if (v.manage_stock) varPayload.stock_quantity = parseInt(v.stock_quantity) || 0;
               if (v.backorders !== undefined) varPayload.backorders = v.backorders;
-              // WQM variation meta
+              // WQM variation meta — 3-step save: tiers → dummy touch → _price
+              // Same pattern as simple product: dummy touch (step 2) resets _price = regular_price,
+              // so _price must be written as a separate final PUT (step 3) to win.
               if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
                 const vTierType = v.wqm_settings?.tiered_pricing_type || v.wqm_tier_type || 'fixed';
                 const parseWqmPrice = (val) => parseFloat(String(val ?? '').replace(',', '.')) || 0;
@@ -6324,19 +6341,26 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
                 const vOrigSettings = v.wqm_settings || {};
                 const vSettings = { ...vOrigSettings, step_interval: v.wqm_settings?.step || vOrigSettings.step_interval || '', qty_design_tiers: v.wqm_settings?.dyo_rows ?? vOrigSettings.qty_design_tiers ?? [] };
                 delete vSettings.step; delete vSettings.dyo_rows; delete vSettings.tiered_pricing_type;
+                // _price intentionally omitted — written in step 3
                 varPayload.meta_data = [
                   { key: '_wqm_tiers', value: vTiers.length > 0 ? { type: vTierType, tiers: vTiers } : null },
                   { key: '_wqm_settings', value: vSettings },
                 ];
-              }
-              const varSave = wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
-              // Dummy touch for WQM variation: fires woocommerce_process_product_meta to recalculate _price
-              if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
-                return varSave.then(() =>
-                  wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", { status: v.enabled === false ? "private" : "publish" })
+                const vFirstAmt = vTiers.length > 0 ? [...vTiers].sort((a,b) => a.qty - b.qty)[0].amt : null;
+                const vStatus = v.enabled === false ? "private" : "publish";
+                return (
+                  // Step 1: write tiers + settings
+                  wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload)
+                  // Step 2: dummy touch — clears transients, WC resets _price = regular_price
+                  .then(() => wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", { status: vStatus }))
+                  // Step 3: force _price = first tier amt (overrides WC's reset)
+                  .then(() => vFirstAmt !== null && vTierType === 'fixed'
+                    ? wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", { meta_data: [{ key: '_price', value: vFirstAmt }] })
+                    : Promise.resolve()
+                  )
                 );
               }
-              return varSave;
+              return wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
             });
             await Promise.all(varPromises);
           }
