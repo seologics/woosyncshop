@@ -60,10 +60,11 @@ export default async (req) => {
   const startDate = new Date(now.getTime() - 60 * 1000)
   const expiryDate = use_schedule && expiry_hours ? new Date(now.getTime() + expiry_hours * 60 * 60 * 1000) : null
 
-  // Format a Date as a local datetime string in Europe/Amsterdam (no timezone suffix)
+  // Format a Date as a local datetime string in the shop's timezone (no timezone suffix)
   // WooCommerce date_expires and acfw_schedule expect local site time, not UTC
-  const toAmsterdam = (d) =>
-    d.toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }).replace('T', ' ').slice(0, 16).replace(' ', ' ')
+  const shopTimezone = shop.timezone || 'Europe/Amsterdam';
+  const toShopTime = (d) =>
+    d.toLocaleString('sv-SE', { timeZone: shopTimezone }).replace('T', ' ').slice(0, 16)
 
   const couponPayload = {
     code: code.toUpperCase(),
@@ -80,8 +81,8 @@ export default async (req) => {
       key: 'acfw_schedule',
       value: {
         enabled: true,
-        start_date: toAmsterdam(startDate),
-        end_date: expiryDate ? toAmsterdam(expiryDate) : '',
+        start_date: toShopTime(startDate),
+        end_date: expiryDate ? toShopTime(expiryDate) : '',
         date_type: 'date_range',
       }
     }]
@@ -103,10 +104,25 @@ export default async (req) => {
     }
     const createdCode = wooData.code?.toUpperCase() || code.toUpperCase()
     const couponUrl = `${siteUrl}/?coupon=${encodeURIComponent(createdCode)}`
+    const expiresAt = expiryDate ? expiryDate.toISOString() : null
+
+    // Persist to coupons table for history view
+    await supabase.from('coupons').insert({
+      user_id:       user.id,
+      shop_id:       shopId,
+      woo_coupon_id: wooData.id,
+      code:          createdCode,
+      discount_type: wooData.discount_type,
+      amount:        parseFloat(wooData.amount) || 0,
+      coupon_url:    couponUrl,
+      expires_at:    expiresAt,
+      created_at:    new Date().toISOString(),
+    }).catch(() => {}) // non-fatal
+
     await writeLog(supabase, 'coupon-create', 'info', 'Coupon created', { code: createdCode, siteUrl, userId: user.id })
     return new Response(JSON.stringify({
       ok: true, coupon_code: createdCode, coupon_url: couponUrl,
-      coupon_id: wooData.id, expires_at: expiryDate ? expiryDate.toISOString() : null,
+      coupon_id: wooData.id, expires_at: expiresAt,
       discount_type: wooData.discount_type, amount: wooData.amount,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   } catch (err) {

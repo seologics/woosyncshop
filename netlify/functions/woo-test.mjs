@@ -76,9 +76,19 @@ export default async (req) => {
     const data = await wooRes.json();
     const wc_version = data?.environment?.version || data?.wc_version || "?";
     const wp_version = data?.environment?.wp_version || "?";
+    const timezone   = data?.environment?.timezone || "Europe/Amsterdam";
+
+    // Persist timezone to shop row so coupon-create can use it
+    if (shop_id) {
+      const supabase = createClient(
+        Netlify.env.get("SUPABASE_URL"),
+        Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+      );
+      await supabase.from("shops").update({ timezone }).eq("id", shop_id).catch(() => {});
+    }
 
     return new Response(
-      JSON.stringify({ ok: true, wc_version, wp_version }),
+      JSON.stringify({ ok: true, wc_version, wp_version, timezone }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (err) {

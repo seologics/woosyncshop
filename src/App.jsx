@@ -2254,6 +2254,8 @@ const CouponManager = ({ activeSite, user }) => {
   const [creating, setCreating] = useState(false);
   const [result, setCouponResult] = useState(null); // { ok, coupon_url, coupon_code, error }
   const [codeGenerated, setCodeGenerated] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Check if Advanced Coupons is installed on the active shop
   useEffect(() => {
@@ -2281,6 +2283,24 @@ const CouponManager = ({ activeSite, user }) => {
     };
     checkPlugin();
   }, [activeSite?.id]);
+
+  // Load coupon history for this shop
+  const loadHistory = async () => {
+    if (!activeSite) return;
+    setHistoryLoading(true);
+    try {
+      const { data } = await supabase
+        .from("coupons")
+        .select("*")
+        .eq("shop_id", activeSite.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      setHistory(data || []);
+    } catch { /* non-fatal */ }
+    finally { setHistoryLoading(false); }
+  };
+
+  useEffect(() => { loadHistory(); }, [activeSite?.id]);
 
   const generateCode = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -2317,6 +2337,7 @@ const CouponManager = ({ activeSite, user }) => {
       // reset form code for next coupon
       setForm(f => ({ ...f, code: "", amount: "" }));
       setCodeGenerated(false);
+      loadHistory();
     } catch (e) {
       setCouponResult({ ok: false, error: e.message });
     } finally {
@@ -2390,6 +2411,32 @@ const CouponManager = ({ activeSite, user }) => {
       {result?.ok === false && (
         <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "var(--rd)", fontSize: 13, color: "var(--re)" }}>
           ✗ {result.error}
+        </div>
+      )}
+
+      {/* Coupon history */}
+      {(history.length > 0 || historyLoading) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 8 }}>
+            🕐 Recente kortingscodes
+            {historyLoading && <span style={{ fontSize: 11, fontWeight: 400, color: "var(--dm)" }}>laden...</span>}
+          </div>
+          {history.map(c => {
+            const expired = c.expires_at && new Date(c.expires_at) < new Date();
+            return (
+              <div key={c.id} style={{ padding: "10px 14px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 12, opacity: expired ? 0.5 : 1 }}>
+                <code style={{ fontWeight: 700, fontSize: 13, letterSpacing: "0.08em", color: expired ? "var(--mx)" : "var(--gr)", minWidth: 90 }}>{c.code}</code>
+                <span style={{ fontSize: 11, color: "var(--mx)", flex: 1 }}>
+                  {c.discount_type === "percent" ? `${c.amount}%` : `€${c.amount}`} korting
+                  {c.expires_at && <> · {expired ? "Verlopen" : "Vervalt"} {new Date(c.expires_at).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
+                </span>
+                {c.coupon_url && !expired && (
+                  <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.coupon_url).catch(() => {})}>📋 URL</Btn>
+                )}
+                <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.code).catch(() => {})}>📋</Btn>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -4311,8 +4358,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         const status = await statusRes.json();
         const activePlugins = status?.active_plugins || [];
         const hasWqm = activePlugins.some(p => p.plugin?.includes("quantity-manager") || p.name?.toLowerCase().includes("quantity manager"));
-        const updatedShop = { ...shop, wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, last_connected: new Date().toISOString() };
-        await supabase.from("shops").update({ wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, last_connected: new Date().toISOString() }).eq("id", shop.id);
+        const updatedShop = { ...shop, wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, timezone: result.timezone || shop.timezone, last_connected: new Date().toISOString() };
+        await supabase.from("shops").update({ wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, timezone: result.timezone || null, last_connected: new Date().toISOString() }).eq("id", shop.id);
         onShopUpdated?.(updatedShop);
       }
     } catch (e) {
