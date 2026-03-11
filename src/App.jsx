@@ -560,6 +560,124 @@ const QtyDesignBuilder = ({ rows, onChange }) => {
   );
 };
 
+
+// ─── Rich Text Editor (WYSIWYG ↔ HTML toggle) ────────────────────────────────
+const RichEditor = ({ value, onChange, rows = 6, label, hint }) => {
+  const [mode, setMode] = useState("wysiwyg");
+  const editorRef = React.useRef(null);
+  const lastHtml = React.useRef(value || "");
+
+  // Sync contenteditable → state on each input
+  const onInput = () => {
+    if (editorRef.current) {
+      lastHtml.current = editorRef.current.innerHTML;
+      onChange(lastHtml.current);
+    }
+  };
+
+  // When switching to wysiwyg, set innerHTML from current value
+  React.useLayoutEffect(() => {
+    if (mode === "wysiwyg" && editorRef.current) {
+      if (editorRef.current.innerHTML !== (value || "")) {
+        editorRef.current.innerHTML = value || "";
+      }
+    }
+  }, [mode]);
+
+  // Initial mount: set content
+  React.useEffect(() => {
+    if (editorRef.current && mode === "wysiwyg") {
+      editorRef.current.innerHTML = value || "";
+    }
+  }, []);
+
+  const execCmd = (cmd, val = null) => {
+    editorRef.current?.focus();
+    document.execCommand(cmd, false, val);
+    onInput();
+  };
+
+  const toggle = [
+    { cmd: "bold",        icon: "B",  style: { fontWeight: 700 } },
+    { cmd: "italic",      icon: "I",  style: { fontStyle: "italic" } },
+    { cmd: "underline",   icon: "U",  style: { textDecoration: "underline" } },
+    { cmd: "insertUnorderedList", icon: "•≡" },
+    { cmd: "insertOrderedList",   icon: "1≡" },
+  ];
+
+  return (
+    <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
+      {/* Toolbar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "4px 8px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", flexWrap: "wrap" }}>
+        {mode === "wysiwyg" && toggle.map(t => (
+          <button key={t.cmd} onMouseDown={e => { e.preventDefault(); execCmd(t.cmd); }}
+            style={{ padding: "2px 7px", border: "1px solid var(--b2)", borderRadius: 4, background: "var(--bg)", cursor: "pointer", fontSize: 12, color: "var(--tx)", ...t.style }}>
+            {t.icon}
+          </button>
+        ))}
+        {mode === "wysiwyg" && (
+          <>
+            <button onMouseDown={e => { e.preventDefault(); const url = prompt("URL:"); if (url) execCmd("createLink", url); }}
+              style={{ padding: "2px 7px", border: "1px solid var(--b2)", borderRadius: 4, background: "var(--bg)", cursor: "pointer", fontSize: 12, color: "var(--tx)" }}>🔗</button>
+            <select onMouseDown={e => e.stopPropagation()} onChange={e => { execCmd("formatBlock", e.target.value); e.target.value = ""; }}
+              style={{ padding: "2px 4px", border: "1px solid var(--b2)", borderRadius: 4, background: "var(--bg)", fontSize: 11, color: "var(--tx)", cursor: "pointer" }}>
+              <option value="">Opmaak</option>
+              <option value="p">Alinea</option>
+              <option value="h2">Kop 2</option>
+              <option value="h3">Kop 3</option>
+              <option value="h4">Kop 4</option>
+            </select>
+          </>
+        )}
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setMode(m => m === "wysiwyg" ? "html" : "wysiwyg")}
+          style={{ padding: "2px 10px", border: "1px solid var(--pr)", borderRadius: 4, background: mode === "html" ? "var(--pr)" : "transparent", cursor: "pointer", fontSize: 11, fontWeight: 600, color: mode === "html" ? "#fff" : "var(--pr)", transition: "all 0.15s" }}>
+          {mode === "wysiwyg" ? "</> HTML" : "✦ WYSIWYG"}
+        </button>
+      </div>
+      {/* Editor area */}
+      {mode === "wysiwyg" ? (
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={onInput}
+          onBlur={onInput}
+          style={{
+            minHeight: rows * 22,
+            padding: "10px 12px",
+            outline: "none",
+            fontSize: 13,
+            lineHeight: 1.6,
+            color: "var(--tx)",
+            background: "var(--bg)",
+            overflowY: "auto",
+          }}
+        />
+      ) : (
+        <textarea
+          value={value || ""}
+          onChange={e => onChange(e.target.value)}
+          rows={rows}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            border: "none",
+            outline: "none",
+            resize: "vertical",
+            fontFamily: "monospace",
+            fontSize: 12,
+            lineHeight: 1.5,
+            background: "var(--bg)",
+            color: "var(--tx)",
+            boxSizing: "border-box",
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
 // ─── Product Edit Modal ───────────────────────────────────────────────────────
 const BASE_EDIT_TABS = [
   { id: "general", label: "Algemeen", icon: "⚙" },
@@ -853,8 +971,11 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
             ) : liveAttributes.length === 0 ? (
               <div style={{ color: "var(--dm)", fontSize: 13, padding: 16 }}>Geen attributen gevonden voor deze shop.</div>
             ) : liveAttributes.map(attr => {
-              const pa = p.attributes?.find(a => a.slug === attr.slug) || { id: attr.id, slug: attr.slug, values: [], visible: false, variation: false };
-              const idx = p.attributes?.findIndex(a => a.slug === attr.slug) ?? -1;
+              const paRaw = p.attributes?.find(a => a.slug === attr.slug || a.id === attr.id);
+              // WooCommerce may return options[] or values[] — normalise to safeVals
+              const pa = paRaw ? { ...paRaw } : { id: attr.id, slug: attr.slug, name: attr.name, options: [], visible: false, variation: false };
+              const safeVals = Array.isArray(pa.values) ? pa.values : Array.isArray(pa.options) ? pa.options : [];
+              const idx = p.attributes?.findIndex(a => a.slug === attr.slug || a.id === attr.id) ?? -1;
               const setAttr = (newPa) => {
                 const attrs = [...(p.attributes || [])];
                 if (idx >= 0) attrs[idx] = newPa; else attrs.push(newPa);
@@ -872,9 +993,9 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                     {(attr.terms || []).map(term => (
                       <button key={term} onClick={() => {
-                        const newVals = pa.values.includes(term) ? pa.values.filter(v => v !== term) : [...pa.values, term];
-                        setAttr({ ...pa, values: newVals });
-                      }} style={{ padding: "3px 10px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: pa.values.includes(term) ? "1.5px solid var(--pr)" : "1px solid var(--b2)", background: pa.values.includes(term) ? "var(--pr-l)" : "transparent", color: pa.values.includes(term) ? "var(--pr-h)" : "var(--mx)", transition: "all 0.15s" }}>
+                        const newVals = safeVals.includes(term) ? safeVals.filter(v => v !== term) : [...safeVals, term];
+                        setAttr({ ...pa, options: newVals, values: newVals });
+                      }} style={{ padding: "3px 10px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: safeVals.includes(term) ? "1.5px solid var(--pr)" : "1px solid var(--b2)", background: safeVals.includes(term) ? "var(--pr-l)" : "transparent", color: safeVals.includes(term) ? "var(--pr-h)" : "var(--mx)", transition: "all 0.15s" }}>
                         {term}
                       </button>
                     ))}
@@ -903,10 +1024,10 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               <Inp value={p.slug} onChange={e => upd("slug", e.target.value)} prefix="/" />
             </Field>
             <Field label="Korte beschrijving" hint="Verschijnt naast de productafbeelding">
-              <Inp value={p.short_description} onChange={e => upd("short_description", e.target.value)} multiline rows={3} />
+              <RichEditor value={p.short_description || ""} onChange={v => upd("short_description", v)} rows={4} />
             </Field>
             <Field label="Productbeschrijving">
-              <Inp value={p.description} onChange={e => upd("description", e.target.value)} multiline rows={7} />
+              <RichEditor value={p.description || ""} onChange={v => upd("description", v)} rows={10} />
             </Field>
             <Field label="Categorieën">
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 10, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
