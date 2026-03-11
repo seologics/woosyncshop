@@ -94,6 +94,9 @@ async function wooFetch(shop, endpoint, params = {}) {
 
 async function fetchAllOrders(shop, after, before) {
   let page = 1, allOrders = [];
+  // Calculate date range in days to set a sensible page cap
+  const daysDiff = Math.ceil((new Date(before) - new Date(after)) / (1000 * 60 * 60 * 24));
+  const maxPages = daysDiff <= 30 ? 10 : daysDiff <= 90 ? 5 : 3; // 1000/500/300 orders max
   while (true) {
     const batch = await wooFetch(shop, "orders", {
       after, before,
@@ -104,7 +107,7 @@ async function fetchAllOrders(shop, after, before) {
     allOrders = allOrders.concat(batch);
     if (batch.length < 100) break;
     page++;
-    if (page > 20) break; // safety cap: 2000 orders max
+    if (page > maxPages) break;
   }
   return allOrders;
 }

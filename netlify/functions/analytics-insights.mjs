@@ -104,10 +104,15 @@ export default async function handler(req) {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers });
 
-    // Get Gemini key from platform_settings
-    const { data: settings } = await supabase.from("platform_settings").select("gemini_api_key, gemini_model").eq("id", 1).single();
-    const geminiKey = settings?.gemini_api_key;
-    if (!geminiKey) return new Response(JSON.stringify({ error: "Gemini API key niet geconfigureerd" }), { status: 400, headers });
+    // Get Gemini key from platform_settings (SERVICE_ROLE bypasses RLS)
+    const { data: settings, error: settingsErr } = await supabase
+      .from("platform_settings").select("gemini_api_key, gemini_model").eq("id", 1).single();
+    // Fallback to env var in case platform_settings is empty
+    const geminiKey = settings?.gemini_api_key || Netlify.env.get("GEMINI_API_KEY") || null;
+    if (!geminiKey) {
+      console.error("Gemini key missing. settings:", JSON.stringify(settings), "settingsErr:", settingsErr?.message);
+      return new Response(JSON.stringify({ error: "Gemini API key niet geconfigureerd", debug: settingsErr?.message }), { status: 400, headers });
+    }
 
     // Get user's own Gemini model preference
     const { data: profile } = await supabase.from("user_profiles").select("gemini_model, plan").eq("id", user.id).single();

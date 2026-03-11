@@ -786,11 +786,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tok}` },
             body: JSON.stringify({ shop_id: activeSite.id, endpoint: `products/${product.id}`, method: "GET" }),
           });
-          const full = await res.json();
-          // ── DEBUG: log what meta_data comes back ──────────────────────────────
-          const wqmRaw = (full?.meta_data || []).find(m => m.key === '_wqm_tiers');
-          console.log("[WQM debug] _wqm_tiers FULL:", JSON.stringify(wqmRaw));
-          // ─────────────────────────────────────────────────────────────────────
+          let full; try { full = await res.json(); } catch { full = null; }
           if (full && full.id) {
             const merged = { ...fresh, ...full, pending_changes: fresh.pending_changes || {} };
             setP(prev => prev ? applyWqmMeta({ ...prev, ...merged }) : applyWqmMeta(merged));
@@ -5369,8 +5365,10 @@ function AnalyticsView({ shops, user }) {
       const res = await fetch(`/api/analytics-orders?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Fout bij ophalen data");
+      let json;
+      try { json = await res.json(); }
+      catch { throw new Error(`Server timeout of netwerkfout (HTTP ${res.status}). Probeer een kortere periode.`); }
+      if (!res.ok) throw new Error(json?.error || `Fout bij ophalen data (HTTP ${res.status})`);
       setData(json);
     } catch (e) {
       setError(e.message);
@@ -5391,8 +5389,10 @@ function AnalyticsView({ shops, user }) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
+      let json;
+      try { json = await res.json(); }
+      catch { throw new Error("Insights server timeout"); }
+      if (!res.ok) throw new Error(json?.error || `Insights fout (HTTP ${res.status})`);
       setInsights(json.insights);
     } catch (e) {
       console.error("Insights error:", e);
