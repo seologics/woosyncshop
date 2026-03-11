@@ -512,23 +512,24 @@ const Tabs = ({ tabs, active, onChange, size = "md" }) => (
 
 // ─── Tiered Pricing Component ─────────────────────────────────────────────────
 const TieredPricing = ({ tiers, onChange, type, onTypeChange }) => {
-  const add = () => onChange([...tiers, { qty: "", price: "" }]);
-  const rm = i => onChange(tiers.filter((_, j) => j !== i));
-  const upd = (i, f, v) => onChange(tiers.map((t, j) => j === i ? { ...t, [f]: v } : t));
+  const safeTiers = Array.isArray(tiers) ? tiers : [];
+  const add = () => onChange([...safeTiers, { qty: "", price: "" }]);
+  const rm = i => onChange(safeTiers.filter((_, j) => j !== i));
+  const upd = (i, f, v) => onChange(safeTiers.map((t, j) => j === i ? { ...t, [f]: v } : t));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Field label="Tiered pricing type">
-        <Sel value={type} onChange={e => onTypeChange(e.target.value)} options={[{ value: "fixed", label: "Fixed price" }, { value: "percentage", label: "Percentage discount" }]} />
+        <Sel value={type || "fixed"} onChange={e => onTypeChange(e.target.value)} options={[{ value: "fixed", label: "Fixed price" }, { value: "percent", label: "Percentage discount" }]} />
       </Field>
       <Field label="Tiers">
-        {tiers.map((t, i) => (
+        {safeTiers.map((t, i) => (
           <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
             <Inp value={t.qty} onChange={e => upd(i, "qty", e.target.value)} placeholder="Starting quantity" type="number" style={{ flex: 1 }} />
             <Inp value={t.price} onChange={e => upd(i, "price", e.target.value)} placeholder={type === "percentage" ? "Discount %" : "Product price"} type="number" style={{ flex: 1 }} />
             <button onClick={() => rm(i)} style={{ background: "none", border: "none", color: "var(--re)", cursor: "pointer", fontSize: 16, padding: "4px 6px" }}>⊗</button>
           </div>
         ))}
-        <Btn variant="secondary" size="sm" onClick={add}>+ Add tier</Btn>
+        <Btn variant="secondary" size="sm" onClick={add}>+ Tier toevoegen</Btn>
       </Field>
     </div>
   );
@@ -590,6 +591,38 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
   useEffect(() => {
     if (!product || !open) return;
     const fresh = JSON.parse(JSON.stringify(product));
+
+    // ── Extract WQM meta from meta_data (WooCommerce stores as meta, not top-level) ──
+    const metaArr = fresh.meta_data || [];
+    const getMeta = (key) => metaArr.find(m => m.key === key)?.value;
+    const wqmTiersRaw   = getMeta('_wqm_tiers');
+    const wqmSettingsRaw = getMeta('_wqm_settings');
+
+    if (wqmTiersRaw && typeof wqmTiersRaw === 'object' && Array.isArray(wqmTiersRaw.tiers)) {
+      // WQM stores {qty, amt}, we use {qty, price}
+      fresh.wqm_tiers = wqmTiersRaw.tiers.map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') }));
+      fresh.wqm_tier_type = wqmTiersRaw.type || 'fixed';
+    } else {
+      fresh.wqm_tiers = Array.isArray(fresh.wqm_tiers) ? fresh.wqm_tiers : [];
+      fresh.wqm_tier_type = 'fixed';
+    }
+
+    if (wqmSettingsRaw && typeof wqmSettingsRaw === 'object') {
+      fresh.wqm_settings = {
+        ...wqmSettingsRaw,
+        step:     String(wqmSettingsRaw.step_interval || ''),  // step_interval → step for UI
+        dyo_rows: Array.isArray(wqmSettingsRaw.qty_design_tiers) ? wqmSettingsRaw.qty_design_tiers : [],
+        tiered_pricing_type: wqmTiersRaw?.type || fresh.wqm_tier_type || 'fixed',
+      };
+    } else {
+      fresh.wqm_settings = {
+        ...(fresh.wqm_settings || {}),
+        step: '',
+        dyo_rows: [],
+        tiered_pricing_type: fresh.wqm_tier_type || 'fixed',
+      };
+    }
+
     setP(fresh);
     setSaveError(null);
     setTab("general");
@@ -675,7 +708,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               </Field>
             </>}
             <div style={{ gridColumn: "1 / -1" }}>
-              <TieredPricing tiers={p.wqm_tiers} onChange={v => upd("wqm_tiers", v)} type={p.wqm_settings?.tiered_pricing_type || "fixed"} onTypeChange={v => upd("wqm_settings.tiered_pricing_type", v)} />
+              <TieredPricing tiers={p.wqm_tiers} onChange={v => upd("wqm_tiers", v)} type={p.wqm_settings?.tiered_pricing_type || p.wqm_tier_type || "fixed"} onTypeChange={v => { upd("wqm_settings.tiered_pricing_type", v); upd("wqm_tier_type", v); }} />
             </div>
             <Divider my={0} />
             <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -733,7 +766,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               <div key={v.id} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
                 <div style={{ padding: "10px 14px", background: "var(--s2)", display: "flex", alignItems: "center", gap: 10 }}>
                   <Badge color="default">#{v.id}</Badge>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{Object.entries(v.attributes || {}).map(([k, val]) => `${liveAttributes.find(a => a.slug === k)?.name || k}: ${val}`).join(" · ")}</span>
                   <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dm)" }}>SKU: {v.sku}</span>
                 </div>
                 <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -776,7 +809,15 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
         {tab === "quantity" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }} className="fade-in">
             <Field label="Quantity selector type">
-              <Sel value={p.wqm_settings?.qty_design || "full_width_swatches"} onChange={e => upd("wqm_settings.qty_design", e.target.value)} options={[{ value: "full_width_swatches", label: "Full width swatches" }, { value: "dropdown", label: "Dropdown" }, { value: "buttons", label: "Buttons" }, { value: "default", label: "Default (number input)" }]} />
+              <Sel value={p.wqm_settings?.qty_design || ""} onChange={e => upd("wqm_settings.qty_design", e.target.value)} options={[
+                { value: "", label: "WooCommerce default" },
+                { value: "select", label: "Dropdown (Basic)" },
+                { value: "buttons", label: "Buttons (Basic)" },
+                { value: "dyo_select", label: "DYO: Dropdown" },
+                { value: "dyo_swatches", label: "DYO: Swatches" },
+                { value: "dyo_wide_swatches", label: "DYO: Full width swatches" },
+                { value: "dyo_imgswatches", label: "DYO: Image swatches" },
+              ]} />
             </Field>
             <Field label="Quantity title">
               <Inp value={p.wqm_settings?.title || ""} onChange={e => upd("wqm_settings.title", e.target.value)} placeholder="Selecteer aantal" />
@@ -791,7 +832,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               <Inp value={p.wqm_settings?.default_qty || ""} onChange={e => upd("wqm_settings.default_qty", e.target.value)} type="number" placeholder="1" />
             </Field>
             <Field label="Step interval">
-              <Inp value={p.wqm_settings?.step || ""} onChange={e => upd("wqm_settings.step", e.target.value)} type="number" placeholder="1" />
+              <Inp value={p.wqm_settings?.step || ""} onChange={e => upd("wqm_settings.step", e.target.value)} type="text" placeholder="1" />
             </Field>
             <div style={{ gridColumn: "1/-1" }}>
               <Chk checked={p.wqm_settings?.variant_selector || false} onChange={v => upd("wqm_settings.variant_selector", v)} label="Custom variant selector – voor elke gekozen hoeveelheid kan de klant de variaties apart kiezen (werkt alleen als alle variaties dezelfde prijs hebben)" />
@@ -829,7 +870,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                    {attr.terms.map(term => (
+                    {(attr.terms || []).map(term => (
                       <button key={term} onClick={() => {
                         const newVals = pa.values.includes(term) ? pa.values.filter(v => v !== term) : [...pa.values, term];
                         setAttr({ ...pa, values: newVals });
@@ -1134,7 +1175,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate })
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "var(--mx)" }}>
-                      {Object.entries(v.attributes).map(([k, val]) => <Badge key={k} color="default" size="sm">{liveAttributes.find(a => a.slug === k)?.name || k}: {val}</Badge>)}
+                      {Object.entries(v.attributes || {}).map(([k, val]) => <Badge key={k} color="default" size="sm">{liveAttributes.find(a => a.slug === k)?.name || k}: {val}</Badge>)}
                     </span>
                   </div>
                   <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "monospace" }}>{v.sku}</span>
@@ -1755,7 +1796,10 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const [connectModal, setConnectModal] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // getToken imported from supabase.js — no local wrapper needed
+  const getToken = async () => {
+    const session = { access_token: await getToken() };
+    return session?.access_token;
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -5096,7 +5140,6 @@ function AnalyticsView({ shops, user }) {
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
   const [loading, setLoading]                 = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
-  const [insightsUnavailable, setInsightsUnavailable] = useState(false);
   const [error, setError]                     = useState(null);
   const [data, setData]                       = useState(null);
   const [insights, setInsights]               = useState(null);
@@ -5129,7 +5172,7 @@ function AnalyticsView({ shops, user }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const fetchInsights = useCallback(async () => {
-    if (!data || insightsUnavailable) return;
+    if (!data) return;
     setInsightsLoading(true);
     try {
       const token = await getToken();
@@ -5138,25 +5181,17 @@ function AnalyticsView({ shops, user }) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
       });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        // Only permanently disable if Gemini key is truly not configured
-        if (res.status === 400 && (json.error || "").includes("niet geconfigureerd")) {
-          setInsightsUnavailable(true);
-          return;
-        }
-        throw new Error(json.error || `Insights fout (${res.status})`);
-      }
       const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
       setInsights(json.insights);
     } catch (e) {
       console.error("Insights error:", e);
     } finally {
       setInsightsLoading(false);
     }
-  }, [data, range, insightsUnavailable]);
+  }, [data, range]);
 
-  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data]);
+  useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
 
   const displayData = useMemo(() => {
     if (!data) return null;
@@ -5688,7 +5723,10 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   // Per-shop cache: attributes (with terms) + categories
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
 
-  // getToken imported from supabase.js — no local wrapper needed
+  const getToken = async () => {
+    const session = { access_token: await getToken() };
+    return session?.access_token;
+  };
 
   const wooCall = async (shopId, endpoint, method = "GET", data = null) => {
     const token = await getToken();
@@ -5963,6 +6001,28 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
           }
           if (images.length > 0) payload.images = images;
 
+          // WQM meta_data (save if shop has WQM)
+          if (updated.wqm_tiers !== undefined || updated.wqm_settings !== undefined) {
+            const tierType = updated.wqm_settings?.tiered_pricing_type || updated.wqm_tier_type || 'fixed';
+            const tiersToSave = (updated.wqm_tiers || [])
+              .filter(t => t.qty)
+              .map(t => ({ qty: Number(t.qty), amt: Number(t.price) }));
+            const settingsToSave = {
+              min_qty:         updated.wqm_settings?.min_qty || '',
+              max_qty:         updated.wqm_settings?.max_qty || '',
+              default_qty:     updated.wqm_settings?.default_qty || '',
+              step_interval:   updated.wqm_settings?.step || '',
+              qty_design:      updated.wqm_settings?.qty_design || '',
+              title:           updated.wqm_settings?.title || '',
+              variant_selector: updated.wqm_settings?.variant_selector || false,
+              qty_design_tiers: updated.wqm_settings?.dyo_rows || [],
+            };
+            payload.meta_data = [
+              { key: '_wqm_tiers',    value: tiersToSave.length > 0 ? { type: tierType, tiers: tiersToSave } : null },
+              { key: '_wqm_settings', value: settingsToSave },
+            ];
+          }
+
           // PUT the main product
           await wooCall(shopId, `products/${updated.id}`, "PUT", payload);
 
@@ -5980,6 +6040,15 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
               };
               if (v.manage_stock) varPayload.stock_quantity = parseInt(v.stock_quantity) || 0;
               if (v.backorders !== undefined) varPayload.backorders = v.backorders;
+              // WQM variation meta
+              if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
+                const vTierType = v.wqm_settings?.tiered_pricing_type || v.wqm_tier_type || 'fixed';
+                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: Number(t.price) }));
+                varPayload.meta_data = [
+                  { key: '_wqm_tiers', value: vTiers.length > 0 ? { type: vTierType, tiers: vTiers } : null },
+                  { key: '_wqm_settings', value: { min_qty: v.wqm_settings?.min_qty || '', max_qty: v.wqm_settings?.max_qty || '', default_qty: v.wqm_settings?.default_qty || '', step_interval: v.wqm_settings?.step || '' } },
+                ];
+              }
               return wooCall(shopId, `products/${updated.id}/variations/${v.id}`, "PUT", varPayload);
             });
             await Promise.all(varPromises);
@@ -8049,23 +8118,6 @@ const PlatformSettings = () => {
 
   const hasGemini = !!ps.gemini_api_key;
   const hasOpenAI = !!ps.openai_api_key;
-  const [keyTest, setKeyTest] = useState({}); // { gemini: 'ok'|'fail'|'loading', openai: ... }
-
-  const testApiKey = async (provider) => {
-    setKeyTest(t => ({ ...t, [provider]: 'loading' }));
-    try {
-      const token = await getToken();
-      const res = await fetch('/api/test-api-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ provider, key: provider === 'gemini' ? ps.gemini_api_key : ps.openai_api_key }),
-      });
-      const d = await res.json();
-      setKeyTest(t => ({ ...t, [provider]: d.ok ? 'ok' : 'fail', [provider + '_msg']: d.error || '' }));
-    } catch (e) {
-      setKeyTest(t => ({ ...t, [provider]: 'fail', [provider + '_msg']: e.message }));
-    }
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -8076,22 +8128,10 @@ const PlatformSettings = () => {
         <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 14 }}>Voeg één of beide toe. Je kiest per use-case welke je gebruikt.</div>
         <div className="settings-2col">
           <Field label="Google Gemini API Key" hint={hasGemini ? "✓ Ingesteld" : "Geen key → Gemini use-cases uitgeschakeld"}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Inp value={ps.gemini_api_key} onChange={e => { setPs(p => ({ ...p, gemini_api_key: e.target.value })); setKeyTest(t => ({ ...t, gemini: null })); }} type="password" placeholder="AIzaSy..." style={{ flex: 1 }} />
-              <button onClick={() => testApiKey('gemini')} disabled={!ps.gemini_api_key || keyTest.gemini === 'loading'} style={{ flexShrink: 0, padding: "7px 12px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", opacity: !ps.gemini_api_key ? 0.4 : 1 }}>
-                {keyTest.gemini === 'loading' ? '⏳' : keyTest.gemini === 'ok' ? '✅ OK' : keyTest.gemini === 'fail' ? '❌ Fout' : '🔌 Test'}
-              </button>
-            </div>
-            {keyTest.gemini === 'fail' && keyTest.gemini_msg && <div style={{ fontSize: 11, color: "var(--re)", marginTop: 4 }}>{keyTest.gemini_msg}</div>}
+            <Inp value={ps.gemini_api_key} onChange={e => setPs(p => ({ ...p, gemini_api_key: e.target.value }))} type="password" placeholder="AIzaSy..." />
           </Field>
           <Field label="OpenAI API Key" hint={hasOpenAI ? "✓ Ingesteld" : "Geen key → OpenAI use-cases uitgeschakeld"}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Inp value={ps.openai_api_key} onChange={e => { setPs(p => ({ ...p, openai_api_key: e.target.value })); setKeyTest(t => ({ ...t, openai: null })); }} type="password" placeholder="sk-..." style={{ flex: 1 }} />
-              <button onClick={() => testApiKey('openai')} disabled={!ps.openai_api_key || keyTest.openai === 'loading'} style={{ flexShrink: 0, padding: "7px 12px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", opacity: !ps.openai_api_key ? 0.4 : 1 }}>
-                {keyTest.openai === 'loading' ? '⏳' : keyTest.openai === 'ok' ? '✅ OK' : keyTest.openai === 'fail' ? '❌ Fout' : '🔌 Test'}
-              </button>
-            </div>
-            {keyTest.openai === 'fail' && keyTest.openai_msg && <div style={{ fontSize: 11, color: "var(--re)", marginTop: 4 }}>{keyTest.openai_msg}</div>}
+            <Inp value={ps.openai_api_key} onChange={e => setPs(p => ({ ...p, openai_api_key: e.target.value }))} type="password" placeholder="sk-..." />
           </Field>
           <Field label="TinyPNG API Key" hint="Gebruikt voor afbeelding compressie na Gemini resize">
             <Inp value={ps.tinypng_api_key} onChange={e => setPs(p => ({ ...p, tinypng_api_key: e.target.value }))} type="password" placeholder="abcdef..." />
