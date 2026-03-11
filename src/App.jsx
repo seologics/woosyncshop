@@ -1742,6 +1742,19 @@ Rules:
   );
 };
 
+const ConnectCTA = ({ service, icon, title, description }) => (
+  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 20px", textAlign: "center", gap: 10 }}>
+    <div style={{ fontSize: 32 }}>{icon}</div>
+    <div style={{ fontFamily: "var(--font-h)", fontSize: 14, fontWeight: 700, color: "var(--tx)" }}>{title}</div>
+    <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, maxWidth: 240 }}>{description}</div>
+    <a href="/#settings" onClick={() => window.location.hash = "settings"} style={{ textDecoration: "none" }}>
+      <button style={{ marginTop: 4, padding: "7px 16px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+        Koppelen in Instellingen →
+      </button>
+    </a>
+  </div>
+);
+
 const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1913,19 +1926,7 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const otherSites = sites.filter(s => s.id !== activeSite?.id);
   const matchModeLabel = { sku: "🔑 SKU", attribute: "🏷 Attribuut", manual: "🔍 Handmatig", ai: "🤖 AI" };
 
-  // ── Connect CTA helper ──────────────────────────────────────────────────
-  const ConnectCTA = ({ service, icon, title, description }) => (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 20px", textAlign: "center", gap: 10 }}>
-      <div style={{ fontSize: 32 }}>{icon}</div>
-      <div style={{ fontFamily: "var(--font-h)", fontSize: 14, fontWeight: 700, color: "var(--tx)" }}>{title}</div>
-      <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, maxWidth: 240 }}>{description}</div>
-      <a href="/#settings" onClick={() => window.location.hash = "settings"} style={{ textDecoration: "none" }}>
-        <button style={{ marginTop: 4, padding: "7px 16px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
-          Koppelen in Instellingen →
-        </button>
-      </a>
-    </div>
-  );
+  // ConnectCTA is defined at module level below
 
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
@@ -2345,7 +2346,6 @@ const CouponManager = ({ activeSite, user }) => {
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Aanmaken mislukt");
       setCouponResult(d);
-      // reset form code for next coupon
       setForm(f => ({ ...f, code: "", amount: "" }));
       setCodeGenerated(false);
       loadHistory();
