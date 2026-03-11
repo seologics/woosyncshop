@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
+export const config = { path: '/api/analytics-insights' };
+
 function writeLog(supabase, level, message, meta = {}) {
   try { supabase.from("system_logs").insert({
     level, message, function_name: "analytics-insights",
