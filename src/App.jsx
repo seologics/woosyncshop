@@ -1742,19 +1742,6 @@ Rules:
   );
 };
 
-const ConnectCTA = ({ service, icon, title, description }) => (
-  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 20px", textAlign: "center", gap: 10 }}>
-    <div style={{ fontSize: 32 }}>{icon}</div>
-    <div style={{ fontFamily: "var(--font-h)", fontSize: 14, fontWeight: 700, color: "var(--tx)" }}>{title}</div>
-    <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, maxWidth: 240 }}>{description}</div>
-    <a href="/#settings" onClick={() => window.location.hash = "settings"} style={{ textDecoration: "none" }}>
-      <button style={{ marginTop: 4, padding: "7px 16px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
-        Koppelen in Instellingen →
-      </button>
-    </a>
-  </div>
-);
-
 const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1768,7 +1755,10 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const [connectModal, setConnectModal] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // getToken is imported from supabase.js — no local wrapper needed
+  const getToken = async () => {
+    const session = { access_token: await getToken() };
+    return session?.access_token;
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -1926,7 +1916,19 @@ const ConnectedSitesView = ({ products, sites, activeSite, wooCall }) => {
   const otherSites = sites.filter(s => s.id !== activeSite?.id);
   const matchModeLabel = { sku: "🔑 SKU", attribute: "🏷 Attribuut", manual: "🔍 Handmatig", ai: "🤖 AI" };
 
-  // ConnectCTA defined at module level
+  // ── Connect CTA helper ──────────────────────────────────────────────────
+  const ConnectCTA = ({ service, icon, title, description }) => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 20px", textAlign: "center", gap: 10 }}>
+      <div style={{ fontSize: 32 }}>{icon}</div>
+      <div style={{ fontFamily: "var(--font-h)", fontSize: 14, fontWeight: 700, color: "var(--tx)" }}>{title}</div>
+      <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.6, maxWidth: 240 }}>{description}</div>
+      <a href="/#settings" onClick={() => window.location.hash = "settings"} style={{ textDecoration: "none" }}>
+        <button style={{ marginTop: 4, padding: "7px 16px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+          Koppelen in Instellingen →
+        </button>
+      </a>
+    </div>
+  );
 
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "60px 0", justifyContent: "center", color: "var(--mx)", fontSize: 13 }}>
@@ -2255,8 +2257,6 @@ const CouponManager = ({ activeSite, user }) => {
   const [creating, setCreating] = useState(false);
   const [result, setCouponResult] = useState(null); // { ok, coupon_url, coupon_code, error }
   const [codeGenerated, setCodeGenerated] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Check if Advanced Coupons is installed on the active shop
   useEffect(() => {
@@ -2269,7 +2269,7 @@ const CouponManager = ({ activeSite, user }) => {
         const res = await fetch("/api/woo", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ shop_id: activeSite.id, endpoint: "system_status", method: "GET" }),
+          body: JSON.stringify({ shopId: activeSite.id, endpoint: "system_status", method: "GET" }),
         });
         if (!res.ok) { setHasAdvCoupons(false); return; }
         const d = await res.json();
@@ -2284,29 +2284,6 @@ const CouponManager = ({ activeSite, user }) => {
     };
     checkPlugin();
   }, [activeSite?.id]);
-
-  const loadHistory = async () => {
-    if (!activeSite) return;
-    setHistoryLoading(true);
-    try {
-      const { data } = await supabase.from("coupons").select("*").eq("shop_id", activeSite.id).order("created_at", { ascending: false }).limit(20);
-      setHistory(data || []);
-    } catch {}
-    finally { setHistoryLoading(false); }
-  };
-  useEffect(() => { loadHistory(); }, [activeSite?.id]);
-
-  const deleteCoupon = async (c) => {
-    try {
-      const token = await getToken();
-      await fetch("/api/coupon-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ coupon_db_id: c.id, woo_coupon_id: c.woo_coupon_id, shop_id: c.shop_id }),
-      });
-      setHistory(h => h.filter(x => x.id !== c.id));
-    } catch {}
-  };
 
   const generateCode = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -2340,9 +2317,9 @@ const CouponManager = ({ activeSite, user }) => {
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Aanmaken mislukt");
       setCouponResult(d);
+      // reset form code for next coupon
       setForm(f => ({ ...f, code: "", amount: "" }));
       setCodeGenerated(false);
-      loadHistory();
     } catch (e) {
       setCouponResult({ ok: false, error: e.message });
     } finally {
@@ -2418,29 +2395,7 @@ const CouponManager = ({ activeSite, user }) => {
           ✗ {result.error}
         </div>
       )}
-      {(history.length > 0 || historyLoading) && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 8 }}>
-            🕐 Recente kortingscodes
-            {historyLoading && <span style={{ fontSize: 11, fontWeight: 400, color: "var(--dm)" }}>laden...</span>}
-          </div>
-          {history.map(c => {
-            const expired = c.expires_at && new Date(c.expires_at) < new Date();
-            return (
-              <div key={c.id} style={{ padding: "10px 14px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 12, opacity: expired ? 0.5 : 1 }}>
-                <code style={{ fontWeight: 700, fontSize: 13, letterSpacing: "0.08em", color: expired ? "var(--mx)" : "var(--gr)", minWidth: 90 }}>{c.code}</code>
-                <span style={{ fontSize: 11, color: "var(--mx)", flex: 1 }}>
-                  {c.discount_type === "percent" ? `${c.amount}%` : `€${c.amount}`} korting
-                  {c.expires_at && <> · {expired ? "Verlopen" : "Vervalt"} {new Date(c.expires_at).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
-                </span>
-                {c.coupon_url && !expired && <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.coupon_url).catch(() => {})}>📋 URL</Btn>}
-                <Btn variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(c.code).catch(() => {})}>📋</Btn>
-                <Btn variant="ghost" size="sm" style={{ color: "var(--re)", opacity: 0.7 }} onClick={() => { if (window.confirm(`Kortingscode ${c.code} verwijderen?`)) deleteCoupon(c); }}>🗑</Btn>
-              </div>
-            );
-          })}
-        </div>
-      )}
+
       {/* Coupon form */}
       {!result?.ok && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -4246,11 +4201,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
     try {
       const token = await getToken();
       const res = await fetch(`/api/shop-google-data?shop_id=${shopId}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`Google services ophalen mislukt (${res.status})` + (txt && !txt.includes("<!DOCTYPE") ? ": " + txt.slice(0, 100) : ""));
-      }
       const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Ophalen mislukt");
       setShopGoogle(s => ({ ...s, [shopId]: { ...d, loading: false, error: null } }));
     } catch (e) {
       setShopGoogle(s => ({ ...s, [shopId]: { ...(s[shopId] || {}), loading: false, error: e.message } }));
@@ -4345,7 +4297,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       const res = await fetch("/api/woo-test", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: shop.id, site_url: shop.site_url, consumer_key: shop.consumer_key, consumer_secret: shop.consumer_secret })
+        body: JSON.stringify({ site_url: shop.site_url, consumer_key: shop.consumer_key, consumer_secret: shop.consumer_secret })
       });
       const result = await res.json();
       setTestResults(r => ({ ...r, [shop.id]: result }));
@@ -4359,8 +4311,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         const status = await statusRes.json();
         const activePlugins = status?.active_plugins || [];
         const hasWqm = activePlugins.some(p => p.plugin?.includes("quantity-manager") || p.name?.toLowerCase().includes("quantity manager"));
-        const updatedShop = { ...shop, wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, timezone: result.timezone || shop.timezone, last_connected: new Date().toISOString() };
-        await supabase.from("shops").update({ wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, timezone: result.timezone || null, last_connected: new Date().toISOString() }).eq("id", shop.id);
+        const updatedShop = { ...shop, wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, last_connected: new Date().toISOString() };
+        await supabase.from("shops").update({ wc_version: result.wc_version, wp_version: result.wp_version, has_wqm: hasWqm, last_connected: new Date().toISOString() }).eq("id", shop.id);
         onShopUpdated?.(updatedShop);
       }
     } catch (e) {
@@ -5132,6 +5084,7 @@ function AnalyticsView({ shops, user }) {
     ai:       { label: "AI zoekmachines", color: "#F472B6", icon: "🤖" },
     email:    { label: "E-mail",          color: "#A78BFA", icon: "📧" },
     other:    { label: "Overig",          color: "#94A3B8", icon: "❓" },
+    admin:    { label: "Intern / Admin",   color: "#CBD5E1", icon: "🖥️" },
   };
 
   const SHOP_COLORS = ["#6E6EF7", "#34D399", "#60A5FA", "#F59E0B", "#F472B6", "#A78BFA"];
@@ -5147,6 +5100,7 @@ function AnalyticsView({ shops, user }) {
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
   const [loading, setLoading]                 = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsUnavailable, setInsightsUnavailable] = useState(false);
   const [error, setError]                     = useState(null);
   const [data, setData]                       = useState(null);
   const [insights, setInsights]               = useState(null);
@@ -5166,11 +5120,8 @@ function AnalyticsView({ shops, user }) {
       const res = await fetch(`/api/analytics-orders?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error("Analytics ophalen mislukt (" + res.status + ")" + (txt && !txt.includes("<!DOCTYPE") ? ": " + txt.slice(0, 100) : ""));
-      }
       const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Fout bij ophalen data");
       setData(json);
     } catch (e) {
       setError(e.message);
@@ -5182,7 +5133,7 @@ function AnalyticsView({ shops, user }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const fetchInsights = useCallback(async () => {
-    if (!data) return;
+    if (!data || insightsUnavailable) return;
     setInsightsLoading(true);
     try {
       const token = await getToken();
@@ -5191,20 +5142,22 @@ function AnalyticsView({ shops, user }) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ merged: data.merged, shops: data.shops, range }),
       });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error("Insights ophalen mislukt (" + res.status + ")");
+      if (res.status === 400) {
+        // Gemini key not configured — silently disable, no console spam
+        setInsightsUnavailable(true);
+        return;
       }
       const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
       setInsights(json.insights);
     } catch (e) {
       console.error("Insights error:", e);
     } finally {
       setInsightsLoading(false);
     }
-  }, [data, range]);
+  }, [data, range, insightsUnavailable]);
 
-  useEffect(() => { if (data && !insights) fetchInsights(); }, [data]);
+  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data]);
 
   const displayData = useMemo(() => {
     if (!data) return null;
@@ -5319,13 +5272,10 @@ function AnalyticsView({ shops, user }) {
   if (!d) return null;
 
   const kpis = [
-    { label: "Omzet (excl. btw)",  value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
-    { label: "Bestellingen",       value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
-    { label: "Gem. orderwaarde",   value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
-    { label: "Terugboekingen",     value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
-    { label: "Kortingen toegepast", value: fmt(d.summary.totalDiscount || 0), icon: "🏷", color: "var(--am)" },
-    { label: "Totaal btw",         value: fmt(d.summary.totalTax || 0),      icon: "🧾", color: "var(--mx)" },
-    { label: "Verzendkosten",      value: fmt(d.summary.totalShipping || 0), icon: "🚚", color: "#60A5FA" },
+    { label: "Omzet",            value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
+    { label: "Bestellingen",     value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
+    { label: "Gem. orderwaarde", value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
+    { label: "Terugboekingen",   value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
   ];
 
   const insightTypeStyle = {
@@ -5503,7 +5453,7 @@ function AnalyticsView({ shops, user }) {
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.revenue)}</div>
-                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders}x verkocht</div>
+                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders} orders</div>
                     </div>
                   </div>
                   <div style={{ height: 3, borderRadius: 99, background: "var(--b1)", overflow: "hidden" }}>
@@ -5739,7 +5689,10 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   // Per-shop cache: attributes (with terms) + categories
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
 
-  // getToken is imported from supabase.js — no local wrapper needed
+  const getToken = async () => {
+    const session = { access_token: await getToken() };
+    return session?.access_token;
+  };
 
   const wooCall = async (shopId, endpoint, method = "GET", data = null) => {
     const token = await getToken();
