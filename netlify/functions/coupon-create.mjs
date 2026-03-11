@@ -62,7 +62,21 @@ export default async (req) => {
 
   // Format a Date as a local datetime string in the shop's timezone (no timezone suffix)
   // WooCommerce date_expires and acfw_schedule expect local site time, not UTC
-  const shopTimezone = shop.timezone || 'Europe/Amsterdam';
+  // WordPress may store timezone as "UTC+1" / "UTC-5" — convert to proper IANA offset string
+  const rawTz = shop.timezone || 'Europe/Amsterdam';
+  const resolveTimezone = (tz) => {
+    const m = tz.match(/^UTC([+-])(\d+)(?:\.(5))?$/);
+    if (!m) return tz; // already an IANA name
+    const sign = m[1];
+    const hours = m[2].padStart(2, '0');
+    const mins = m[3] ? '30' : '00';
+    // Etc/GMT uses inverted sign convention
+    const etcSign = sign === '+' ? '-' : '+';
+    const ianaGuess = `Etc/GMT${etcSign}${parseInt(m[2])}`;
+    try { new Intl.DateTimeFormat('en', { timeZone: ianaGuess }); return ianaGuess; }
+    catch { return 'Europe/Amsterdam'; }
+  };
+  const shopTimezone = resolveTimezone(rawTz);
   const toShopTime = (d) =>
     d.toLocaleString('sv-SE', { timeZone: shopTimezone }).replace('T', ' ').slice(0, 16)
 
@@ -107,17 +121,19 @@ export default async (req) => {
     const expiresAt = expiryDate ? expiryDate.toISOString() : null
 
     // Persist to coupons table for history view
-    await supabase.from('coupons').insert({
-      user_id:       user.id,
-      shop_id:       shopId,
-      woo_coupon_id: wooData.id,
-      code:          createdCode,
-      discount_type: wooData.discount_type,
-      amount:        parseFloat(wooData.amount) || 0,
-      coupon_url:    couponUrl,
-      expires_at:    expiresAt,
-      created_at:    new Date().toISOString(),
-    }).catch(() => {}) // non-fatal
+    try {
+      await supabase.from('coupons').insert({
+        user_id:       user.id,
+        shop_id:       shopId,
+        woo_coupon_id: wooData.id,
+        code:          createdCode,
+        discount_type: wooData.discount_type,
+        amount:        parseFloat(wooData.amount) || 0,
+        coupon_url:    couponUrl,
+        expires_at:    expiresAt,
+        created_at:    new Date().toISOString(),
+      });
+    } catch { /* non-fatal */ }
 
     await writeLog(supabase, 'coupon-create', 'info', 'Coupon created', { code: createdCode, siteUrl, userId: user.id })
     return new Response(JSON.stringify({

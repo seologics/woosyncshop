@@ -84,7 +84,7 @@ export default async (req) => {
         Netlify.env.get("SUPABASE_URL"),
         Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY"),
       );
-      await supabase.from("shops").update({ timezone }).eq("id", shop_id).catch(() => {});
+      try { await supabase.from("shops").update({ timezone }).eq("id", shop_id); } catch {}
     }
 
     return new Response(
