@@ -701,34 +701,31 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [variationsLoading, setVariationsLoading] = useState(false);
+  const [metaLoading, setMetaLoading] = useState(false);
 
   // Use live attributes/categories from shopCache, fallback to empty
   const liveAttributes = shopCache?.attributes || [];
   const liveCategories = shopCache?.categories || [];
 
-  useEffect(() => {
-    if (!product || !open) return;
-    const fresh = JSON.parse(JSON.stringify(product));
-
-    // ── Extract WQM meta from meta_data (WooCommerce stores as meta, not top-level) ──
+  // ── Helper: apply WQM normalization to a product object ──────────────────────
+  const applyWqmMeta = (fresh) => {
     const metaArr = fresh.meta_data || [];
     const getMeta = (key) => metaArr.find(m => m.key === key)?.value;
-    const wqmTiersRaw   = getMeta('_wqm_tiers');
+    const wqmTiersRaw    = getMeta('_wqm_tiers');
     const wqmSettingsRaw = getMeta('_wqm_settings');
 
     if (wqmTiersRaw && typeof wqmTiersRaw === 'object' && Array.isArray(wqmTiersRaw.tiers)) {
-      // WQM stores {qty, amt}, we use {qty, price}
-      fresh.wqm_tiers = wqmTiersRaw.tiers.map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') }));
+      fresh.wqm_tiers     = wqmTiersRaw.tiers.map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') }));
       fresh.wqm_tier_type = wqmTiersRaw.type || 'fixed';
     } else {
-      fresh.wqm_tiers = Array.isArray(fresh.wqm_tiers) ? fresh.wqm_tiers : [];
+      fresh.wqm_tiers     = Array.isArray(fresh.wqm_tiers) ? fresh.wqm_tiers : [];
       fresh.wqm_tier_type = 'fixed';
     }
 
     if (wqmSettingsRaw && typeof wqmSettingsRaw === 'object') {
       fresh.wqm_settings = {
         ...wqmSettingsRaw,
-        step:     String(wqmSettingsRaw.step_interval || ''),  // step_interval → step for UI
+        step:     String(wqmSettingsRaw.step_interval || ''),
         dyo_rows: Array.isArray(wqmSettingsRaw.qty_design_tiers) ? wqmSettingsRaw.qty_design_tiers : [],
         tiered_pricing_type: wqmTiersRaw?.type || fresh.wqm_tier_type || 'fixed',
       };
@@ -740,20 +737,53 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
         tiered_pricing_type: fresh.wqm_tier_type || 'fixed',
       };
     }
+    return fresh;
+  };
 
-    setP(fresh);
+  useEffect(() => {
+    if (!product || !open) return;
+    const fresh = JSON.parse(JSON.stringify(product));
     setSaveError(null);
     setTab("general");
+
+    // ── Always fetch the full single product to guarantee meta_data is present ──
+    // The products list endpoint omits meta_data for performance; the single
+    // product endpoint always includes it (needed for _wqm_tiers, _wqm_settings).
+    // Show modal immediately with list data, then silently update with full data.
+    setP(applyWqmMeta(fresh));  // Show modal immediately
+
+    if (activeSite?.id && product.id) {
+      setMetaLoading(true);
+      getToken().then(async (tok) => {
+        try {
+          const res = await fetch("/api/woo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tok}` },
+            body: JSON.stringify({ shop_id: activeSite.id, endpoint: `products/${product.id}`, method: "GET" }),
+          });
+          const full = await res.json();
+          if (full && full.id) {
+            // Merge full product data (has meta_data) over the list snapshot
+            const merged = { ...fresh, ...full, pending_changes: fresh.pending_changes || {} };
+            setP(prev => prev ? applyWqmMeta({ ...prev, ...merged }) : applyWqmMeta(merged));
+          }
+        } catch (e) {
+          console.error("Full product fetch failed:", e);
+        } finally {
+          setMetaLoading(false);
+        }
+      });
+    }
 
     // Fetch full variation details if variable product (products list only has variation IDs)
     if (product.type === "variable" && product.id && activeSite?.id) {
       const hasFullVariations = Array.isArray(product.variations) && product.variations.length > 0 && typeof product.variations[0] === "object" && product.variations[0].regular_price !== undefined;
       if (!hasFullVariations) {
         setVariationsLoading(true);
-        getToken().then((tok) => { const session = { access_token: tok };
+        getToken().then((tok) => {
           fetch("/api/woo", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tok}` },
             body: JSON.stringify({ shop_id: activeSite.id, endpoint: `products/${product.id}/variations?per_page=100`, method: "GET" }),
           })
             .then(r => r.json())
@@ -826,7 +856,10 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               </Field>
             </>}
             <div style={{ gridColumn: "1 / -1" }}>
-              <TieredPricing tiers={p.wqm_tiers} onChange={v => upd("wqm_tiers", v)} type={p.wqm_settings?.tiered_pricing_type || p.wqm_tier_type || "fixed"} onTypeChange={v => { upd("wqm_settings.tiered_pricing_type", v); upd("wqm_tier_type", v); }} />
+              {metaLoading
+                ? <div style={{ fontSize: 12, color: "var(--mx)", padding: "8px 0" }}>⏳ Tiers laden…</div>
+                : <TieredPricing tiers={p.wqm_tiers} onChange={v => upd("wqm_tiers", v)} type={p.wqm_settings?.tiered_pricing_type || p.wqm_tier_type || "fixed"} onTypeChange={v => { upd("wqm_settings.tiered_pricing_type", v); upd("wqm_tier_type", v); }} />
+              }
             </div>
             <Divider my={0} />
             <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -926,6 +959,11 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
         {/* ── HOEVEELHEID (WQM) ── */}
         {tab === "quantity" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }} className="fade-in">
+            {metaLoading && (
+              <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "var(--s2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
+                <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span> Hoeveelheidsopties laden…
+              </div>
+            )}
             <Field label="Quantity selector type">
               <Sel value={p.wqm_settings?.qty_design || ""} onChange={e => upd("wqm_settings.qty_design", e.target.value)} options={[
                 { value: "", label: "WooCommerce default" },
