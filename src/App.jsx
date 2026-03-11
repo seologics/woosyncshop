@@ -5329,6 +5329,7 @@ function AnalyticsView({ shops, user }) {
     referral: { label: "Doorverwijzing",  color: "#F59E0B", icon: "↗️" },
     ai:       { label: "AI zoekmachines", color: "#F472B6", icon: "🤖" },
     email:    { label: "E-mail",          color: "#A78BFA", icon: "📧" },
+    admin:    { label: "Intern / Admin",  color: "#CBD5E1", icon: "🖥️" },
     other:    { label: "Overig",          color: "#94A3B8", icon: "❓" },
   };
 
@@ -5341,6 +5342,8 @@ function AnalyticsView({ shops, user }) {
     setSelectedShopForConnections(id);
   };
   const [range, setRange]                     = useState("30d");
+  const [excludeCancelled, setExcludeCancelled] = useState(false);
+  const [excludeRefunded,  setExcludeRefunded]  = useState(false);
   const [activeMetric, setActiveMetric]       = useState("revenue");
   const [activeSourceTab, setActiveSourceTab] = useState("overview");
   const [loading, setLoading]                 = useState(false);
@@ -5361,6 +5364,8 @@ function AnalyticsView({ shops, user }) {
       const token = await getToken();
       const params = new URLSearchParams({ range });
       if (selectedShop !== "all") params.set("shop_id", selectedShop);
+      if (excludeCancelled) params.set("exclude_cancelled", "1");
+      if (excludeRefunded)  params.set("exclude_refunded", "1");
       const res = await fetch(`/api/analytics-orders?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -5372,7 +5377,7 @@ function AnalyticsView({ shops, user }) {
     } finally {
       setLoading(false);
     }
-  }, [range, selectedShop]);
+  }, [range, selectedShop, excludeCancelled, excludeRefunded]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -5511,10 +5516,13 @@ function AnalyticsView({ shops, user }) {
   if (!d) return null;
 
   const kpis = [
-    { label: "Omzet",            value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
-    { label: "Bestellingen",     value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
-    { label: "Gem. orderwaarde", value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
-    { label: "Terugboekingen",   value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
+    { label: "Omzet (excl. btw)",     value: fmt(d.summary.totalRevenue),   icon: "💶", color: "#34D399" },
+    { label: "Bestellingen",          value: d.summary.totalOrders,         icon: "📦", color: "#60A5FA" },
+    { label: "Gem. orderwaarde",      value: fmt(d.summary.avgOrderValue),  icon: "🎯", color: "var(--pr-h)" },
+    { label: "Terugboekingen",        value: d.summary.totalRefunds,        icon: "↩️", color: d.summary.totalRefunds > 0 ? "var(--re)" : "#34D399" },
+    { label: "Kortingen toegepast",   value: fmt(d.summary.totalDiscount || 0), icon: "🏷️", color: "#F59E0B" },
+    { label: "Totaal btw",            value: fmt(d.summary.totalTax      || 0), icon: "🧾", color: "#A78BFA" },
+    { label: "Verzendkosten",         value: fmt(d.summary.totalShipping || 0), icon: "🚚", color: "#60A5FA" },
   ];
 
   const insightTypeStyle = {
@@ -5556,14 +5564,38 @@ function AnalyticsView({ shops, user }) {
       </div>
 
       {/* KPI cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
-        {kpis.map((k, i) => (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 8 }}>
+        {kpis.slice(0, 4).map((k, i) => (
           <div key={i} style={{ ...S.card, position: "relative", overflow: "hidden" }}>
             <div style={{ position: "absolute", top: -8, right: -8, fontSize: 44, opacity: .05 }}>{k.icon}</div>
             <div style={{ fontSize: 11, color: "var(--mx)", textTransform: "uppercase", letterSpacing: .5, fontWeight: 600, marginBottom: 6 }}>{k.label}</div>
             <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)", letterSpacing: -1, color: k.color }}>{k.value}</div>
           </div>
         ))}
+      </div>
+      {/* Secondary KPI row: discount / tax / shipping + filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+        {kpis.slice(4).map((k, i) => (
+          <div key={i} style={{ ...S.card, flex: "1 1 150px", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
+            <span style={{ fontSize: 18 }}>{k.icon}</span>
+            <div>
+              <div style={{ fontSize: 10, color: "var(--mx)", textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>{k.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "var(--font-h)", color: k.color }}>{k.value}</div>
+            </div>
+          </div>
+        ))}
+        {/* Order filters */}
+        <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "var(--mx)", whiteSpace: "nowrap" }}>Toon:</span>
+          {[
+            { label: "Geannuleerd", state: excludeCancelled, toggle: () => setExcludeCancelled(v => !v) },
+            { label: "Terugbetaald", state: excludeRefunded,  toggle: () => setExcludeRefunded(v => !v) },
+          ].map(f => (
+            <button key={f.label} onClick={f.toggle} style={{ padding: "4px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${f.state ? "var(--re)" : "var(--b2)"}`, background: f.state ? "rgba(239,68,68,.1)" : "transparent", color: f.state ? "var(--re)" : "var(--mx)", transition: "all .15s", textDecoration: f.state ? "line-through" : "none" }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Revenue chart + Source donut */}
@@ -5692,7 +5724,7 @@ function AnalyticsView({ shops, user }) {
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.revenue)}</div>
-                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders} orders</div>
+                      <div style={{ fontSize: 11, color: "var(--mx)" }}>{p.orders}x verkocht</div>
                     </div>
                   </div>
                   <div style={{ height: 3, borderRadius: 99, background: "var(--b1)", overflow: "hidden" }}>
