@@ -2045,8 +2045,8 @@ Rules:
               <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
                 <div style={{ padding: "8px 12px", background: "rgba(16,185,129,0.07)", borderBottom: "1px solid var(--b1)", fontSize: 11, fontWeight: 600, color: "var(--gr)", textTransform: "uppercase", letterSpacing: "0.05em" }}>🔍 SEO Meta ({seoPlugin})</div>
                 <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                  {preview.meta_title        && {renderEditableField("meta_title", "Meta titel")}}
-                  {preview.meta_description  && {renderEditableField("meta_description", "Meta beschrijving")}}
+                  {preview.meta_title        && renderEditableField("meta_title", "Meta titel")}
+                  {preview.meta_description  && renderEditableField("meta_description", "Meta beschrijving")}
                 </div>
               </div>
             )}
@@ -8429,6 +8429,12 @@ const AI_USE_CASES = [
   { id: "image",       label: "🖼 Afbeelding optimalisatie", hint: "Gemini resize voor TinyPNG compressie", geminiOnly: true },
 ];
 
+const CLAUDE_MODELS = [
+  { value: "claude-sonnet-4-6",         label: "claude-sonnet-4-6 (aanbevolen)" },
+  { value: "claude-sonnet-4-5",         label: "claude-sonnet-4-5" },
+  { value: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5 (snel/goedkoop)" },
+];
+
 const GEMINI_MODELS = [
   { value: "gemini-2.5-pro",        label: "gemini-2.5-pro (krachtigst)" },
   { value: "gemini-2.5-flash",      label: "gemini-2.5-flash (aanbevolen)" },
@@ -8494,6 +8500,7 @@ const PlatformSettings = () => {
     ai_provider_matching: "gemini", ai_provider_translation: "gemini",
     ai_provider_image: "gemini", ai_provider_normalization: "gemini",
     ai_model_matching: "", ai_model_translation: "", ai_model_image: "",
+    claude_model_content: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -8559,6 +8566,7 @@ const PlatformSettings = () => {
           ai_model_matching: d.ai_model_matching || "",
           ai_model_translation: d.ai_model_translation || "",
           ai_model_image: d.ai_model_image || "",
+          claude_model_content: d.claude_model_content || "",
         }));
       } catch {}
       setLoading(false);
@@ -8743,6 +8751,31 @@ const PlatformSettings = () => {
               </div>
             );
           })}
+        </div>
+
+        {/* ── Claude — Content generatie ── */}
+        <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>✨ Content generatie</div>
+              <div style={{ fontSize: 11, color: "var(--dm)" }}>Productbeschrijvingen, SEO meta & attribuut suggesties bij dupliceren</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "var(--pr-h)", flexShrink: 0 }}>
+              ◆ Claude
+            </div>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: "var(--dm)", flexShrink: 0 }}>Model:</span>
+            <Sel
+              value={ps.claude_model_content || "claude-sonnet-4-6"}
+              onChange={e => setPs(p => ({ ...p, claude_model_content: e.target.value }))}
+              options={CLAUDE_MODELS.map(m => ({ value: m.value, label: m.label }))}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            {ps.claude_model_content && (
+              <button onClick={() => setPs(p => ({ ...p, claude_model_content: "" }))} style={{ fontSize: 10, color: "var(--dm)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px" }} title="Reset naar standaard">✕ reset</button>
+            )}
+          </div>
         </div>
       </div>
 
