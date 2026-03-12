@@ -1767,6 +1767,17 @@ Rules:
       const isVariable = product.type === "variable";
       const { ean, sku, short_description } = preview;
 
+      // Parse WQM data from meta_data if not already on product object
+      const getMeta = key => { const m = (product.meta_data || []).find(x => x.key === key); return m?.value ?? null; };
+      const wqmTiersRaw = product.wqm_tiers?.length > 0 ? null : getMeta('_wqm_tiers');
+      const wqmSettingsRaw = product.wqm_settings ? null : getMeta('_wqm_settings');
+      const resolvedTiers = product.wqm_tiers?.length > 0
+        ? product.wqm_tiers
+        : (wqmTiersRaw?.tiers ? (Array.isArray(wqmTiersRaw.tiers) ? wqmTiersRaw.tiers : Object.values(wqmTiersRaw.tiers)).map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') })) : []);
+      const resolvedTierType = product.wqm_tier_type || product.wqm_settings?.tiered_pricing_type || wqmTiersRaw?.type || 'fixed';
+      const resolvedSettings = product.wqm_settings || wqmSettingsRaw || null;
+      const resolvedLowStock = product.low_stock_amount ?? getMeta('_low_stock_amount');
+
       // Build payload — copy base product, swap title/sku/ean/description
       const payload = {
         name: newTitle,
@@ -1781,7 +1792,7 @@ Rules:
         manage_stock: product.manage_stock || false,
         stock_quantity: product.stock_quantity ?? null,
         stock_status: product.stock_status || "instock",
-        low_stock_amount: product.low_stock_amount ?? "",
+        low_stock_amount: resolvedLowStock ?? "",
         categories: (product.categories || []).map(c => ({ id: c.id })),
         attributes: (product.attributes || []).map(a => ({
           id: a.id || 0, name: a.name || a.slug || "",
@@ -1791,17 +1802,17 @@ Rules:
         images: product.featured_image ? [{ src: product.featured_image }] : undefined,
         meta_data: [
           { key: "_alg_ean", value: ean },
-          ...(product.wqm_tiers?.length > 0 ? [{
+          ...(resolvedTiers.length > 0 ? [{
             key: "_wqm_tiers",
             value: {
-              type: product.wqm_tier_type || product.wqm_settings?.tiered_pricing_type || "fixed",
-              tiers: product.wqm_tiers.map(t => ({
+              type: resolvedTierType,
+              tiers: resolvedTiers.map(t => ({
                 qty: parseFloat(t.qty) || 0,
                 amt: parseFloat(t.price) || 0,
               })).sort((a, b) => b.qty - a.qty),
             },
           }] : [{ key: "_wqm_tiers", value: null }]),
-          ...(product.wqm_settings ? [{ key: "_wqm_settings", value: product.wqm_settings }] : []),
+          ...(resolvedSettings ? [{ key: "_wqm_settings", value: resolvedSettings }] : []),
         ],
       };
 
