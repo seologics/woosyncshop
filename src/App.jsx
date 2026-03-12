@@ -6260,9 +6260,11 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             const parseWqmPrice = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
             const tiersToSave = (updated.wqm_tiers || [])
               .filter(t => t.qty)
-              // amt must be a string with dot decimal (e.g. "16.79") — WQM PHP stores via
-              // wc_format_decimal() which returns strings. WQM's JS breaks with number types.
-              .map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price).toFixed(2) }));
+              // amt must be a float NUMBER (not string) — WQM's frontend JS does arithmetic on it.
+              // Sort descending by qty: WQM JS walks top-to-bottom and takes first entry where
+              // qty <= currentQty. Ascending order would always match the first (lowest) tier.
+              .map(t => ({ qty: Number(t.qty), amt: parseFloat(parseWqmPrice(t.price).toFixed(2)) }))
+              .sort((a, b) => b.qty - a.qty);
 
             // Preserve ALL original _wqm_settings fields — only override the ones we explicitly manage.
             // Writing only a fixed subset would silently delete any WQM field we don't know about,
@@ -6303,7 +6305,8 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             const tierType2 = updated.wqm_settings?.tiered_pricing_type || updated.wqm_tier_type || 'fixed';
             const parseP = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
             const tiersForPrice = (updated.wqm_tiers || []).filter(t => t.qty)
-              .map(t => ({ qty: Number(t.qty), amt: parseP(t.price).toFixed(2) }));
+              .map(t => ({ qty: Number(t.qty), amt: parseFloat(parseP(t.price).toFixed(2)) }))
+              .sort((a, b) => b.qty - a.qty);
             const firstTierAmt = tiersForPrice.length > 0
               ? [...tiersForPrice].sort((a, b) => a.qty - b.qty)[0].amt
               : null;
@@ -6337,7 +6340,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
               if (v.wqm_tiers !== undefined || v.wqm_settings !== undefined) {
                 const vTierType = v.wqm_settings?.tiered_pricing_type || v.wqm_tier_type || 'fixed';
                 const parseWqmPrice = (val) => parseFloat(String(val ?? '').replace(',', '.')) || 0;
-                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: parseWqmPrice(t.price).toFixed(2) }));
+                const vTiers = (v.wqm_tiers || []).filter(t => t.qty).map(t => ({ qty: Number(t.qty), amt: parseFloat(parseWqmPrice(t.price).toFixed(2)) })).sort((a, b) => b.qty - a.qty);
                 const vOrigSettings = v.wqm_settings || {};
                 const vSettings = { ...vOrigSettings, step_interval: v.wqm_settings?.step || vOrigSettings.step_interval || '', qty_design_tiers: v.wqm_settings?.dyo_rows ?? vOrigSettings.qty_design_tiers ?? [] };
                 delete vSettings.step; delete vSettings.dyo_rows; delete vSettings.tiered_pricing_type;
