@@ -1,5 +1,5 @@
 import { signIn, signUp, signOut, getSession, getUser, supabase, getToken, setCachedToken } from "./lib/supabase.js";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ─── EU VAT Rates & Countries ─────────────────────────────────────────────────
@@ -564,8 +564,8 @@ const QtyDesignBuilder = ({ rows, onChange }) => {
 // ─── Rich Text Editor (WYSIWYG ↔ HTML toggle) ────────────────────────────────
 const RichEditor = ({ value, onChange, rows = 6, label, hint }) => {
   const [mode, setMode] = useState("wysiwyg");
-  const editorRef = React.useRef(null);
-  const lastHtml = React.useRef(value || "");
+  const editorRef = useRef(null);
+  const lastHtml = useRef(value || "");
 
   // Sync contenteditable → state on each input
   const onInput = () => {
@@ -576,7 +576,7 @@ const RichEditor = ({ value, onChange, rows = 6, label, hint }) => {
   };
 
   // When switching to wysiwyg, set innerHTML from current value
-  React.useLayoutEffect(() => {
+  useLayoutEffect(() => {
     if (mode === "wysiwyg" && editorRef.current) {
       if (editorRef.current.innerHTML !== (value || "")) {
         editorRef.current.innerHTML = value || "";
@@ -585,7 +585,7 @@ const RichEditor = ({ value, onChange, rows = 6, label, hint }) => {
   }, [mode]);
 
   // Initial mount: set content
-  React.useEffect(() => {
+  useEffect(() => {
     if (editorRef.current && mode === "wysiwyg") {
       editorRef.current.innerHTML = value || "";
     }
