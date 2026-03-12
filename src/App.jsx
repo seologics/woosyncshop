@@ -1751,13 +1751,13 @@ const DuplicateProductModal = ({ product, open, onClose, wooCall, onCreated, act
   const [editValues, setEditValues] = useState({});
   const [seoPlugin, setSeoPlugin]   = useState(null); // null=unchecked, false=none, "yoast"|"rankmath"
 
-  // Detect SEO plugin once per shop when modal opens
+  // Detect SEO plugin once per shop when modal opens (skip if no activeSite)
   useEffect(() => {
     if (!open || !activeSite || seoPlugin !== null) return;
     const check = async () => {
       try {
-        const res = await wooCall(null, "plugins?per_page=100&status=active");
-        const plugins = Array.isArray(res) ? res : [];
+        const res = await wooCall(null, "system_status");
+        const plugins = res?.active_plugins || [];
         const hasYoast    = plugins.some(p => (p.plugin || p.name || "").toLowerCase().includes("wordpress-seo"));
         const hasRankMath = plugins.some(p => (p.plugin || p.name || "").toLowerCase().includes("seo-by-rank-math"));
         setSeoPlugin(hasYoast ? "yoast" : hasRankMath ? "rankmath" : false);
@@ -1829,7 +1829,7 @@ Rules:
 - attribute_suggestions: array of {"name","original","suggested","reason"} where the new title clearly implies a different attribute value. Scan ALL attributes vs the new title. If a pot size, plant height, length etc is explicitly stated in the new title and differs from the original attribute, include it. If unclear, return [].${seoRules}`;
 
       const { data: { session } } = await supabase.auth.getSession();
-      const resp = await fetch("/.netlify/functions/duplicate-ai", {
+      const resp = await fetch("/api/duplicate-ai", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
         body: JSON.stringify({ prompt }),

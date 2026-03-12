@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
+export const config = { path: '/api/duplicate-ai', timeout: 26 }
+
 export default async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
@@ -25,7 +27,7 @@ export default async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),
