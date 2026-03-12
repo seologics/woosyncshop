@@ -1306,7 +1306,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
       {/* Table */}
       <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
         {/* Header */}
-        <div className="product-table-header-row" style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 110px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
+        <div className="product-table-header-row" style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 150px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
           {["", "", "Product", "SKU", "Prijs", "Voorraad", "Status", "Acties"].map((h, i) => (
             <span key={i} style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
           ))}
@@ -1315,7 +1315,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
         {filtered.map((product, pi) => (
           <div key={product.id}>
             {/* Product Row */}
-            <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 110px", gap: 0, padding: "10px 12px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: pi % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", transition: "background 0.1s" }}
+            <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 150px", gap: 0, padding: "10px 12px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: pi % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", transition: "background 0.1s" }}
               onMouseEnter={e => e.currentTarget.style.background = "var(--s2)"}
               onMouseLeave={e => e.currentTarget.style.background = pi % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)"}>
               <button onClick={() => product.type === "variable" && toggle(product.id)} style={{ background: "none", border: "none", cursor: product.type === "variable" ? "pointer" : "default", color: "var(--mx)", fontSize: 12, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, transition: "transform 0.15s", transform: expanded.includes(product.id) ? "rotate(90deg)" : "none" }}>
@@ -1353,7 +1353,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
             {/* Variations */}
             {expanded.includes(product.id) && product.variations.map((v, vi) => (
               <div key={v.id}>
-                <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 110px", gap: 0, padding: "8px 12px 8px 28px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: "var(--s1)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 100px 100px 90px 90px 150px", gap: 0, padding: "8px 12px 8px 28px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: "var(--s1)" }}>
                   <button onClick={() => toggleVar(v.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 11, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s", transform: expandedVars.includes(v.id) ? "rotate(90deg)" : "none" }}>▶</button>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: v.enabled ? "var(--gr)" : "var(--dm)" }} />
