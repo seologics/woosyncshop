@@ -2818,39 +2818,59 @@ const CouponManager = ({ activeSite, user }) => {
   const [deletingId, setDeletingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
-  // Load history from Supabase coupons table (has expires_at stored correctly)
+  // Load from WooCommerce (all coupons + usage), supplement with Supabase for expires_at
   const loadHistory = async (siteId) => {
     if (!siteId) return;
     setHistoryLoading(true);
     try {
-      const { data, error } = await supabase
+      const token = await getToken();
+      // 1. Fetch coupon list from WooCommerce
+      const wooRes = await fetch('/api/woo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ shop_id: siteId, endpoint: 'coupons?per_page=20&orderby=date&order=desc', method: 'GET' }),
+      });
+      const wooCoupons = wooRes.ok ? (await wooRes.json()) : [];
+
+      // 2. Fetch expires_at from Supabase (keyed by woo_coupon_id)
+      const { data: dbRows } = await supabase
         .from('coupons')
-        .select('*')
-        .eq('shop_id', siteId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (!error) setHistory(data || []);
+        .select('woo_coupon_id, expires_at, id')
+        .eq('shop_id', siteId);
+      const expiryMap = {};
+      const dbIdMap = {};
+      (dbRows || []).forEach(r => {
+        if (r.woo_coupon_id) {
+          expiryMap[r.woo_coupon_id] = r.expires_at;
+          dbIdMap[r.woo_coupon_id] = r.id;
+        }
+      });
+
+      // 3. Merge: attach expires_at + db_id to each WooCommerce coupon
+      const merged = Array.isArray(wooCoupons) ? wooCoupons.map(c => ({
+        ...c,
+        expires_at: expiryMap[c.id] || (c.date_expires ? new Date(c.date_expires + 'Z').toISOString() : null),
+        db_id: dbIdMap[c.id] || null,
+      })) : [];
+
+      setHistory(merged);
     } catch (e) { console.error('Load coupon history failed:', e); }
     finally { setHistoryLoading(false); }
   };
 
-  const deleteCoupon = async (couponId, wooCouponId) => {
+  const deleteCoupon = async (wooId, dbId) => {
     if (!window.confirm('Kortingscode verwijderen?')) return;
-    setDeletingId(couponId);
+    setDeletingId(wooId);
     try {
       const token = await getToken();
-      // Delete from WooCommerce
-      if (wooCouponId) {
-        await fetch('/api/woo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ shop_id: activeSite.id, endpoint: `coupons/${wooCouponId}?force=true`, method: 'DELETE' }),
-        });
-      }
-      // Delete from Supabase
-      await supabase.from('coupons').delete().eq('id', couponId);
-      setHistory(h => h.filter(cc => cc.id !== couponId));
-    } catch (e) { console.error('Delete coupon failed:', e); }
+      const res = await fetch('/api/coupon-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ coupon_db_id: dbId, woo_coupon_id: wooId, shop_id: activeSite.id }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Verwijderen mislukt');
+      setHistory(h => h.filter(cc => cc.id !== wooId));
+    } catch (e) { console.error('Delete coupon failed:', e); alert('Verwijderen mislukt: ' + e.message); }
     finally { setDeletingId(null); }
   };
 
@@ -3169,12 +3189,12 @@ const CouponManager = ({ activeSite, user }) => {
                   </div>
                   <span style={{ fontSize: 11, color: "var(--mx)" }}>{typeLabel}</span>
                   <span style={{ fontSize: 12, fontWeight: 600 }}>{amount}</span>
-                  <span style={{ fontSize: 11, color: "var(--mx)" }}>—</span>
-                  <span style={{ fontSize: 11, color: "var(--mx)" }}>—</span>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{(coupon.usage_count ?? 0)}×</span>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{coupon.usage_limit ? coupon.usage_limit : "∞"}</span>
                   <span style={{ fontSize: 11, color: isExpired ? "var(--re)" : "var(--mx)" }}>
                     {isExpired ? "⚠ " : ""}{expires}
                   </span>
-                  <button onClick={() => deleteCoupon(coupon.id, coupon.woo_coupon_id)} disabled={deletingId === coupon.id}
+                  <button onClick={() => deleteCoupon(coupon.id, coupon.db_id)} disabled={deletingId === coupon.id}
                     title="Verwijderen"
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 13, padding: "2px 4px", borderRadius: 4, opacity: deletingId === coupon.id ? 0.5 : 1 }}>
                     {deletingId === coupon.id ? "↻" : "🗑"}
