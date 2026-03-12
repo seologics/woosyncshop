@@ -2798,7 +2798,7 @@ const DISCOUNT_TYPES = [
   { value: "fixed_product",  label: "Vaste productkorting" },
 ];
 
-const CouponManager = ({ activeSite, user }) => {
+const CouponManager = ({ activeSite, user, couponCache, onCouponCacheUpdate }) => {
   const [hasAdvCoupons, setHasAdvCoupons] = useState(null); // null=checking, true/false
   const [checkingPlugin, setCheckingPlugin] = useState(false);
   const [form, setForm] = useState({
@@ -2818,13 +2818,19 @@ const CouponManager = ({ activeSite, user }) => {
   const [deletingId, setDeletingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
-  // Load from WooCommerce (all coupons + usage), supplement with Supabase for expires_at
-  const loadHistory = async (siteId) => {
+  // Load from WooCommerce + Supabase, with session cache to avoid re-fetching on tab switch
+  const loadHistory = async (siteId, force = false) => {
     if (!siteId) return;
+    // Return cached data if available and not forced
+    const cached = couponCache?.[siteId];
+    if (cached && !force) {
+      setHistory(cached.rows);
+      return;
+    }
     setHistoryLoading(true);
     try {
       const token = await getToken();
-      // 1. Fetch coupon list from WooCommerce
+      // 1. WooCommerce coupon list
       const wooRes = await fetch('/api/woo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2832,7 +2838,7 @@ const CouponManager = ({ activeSite, user }) => {
       });
       const wooCoupons = wooRes.ok ? (await wooRes.json()) : [];
 
-      // 2. Fetch expires_at from Supabase (keyed by woo_coupon_id)
+      // 2. Supabase expires_at keyed by woo_coupon_id
       const { data: dbRows } = await supabase
         .from('coupons')
         .select('woo_coupon_id, expires_at, id')
@@ -2846,14 +2852,16 @@ const CouponManager = ({ activeSite, user }) => {
         }
       });
 
-      // 3. Merge: attach expires_at + db_id to each WooCommerce coupon
-      const merged = Array.isArray(wooCoupons) ? wooCoupons.map(c => ({
-        ...c,
-        expires_at: expiryMap[c.id] || (c.date_expires ? new Date(c.date_expires + 'Z').toISOString() : null),
-        db_id: dbIdMap[c.id] || null,
+      // 3. Merge
+      const merged = Array.isArray(wooCoupons) ? wooCoupons.map(cc => ({
+        ...cc,
+        expires_at: expiryMap[cc.id] || (cc.date_expires ? new Date(cc.date_expires + 'Z').toISOString() : null),
+        db_id: dbIdMap[cc.id] || null,
       })) : [];
 
       setHistory(merged);
+      // Store in session cache
+      onCouponCacheUpdate?.(prev => ({ ...prev, [siteId]: { rows: merged, loadedAt: Date.now() } }));
     } catch (e) { console.error('Load coupon history failed:', e); }
     finally { setHistoryLoading(false); }
   };
@@ -2869,7 +2877,9 @@ const CouponManager = ({ activeSite, user }) => {
         body: JSON.stringify({ coupon_db_id: dbId, woo_coupon_id: wooId, shop_id: activeSite.id }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Verwijderen mislukt');
-      setHistory(h => h.filter(cc => cc.id !== wooId));
+      const updated = history.filter(cc => cc.id !== wooId);
+      setHistory(updated);
+      onCouponCacheUpdate?.(prev => ({ ...prev, [activeSite.id]: { rows: updated, loadedAt: Date.now() } }));
     } catch (e) { console.error('Delete coupon failed:', e); alert('Verwijderen mislukt: ' + e.message); }
     finally { setDeletingId(null); }
   };
@@ -2885,8 +2895,11 @@ const CouponManager = ({ activeSite, user }) => {
     if (!activeSite) return;
     setHasAdvCoupons(null);
     setCheckingPlugin(true);
-    setHistory([]);
-    loadHistory(activeSite.id);
+    // Restore from cache immediately (no spinner), fetch in background only if not cached
+    const cached = couponCache?.[activeSite.id];
+    if (cached) setHistory(cached.rows);
+    else setHistory([]);
+    loadHistory(activeSite.id); // reads cache, skips network if already loaded
     const checkPlugin = async () => {
       try {
         const token = await getToken();
@@ -2963,7 +2976,7 @@ const CouponManager = ({ activeSite, user }) => {
       // reset form code for next coupon
       setForm(f => ({ ...f, code: "", amount: "" }));
       setCodeGenerated(false);
-      loadHistory(activeSite.id);
+      loadHistory(activeSite.id, true); // force refresh after new coupon
     } catch (e) {
       setCouponResult({ ok: false, error: e.message });
     } finally {
@@ -3142,7 +3155,7 @@ const CouponManager = ({ activeSite, user }) => {
       <div style={{ marginTop: 8 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>📋 Recente kortingscodes</div>
-          <Btn variant="ghost" size="sm" onClick={() => loadHistory(activeSite?.id)} disabled={historyLoading}>
+          <Btn variant="ghost" size="sm" onClick={() => loadHistory(activeSite?.id, true)} disabled={historyLoading}>
             {historyLoading ? "↻ Laden..." : "🔄 Vernieuwen"}
           </Btn>
         </div>
@@ -3210,7 +3223,7 @@ const CouponManager = ({ activeSite, user }) => {
   );
 };
 
-const MarketingView = ({ activeSite, shops, user }) => {
+const MarketingView = ({ activeSite, shops, user, couponCache, onCouponCacheUpdate }) => {
   const [marketingTab, setMarketingTab] = useState("coupons");
 
   return (
@@ -3225,7 +3238,7 @@ const MarketingView = ({ activeSite, shops, user }) => {
         onChange={setMarketingTab}
         size="sm"
       />
-      {marketingTab === "coupons" && <CouponManager activeSite={activeSite} user={user} />}
+      {marketingTab === "coupons" && <CouponManager activeSite={activeSite} user={user} couponCache={couponCache} onCouponCacheUpdate={onCouponCacheUpdate} />}
     </div>
   );
 };
@@ -5774,7 +5787,7 @@ const SuperAdminDashboard = ({ user, onLogout }) => {
 };
 
 // ─── AnalyticsView ────────────────────────────────────────────────────────────
-function AnalyticsView({ shops, user }) {
+function AnalyticsView({ shops, user, analyticsCache, onAnalyticsCacheUpdate }) {
   const [selectedShopForConnections, setSelectedShopForConnections] = useState("all");
 
   const googleConnections = useMemo(() => {
@@ -5834,7 +5847,16 @@ function AnalyticsView({ shops, user }) {
   const fmt = (n) => "€" + (n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtShort = (n) => n >= 1000 ? "€" + (n / 1000).toFixed(1) + "k" : fmt(n);
 
-  const fetchData = useCallback(async () => {
+  // Cache key — same params = same data, no re-fetch needed
+  const cacheKey = `${range}|${selectedShop}|${excludeCancelled ? 1 : 0}|${excludeRefunded ? 1 : 0}`;
+
+  const fetchData = useCallback(async (force = false) => {
+    // Restore from cache immediately if params match
+    if (!force && analyticsCache && analyticsCache.key === cacheKey) {
+      setData(analyticsCache.data);
+      if (analyticsCache.insights) setInsights(analyticsCache.insights);
+      return;
+    }
     setLoading(true);
     setError(null);
     setInsights(null);
@@ -5853,17 +5875,25 @@ function AnalyticsView({ shops, user }) {
       catch { throw new Error(`Server timeout of netwerkfout (HTTP ${res.status}). Probeer een kortere periode.`); }
       if (!res.ok) throw new Error(json?.error || `Fout bij ophalen data (HTTP ${res.status})`);
       setData(json);
+      onAnalyticsCacheUpdate?.({ key: cacheKey, data: json, insights: null, loadedAt: Date.now() });
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [range, selectedShop, excludeCancelled, excludeRefunded]);
+  }, [range, selectedShop, excludeCancelled, excludeRefunded, cacheKey]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const fetchInsights = useCallback(async () => {
+  const fetchInsights = useCallback(async (force = false) => {
     if (!data) return;
+    // Don't fetch if no orders at all
+    if (!data.merged?.totalOrders && !data.merged?.orders) return;
+    // Use cached insights if available for same params
+    if (!force && analyticsCache?.key === cacheKey && analyticsCache?.insights) {
+      setInsights(analyticsCache.insights);
+      return;
+    }
     setInsightsLoading(true);
     try {
       const token = await getToken();
@@ -5877,18 +5907,18 @@ function AnalyticsView({ shops, user }) {
       catch { throw new Error("Insights server timeout"); }
       if (!res.ok) throw new Error(json?.error || `Insights fout (HTTP ${res.status})`);
       setInsights(json.insights);
+      onAnalyticsCacheUpdate?.(prev => prev ? { ...prev, insights: json.insights } : null);
     } catch (e) {
       console.error("Insights error:", e);
-      // If the key is invalid, stop retrying automatically
       if (e.message?.includes("not valid") || e.message?.includes("API_KEY_INVALID") || e.message?.includes("niet geconfigureerd")) {
         setInsightsUnavailable(true);
       }
     } finally {
       setInsightsLoading(false);
     }
-  }, [data, range]);
+  }, [data, range, cacheKey]);
 
-  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data, insightsUnavailable]);
+  useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data]);
 
   const displayData = useMemo(() => {
     if (!data) return null;
@@ -5994,7 +6024,7 @@ function AnalyticsView({ shops, user }) {
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
         <div style={{ color: "var(--re)", marginBottom: 16, fontSize: 14 }}>{error}</div>
-        <button onClick={fetchData} style={{ padding: "8px 20px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600 }}>Opnieuw proberen</button>
+        <button onClick={() => fetchData(true)} style={{ padding: "8px 20px", borderRadius: 99, border: "1px solid var(--pr)", background: "var(--pr-l)", color: "var(--pr-h)", cursor: "pointer", fontWeight: 600 }}>Opnieuw proberen</button>
       </div>
     </div>
   );
@@ -6032,7 +6062,7 @@ function AnalyticsView({ shops, user }) {
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {RANGES.map(r => <button key={r.key} style={S.rangeBtn(r.key === range)} onClick={() => setRange(r.key)}>{r.label}</button>)}
-          <button onClick={fetchData} style={{ ...S.rangeBtn(false), padding: "5px 9px" }} title="Vernieuwen">🔄</button>
+          <button onClick={() => fetchData(true)} style={{ ...S.rangeBtn(false), padding: "5px 9px" }} title="Vernieuwen">🔄</button>
         </div>
       </div>
 
@@ -6365,7 +6395,7 @@ function AnalyticsView({ shops, user }) {
           <span>🤖 AI Inzichten</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {insightsLoading && <span style={{ fontSize: 12, color: "var(--mx)" }}>Analyseren…</span>}
-            <button onClick={fetchInsights} style={S.rangeBtn(false)} disabled={insightsLoading}>{insightsLoading ? "⏳" : "🔄 Vernieuwen"}</button>
+            <button onClick={() => fetchInsights(true)} style={S.rangeBtn(false)} disabled={insightsLoading}>{insightsLoading ? "⏳" : "🔄 Vernieuwen"}</button>
           </div>
         </div>
         {insightsLoading && !insights && (
@@ -6450,6 +6480,10 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   // Per-shop cache: attributes (with terms) + categories
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
   const liveCategories = shopCache[activeSite?.id]?.categories || [];
+
+  // ── Session-level caches (survive tab switches, cleared on logout) ──
+  const [couponCache, setCouponCache] = useState({}); // { [shopId]: { rows, loadedAt } }
+  const [analyticsCache, setAnalyticsCache] = useState(null); // { data, insights, range, shopId, loadedAt }
 
   // getToken imported from supabase.js — no local wrapper
 
@@ -6734,8 +6768,8 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             )}
             {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} activeSite={activeSite} wooCall={wooCall} />}
             {activeView === "hreflang" && <HreflangView sites={shops} />}
-            {activeView === "marketing" && <MarketingView activeSite={activeSite} shops={shops} user={user} />}
-            {activeView === "analytics" && <AnalyticsView shops={shops} user={user} />}
+            {activeView === "marketing" && <MarketingView activeSite={activeSite} shops={shops} user={user} couponCache={couponCache} onCouponCacheUpdate={setCouponCache} />}
+            {activeView === "analytics" && <AnalyticsView shops={shops} user={user} analyticsCache={analyticsCache} onAnalyticsCacheUpdate={setAnalyticsCache} />}
           </>
         )}
         {activeView === "settings" && (
