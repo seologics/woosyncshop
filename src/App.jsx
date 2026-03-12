@@ -708,6 +708,14 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
   // Use live attributes/categories from shopCache, fallback to empty
   const liveAttributes = shopCache?.attributes || [];
   const liveCategories = shopCache?.categories || [];
+  // Primary category term (Yoast + RankMath)
+  const getPrimaryMeta = (prod) => {
+    const meta = prod?.meta_data || [];
+    return meta.find(m => m.key === "_yoast_wpseo_primary_product_cat")?.value
+        || meta.find(m => m.key === "rank_math_primary_product_cat")?.value
+        || null;
+  };
+  const [primaryCatId, setPrimaryCatId] = useState(() => getPrimaryMeta(product));
 
   // ── Helper: apply WQM normalization to a product object ──────────────────────
   const applyWqmMeta = (fresh) => {
@@ -775,6 +783,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
     // product endpoint always includes it (needed for _wqm_tiers, _wqm_settings).
     // Show modal immediately with list data, then silently update with full data.
     setP(applyWqmMeta(fresh));  // Show modal immediately
+    setPrimaryCatId(getPrimaryMeta(fresh));
 
     if (activeSite?.id && product.id) {
       setMetaLoading(true);
@@ -789,6 +798,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
           if (full && full.id) {
             const merged = { ...fresh, ...full, pending_changes: fresh.pending_changes || {} };
             setP(prev => prev ? applyWqmMeta({ ...prev, ...merged }) : applyWqmMeta(merged));
+            setPrimaryCatId(getPrimaryMeta(full));
           }
         } catch (e) {
           console.error("Full product fetch failed:", e);
@@ -1091,16 +1101,31 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
               <RichEditor value={p.description || ""} onChange={v => upd("description", v)} rows={10} />
             </Field>
             <Field label="Categorieën">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 10, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 10, background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
                 {liveCategories.map(cat => {
-                  // p.categories from WooCommerce is [{id, name}], normalize to check by id
                   const catIds = (p.categories || []).map(c => typeof c === "object" ? c.id : c);
+                  const isChecked = catIds.includes(cat.id);
+                  const isPrimary = String(primaryCatId) === String(cat.id);
+                  const indent = cat.parent > 0 ? 16 : 0;
                   return (
-                    <Chk key={cat.id} checked={catIds.includes(cat.id)} onChange={c => {
-                      const current = (p.categories || []).map(x => typeof x === "object" ? x : { id: x });
-                      const updated = c ? [...current, { id: cat.id, name: cat.name }] : current.filter(x => x.id !== cat.id);
-                      upd("categories", updated);
-                    }} label={cat.name} />
+                    <div key={cat.id} style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: indent }}>
+                      <Chk checked={isChecked} onChange={checked => {
+                        const current = (p.categories || []).map(x => typeof x === "object" ? x : { id: x });
+                        const updated = checked ? [...current, { id: cat.id, name: cat.name }] : current.filter(x => x.id !== cat.id);
+                        upd("categories", updated);
+                        if (!checked && isPrimary) setPrimaryCatId(null);
+                      }} label={cat.name} />
+                      {isChecked && (
+                        <button
+                          onClick={() => setPrimaryCatId(isPrimary ? null : String(cat.id))}
+                          title={isPrimary ? "Primaire categorie — klik om te verwijderen" : "Instellen als primaire categorie"}
+                          style={{ fontSize: 10, padding: "1px 7px", borderRadius: 10, border: isPrimary ? "1px solid var(--pr)" : "1px solid var(--b2)",
+                            background: isPrimary ? "var(--pr)" : "var(--s3)", color: isPrimary ? "#fff" : "var(--dm)",
+                            cursor: "pointer", fontWeight: isPrimary ? 700 : 400, flexShrink: 0, lineHeight: 1.6 }}>
+                          {isPrimary ? "★ Primair" : "☆ Primair"}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -1222,7 +1247,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
             setSaving(true);
             setSaveError(null);
             try {
-              await onSaveDirect(p);
+              await onSaveDirect({ ...p, _primaryCatId: primaryCatId });
               onClose();
             } catch (err) {
               setSaveError(err.message || "Opslaan mislukt");
@@ -1286,40 +1311,22 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
     finally { setCatChanging(p => ({ ...p, [product.id]: false })); }
   };
 
-  // Resolve the "primary" category for a product:
-  // 1. Yoast primary term (_yoast_wpseo_primary_product_cat)
-  // 2. RankMath primary term (rank_math_primary_product_cat)
-  // 3. Deepest sub-category (highest parent depth)
-  // 4. First category
+  // Resolve the primary category cheaply (no full liveCategories scan per row):
+  // 1. Yoast/RankMath primary term meta  2. Sub-cat (parent > 0)  3. First cat
   const getPrimaryCategory = (product) => {
     const cats = product.categories || [];
     if (cats.length === 0) return null;
-
-    // Check meta for primary term id
     const meta = product.meta_data || [];
-    const yoastPrimary    = meta.find(m => m.key === "_yoast_wpseo_primary_product_cat")?.value;
-    const rankMathPrimary = meta.find(m => m.key === "rank_math_primary_product_cat")?.value;
-    const primaryId = yoastPrimary || rankMathPrimary;
-
+    const primaryId = meta.find(m => m.key === "_yoast_wpseo_primary_product_cat")?.value
+                   || meta.find(m => m.key === "rank_math_primary_product_cat")?.value;
     if (primaryId) {
       const found = cats.find(c => String(c.id) === String(primaryId));
       if (found) return found;
     }
-
-    // Fall back: deepest sub-category = the one whose id appears as a child in liveCategories
-    const parentIds = new Set(liveCategories.map(c => c.parent).filter(Boolean));
+    // Use liveCategories only to identify which cats are sub-cats (parent > 0)
     const catIds = new Set(cats.map(c => c.id));
-    // Cats that are children of something (have parent > 0) AND in product's cats
-    const subCats = liveCategories.filter(lc => lc.parent > 0 && catIds.has(lc.id));
-    if (subCats.length > 0) {
-      // Pick the one not itself a parent of another product cat (deepest leaf)
-      const leaf = subCats.find(sc => !cats.some(c => {
-        const live = liveCategories.find(lc => lc.id === c.id);
-        return live?.parent === sc.id;
-      })) || subCats[0];
-      return cats.find(c => c.id === leaf.id) || leaf;
-    }
-
+    const subCat = liveCategories.find(lc => lc.parent > 0 && catIds.has(lc.id));
+    if (subCat) return cats.find(c => c.id === subCat.id) || subCat;
     return cats[0];
   };
 
@@ -1369,7 +1376,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
       <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
         {/* Header */}
         <div className="product-table-header-row" style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 130px 100px 170px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
-          {["", "", "Product", "SKU", "Prijs", "Voorraad", "Categorie", "Status", "Acties"].map((h, i) => (
+          {["", "", "Product", "SKU", "Prijs", "Voorraad", "Primaire cat.", "Status", "Acties"].map((h, i) => (
             <span key={i} style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
           ))}
         </div>
@@ -6681,6 +6688,16 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 
           }
 
+          // Primary category term (Yoast + RankMath)
+          if (updated._primaryCatId !== undefined) {
+            const pid = updated._primaryCatId ? String(updated._primaryCatId) : "";
+            const primMeta = [
+              { key: "_yoast_wpseo_primary_product_cat", value: pid },
+              { key: "rank_math_primary_product_cat",    value: pid },
+            ];
+            payload.meta_data = [...(payload.meta_data || []), ...primMeta];
+          }
+
           // PUT the main product (step 1: writes _wqm_tiers + _wqm_settings)
           await wooCall(shopId, `products/${updated.id}`, "PUT", payload);
 
@@ -6754,12 +6771,22 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             await Promise.all(varPromises);
           }
 
+          // Merge primary cat into meta_data for immediate reflection in product list
+          const pid = updated._primaryCatId ? String(updated._primaryCatId) : "";
+          const mergedMeta = [
+            ...(updated.meta_data || []).filter(m => m.key !== "_yoast_wpseo_primary_product_cat" && m.key !== "rank_math_primary_product_cat"),
+            { key: "_yoast_wpseo_primary_product_cat", value: pid },
+            { key: "rank_math_primary_product_cat",    value: pid },
+          ];
+          const { _primaryCatId: _removed, ...updatedClean } = updated;
+          const updatedFinal = { ...updatedClean, meta_data: mergedMeta, pending_changes: {} };
+
           // Update local state
-          setProducts(prev => prev.map(p => p.id === updated.id ? { ...updated, pending_changes: {} } : p));
+          setProducts(prev => prev.map(p => p.id === updated.id ? updatedFinal : p));
           // Keep cache in sync
           if (activeSite?.id && productsCacheRef.current[activeSite.id]) {
             productsCacheRef.current[activeSite.id] = productsCacheRef.current[activeSite.id].map(p =>
-              p.id === updated.id ? { ...updated, pending_changes: {} } : p
+              p.id === updated.id ? updatedFinal : p
             );
           }
         }}
