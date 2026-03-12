@@ -106,7 +106,7 @@ export default async function handler(req) {
 
     // Get Gemini key from platform_settings (SERVICE_ROLE bypasses RLS)
     const { data: settings, error: settingsErr } = await supabase
-      .from("platform_settings").select("gemini_api_key, ai_model_image, ai_provider_image, openai_api_key, ai_model_matching").eq("id", 1).single();
+      .from("platform_settings").select("gemini_api_key, ai_model_image, ai_provider_image").eq("id", 1).single();
     // Fallback to env var in case platform_settings is empty
     const geminiKey = (settings?.gemini_api_key || Netlify.env.get("GEMINI_API_KEY") || "").trim() || null;
     if (!geminiKey) {
@@ -116,7 +116,7 @@ export default async function handler(req) {
 
     // Get user's own Gemini model preference
     const { data: profile } = await supabase.from("user_profiles").select("gemini_model, plan").eq("id", user.id).single();
-    const model = settings?.ai_model_matching || profile?.gemini_model || "gemini-2.5-flash";
+    const model = profile?.gemini_model || "gemini-2.5-flash";
 
     const body = await req.json();
     const prompt = buildPrompt(body);
