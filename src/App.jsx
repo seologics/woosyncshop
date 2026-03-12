@@ -1271,7 +1271,7 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
 };
 
 // ─── Products Table ───────────────────────────────────────────────────────────
-const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate }) => {
+const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, onPublish, onRefresh, onPromptSettings }) => {
   const [expanded, setExpanded] = useState([]);
   const [expandedVars, setExpandedVars] = useState([]);
   const [search, setSearch] = useState("");
@@ -1296,6 +1296,8 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate })
         <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍  Zoek op naam of SKU..." style={{ maxWidth: 280 }} />
         <Sel value={filter} onChange={e => setFilter(e.target.value)} options={[{ value: "all", label: "Alle producten" }, { value: "variable", label: "Variabel" }, { value: "instock", label: "Op voorraad" }]} style={{ maxWidth: 160 }} />
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <Btn variant="ghost" size="sm" onClick={onRefresh} title="Productenlijst vernieuwen">🔄 Vernieuwen</Btn>
+          <Btn variant="ghost" size="sm" onClick={onPromptSettings} title="AI prompt instellingen">⚙️ AI prompts</Btn>
           <Btn variant="secondary" size="sm" icon="↑">Importeer CSV</Btn>
           <Btn variant="primary" size="sm" icon="+">Nieuw product</Btn>
         </div>
@@ -1343,6 +1345,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate })
               <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                 <Btn variant="secondary" size="sm" onClick={() => onConnect(product)} title="Verbind met andere shops">🔗</Btn>
                 <Btn variant="ghost" size="sm" onClick={() => onDuplicate?.(product)} title="Dupliceren met AI">⧉</Btn>
+                <Btn variant="ghost" size="sm" title={product.status === "publish" ? "Al gepubliceerd" : "Publiceren"} disabled={product.status === "publish"} onClick={() => onPublish?.(product.id)} style={{ opacity: product.status === "publish" ? 0.35 : 1 }}>🌐</Btn>
                 <Btn variant="primary" size="sm" onClick={() => onEdit(product)}>Bewerken</Btn>
               </div>
             </div>
@@ -1680,61 +1683,150 @@ const fetchEanFromPool = async (sku, productId = null) => {
 };
 
 // ─── Duplicate Product Modal ──────────────────────────────────────────────────
-const DuplicateProductModal = ({ product, open, onClose, wooCall, onCreated }) => {
+
+// ─── PromptSettingsModal ──────────────────────────────────────────────────────
+const PromptSettingsModal = ({ open, onClose, promptSettings, onSave }) => {
+  const [local, setLocal] = useState({});
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (open) setLocal(promptSettings || {}); }, [open]);
+  if (!open) return null;
+
+  const upd = (field, key, val) => setLocal(p => ({
+    ...p, default: { ...(p.default || {}), [field]: { ...(p.default?.[field] || {}), [key]: val } }
+  }));
+  const get = (field, key, def = "") => local.default?.[field]?.[key] ?? def;
+
+  const FIELDS = [
+    { key: "short_description", label: "Korte beschrijving", wc: true, wc_def: "30" },
+    { key: "description",       label: "Productbeschrijving", wc: true, wc_def: "150" },
+    { key: "meta_title",        label: "SEO meta titel", wc: false },
+    { key: "meta_description",  label: "SEO meta beschrijving", wc: false },
+  ];
+
+  return (
+    <Overlay open onClose={onClose} width={600} title="⚙️ AI Prompt Instellingen">
+      <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ fontSize: 13, color: "var(--mx)", lineHeight: 1.6 }}>
+          Stel in hoe de AI content genereert bij het dupliceren van producten. Per veld kun je een aanvullende instructie, woordtelling en focuszoekwoorden opgeven.
+        </div>
+        {FIELDS.map(f => (
+          <div key={f.key} style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
+            <div style={{ padding: "9px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>{f.label}</div>
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <Field label="Aanvullende instructie" hint="Extra schrijfinstructie voor de AI">
+                <Inp multiline rows={2} value={get(f.key, "custom_prompt")} onChange={e => upd(f.key, "custom_prompt", e.target.value)} placeholder={'Bijv. "Schrijf in een vriendelijke, informatieve toon"'} />
+              </Field>
+              <div style={{ display: "grid", gridTemplateColumns: f.wc ? "1fr 1fr" : "1fr", gap: 10 }}>
+                {f.wc && (
+                  <Field label="Max. woordtelling">
+                    <Inp type="number" value={get(f.key, "word_count", f.wc_def)} onChange={e => upd(f.key, "word_count", e.target.value)} />
+                  </Field>
+                )}
+                <Field label="Focuszoekwoorden" hint="Kommagescheiden">
+                  <Inp value={get(f.key, "keywords")} onChange={e => upd(f.key, "keywords", e.target.value)} placeholder="bamboe, haag, tuin" />
+                </Field>
+              </div>
+            </div>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <Btn variant="secondary" onClick={onClose}>Annuleren</Btn>
+          <Btn variant="primary" disabled={saving} onClick={async () => { setSaving(true); await onSave(local); setSaving(false); onClose(); }}>
+            {saving ? "Opslaan..." : "💾 Opslaan"}
+          </Btn>
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
+const DuplicateProductModal = ({ product, open, onClose, wooCall, onCreated, activeSite, promptSettings }) => {
   const [newTitle, setNewTitle]     = useState("");
-  const [step, setStep]             = useState("input"); // input | generating | preview | creating | done | error
-  const [preview, setPreview]       = useState(null);    // { short_description, sku, ean }
+  const [step, setStep]             = useState("input");
+  const [preview, setPreview]       = useState(null);
   const [errMsg, setErrMsg]         = useState("");
   const [progress, setProgress]     = useState("");
+  const [attrChecks, setAttrChecks] = useState({});
+  const [editField, setEditField]   = useState(null);
+  const [editValues, setEditValues] = useState({});
+  const [seoPlugin, setSeoPlugin]   = useState(null); // null=unchecked, false=none, "yoast"|"rankmath"
+
+  // Detect SEO plugin once per shop when modal opens
+  useEffect(() => {
+    if (!open || !activeSite || seoPlugin !== null) return;
+    const check = async () => {
+      try {
+        const res = await wooCall(null, "plugins?per_page=100&status=active");
+        const plugins = Array.isArray(res) ? res : [];
+        const hasYoast    = plugins.some(p => (p.plugin || p.name || "").toLowerCase().includes("wordpress-seo"));
+        const hasRankMath = plugins.some(p => (p.plugin || p.name || "").toLowerCase().includes("seo-by-rank-math"));
+        setSeoPlugin(hasYoast ? "yoast" : hasRankMath ? "rankmath" : false);
+      } catch { setSeoPlugin(false); }
+    };
+    check();
+  }, [open, activeSite?.id]);
 
   useEffect(() => {
     if (open && product) {
       setNewTitle(product.name + " (kopie)");
-      setStep("input");
-      setPreview(null);
-      setErrMsg("");
+      setStep("input"); setPreview(null); setErrMsg("");
+      setAttrChecks({}); setEditField(null); setEditValues({});
     }
-  }, [open, product]);
+  }, [open, product?.id]);
 
   if (!open || !product) return null;
 
-  // ── Extract existing SKUs from product to infer style ──
-  const existingSkus = [
-    product.sku,
-    ...(product.variations || []).map(v => v.sku),
-  ].filter(Boolean);
+  const existingSkus = [product.sku, ...(product.variations || []).map(v => v.sku)].filter(Boolean);
+  const extractEan   = (p) => { if (p.global_unique_id) return p.global_unique_id; const m = (p.meta_data || []).find(x => x.key === "_alg_ean"); return m?.value || ""; };
+  const sourceEan    = extractEan(product);
+  const productAttributes = (product.attributes || []).map(a => ({ name: a.name || a.slug || "", value: (a.values || a.options || []).join(", ") })).filter(a => a.name && a.value);
 
-  // ── Extract existing EAN (native WC field OR _alg_ean meta) ──
-  const extractEan = (p) => {
-    if (p.global_unique_id) return p.global_unique_id;
-    const meta = (p.meta_data || []).find(m => m.key === "_alg_ean");
-    return meta?.value || "";
-  };
-  const sourceEan = extractEan(product);
-
-  // ── AI generation ──
   const runAI = async () => {
     setStep("generating");
-    setProgress("AI genereert beschrijving en SKU...");
+    setProgress("AI analyseert product en genereert content...");
     try {
-      const prompt = `You are a WooCommerce product data assistant. Generate data for a new product.
+      const ps = promptSettings?.default || {};
+      const shortWc  = ps.short_description?.word_count  || 30;
+      const descWc   = ps.description?.word_count        || 150;
+      const shortInstr  = ps.short_description?.custom_prompt  || "";
+      const descInstr   = ps.description?.custom_prompt        || "";
+      const metaTInstr  = ps.meta_title?.custom_prompt         || "";
+      const metaDInstr  = ps.meta_description?.custom_prompt   || "";
+      const shortKw  = ps.short_description?.keywords || "";
+      const metaTKw  = ps.meta_title?.keywords        || "";
+      const metaDKw  = ps.meta_description?.keywords  || "";
+
+      const attrCtx = productAttributes.length > 0
+        ? "\nProduct attributes:\n" + productAttributes.map(a => `- ${a.name}: ${a.value}`).join("\n")
+        : "";
+      const hasSeo = seoPlugin && seoPlugin !== false;
+      const seoFields = hasSeo ? `\n  "meta_title": "...",\n  "meta_description": "...",` : "";
+      const seoRules  = hasSeo ? `\n- meta_title: SEO title max 60 chars, same language as original.${metaTInstr ? " " + metaTInstr : ""}${metaTKw ? " Include keywords: " + metaTKw + "." : ""}
+- meta_description: SEO meta description max 155 chars, same language.${metaDInstr ? " " + metaDInstr : ""}${metaDKw ? " Include keywords: " + metaDKw + "." : ""}` : "";
+
+      const prompt = `You are a WooCommerce product data assistant. Generate content for a new product duplication.
 
 Original product:
 - Title: "${product.name}"
 - Short description: "${product.short_description || "(none)"}"
-- SKU(s): ${existingSkus.join(", ") || "(none)"}
+- Description: "${(product.description || "").replace(/<[^>]+>/g, "").substring(0, 400) || "(none)"}"
+- SKU(s): ${existingSkus.join(", ") || "(none)"}${attrCtx}
 
 New product title: "${newTitle}"
 
 Respond ONLY with valid JSON, no markdown fences:
 {
   "short_description": "...",
-  "sku": "..."
+  "description": "...",
+  "sku": "...",
+  "attribute_suggestions": []${seoFields}
 }
 
 Rules:
-- short_description: 1–2 sentences in the same language as the original, unique for this new title. No HTML.
-- sku: follow the exact same format/pattern as the existing SKUs. If original SKU was "FA-5L-100-CM", derive a logical new SKU for the new title. If no existing SKU pattern, generate a clean uppercase alphanumeric SKU.`;
+- short_description: max ${shortWc} words, same language as original. No HTML.${shortInstr ? " " + shortInstr : ""}${shortKw ? " Include keywords: " + shortKw + "." : ""}
+- description: max ${descWc} words, plain text (no HTML tags), well-structured.${descInstr ? " " + descInstr : ""}
+- sku: follow exact same format/pattern as existing SKUs, derived logically from the new title.
+- attribute_suggestions: array of {"name","original","suggested","reason"} where the new title clearly implies a different attribute value. Scan ALL attributes vs the new title. If a pot size, plant height, length etc is explicitly stated in the new title and differs from the original attribute, include it. If unclear, return [].${seoRules}`;
 
       const { data: { session } } = await supabase.auth.getSession();
       const resp = await fetch("/.netlify/functions/duplicate-ai", {
@@ -1743,15 +1835,34 @@ Rules:
         body: JSON.stringify({ prompt }),
       });
       const data = await resp.json();
-      const raw = data.content?.[0]?.text || "";
+      const raw   = data.content?.[0]?.text || "";
       const clean = raw.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
 
-      // Now fetch EAN from pool using the AI-generated SKU
       setProgress("EAN ophalen uit pool...");
       const newEan = await fetchEanFromPool(parsed.sku);
 
-      setPreview({ short_description: parsed.short_description, sku: parsed.sku, ean: newEan });
+      const suggestions = Array.isArray(parsed.attribute_suggestions) ? parsed.attribute_suggestions : [];
+      const initChecks = {};
+      suggestions.forEach(s => { initChecks[s.name] = true; });
+      setAttrChecks(initChecks);
+
+      const pv = {
+        short_description:    parsed.short_description || "",
+        description:          parsed.description       || "",
+        sku:                  parsed.sku,
+        ean:                  newEan,
+        attribute_suggestions: suggestions,
+        meta_title:           parsed.meta_title        || "",
+        meta_description:     parsed.meta_description  || "",
+      };
+      setPreview(pv);
+      setEditValues({
+        short_description: pv.short_description,
+        description:       pv.description,
+        meta_title:        pv.meta_title,
+        meta_description:  pv.meta_description,
+      });
       setStep("preview");
     } catch (e) {
       setErrMsg("AI generatie mislukt: " + e.message);
@@ -1759,60 +1870,67 @@ Rules:
     }
   };
 
-  // ── Create product in WooCommerce ──
   const createProduct = async () => {
     setStep("creating");
     setProgress("Product aanmaken in WooCommerce...");
     try {
       const isVariable = product.type === "variable";
-      const { ean, sku, short_description } = preview;
+      const { ean, sku } = preview;
+      const short_description = editValues.short_description ?? preview.short_description;
+      const description       = editValues.description       ?? preview.description;
 
-      // Parse WQM data from meta_data if not already on product object
       const getMeta = key => { const m = (product.meta_data || []).find(x => x.key === key); return m?.value ?? null; };
-      const wqmTiersRaw = product.wqm_tiers?.length > 0 ? null : getMeta('_wqm_tiers');
+      const wqmTiersRaw    = product.wqm_tiers?.length > 0 ? null : getMeta('_wqm_tiers');
       const wqmSettingsRaw = product.wqm_settings ? null : getMeta('_wqm_settings');
-      const resolvedTiers = product.wqm_tiers?.length > 0
+      const resolvedTiers  = product.wqm_tiers?.length > 0
         ? product.wqm_tiers
         : (wqmTiersRaw?.tiers ? (Array.isArray(wqmTiersRaw.tiers) ? wqmTiersRaw.tiers : Object.values(wqmTiersRaw.tiers)).map(t => ({ qty: String(t.qty || ''), price: String(t.amt || '') })) : []);
-      const resolvedTierType = product.wqm_tier_type || product.wqm_settings?.tiered_pricing_type || wqmTiersRaw?.type || 'fixed';
-      const resolvedSettings = product.wqm_settings || wqmSettingsRaw || null;
-      const resolvedLowStock = product.low_stock_amount ?? getMeta('_low_stock_amount');
+      const resolvedTierType  = product.wqm_tier_type || product.wqm_settings?.tiered_pricing_type || wqmTiersRaw?.type || 'fixed';
+      const resolvedSettings  = product.wqm_settings || wqmSettingsRaw || null;
+      const resolvedLowStock  = product.low_stock_amount ?? getMeta('_low_stock_amount');
 
-      // Build payload — copy base product, swap title/sku/ean/description
+      // Apply checked attribute suggestions
+      const checkedSuggestions = (preview.attribute_suggestions || []).filter(s => attrChecks[s.name]);
+      const baseAttributes = (product.attributes || []).map(a => ({
+        id: a.id || 0, name: a.name || a.slug || "",
+        visible: !!a.visible, variation: !!a.variation,
+        options: a.values || a.options || [],
+      }));
+      const finalAttributes = baseAttributes.map(a => {
+        const sug = checkedSuggestions.find(s => s.name.toLowerCase() === (a.name || "").toLowerCase());
+        return sug ? { ...a, options: [sug.suggested] } : a;
+      });
+
+      const titleSlug = newTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+      // SEO meta keys (write both Yoast + RankMath — harmless if plugin not present)
+      const seoMeta = [];
+      const mt = editValues.meta_title ?? preview.meta_title;
+      const md = editValues.meta_description ?? preview.meta_description;
+      if (mt) { seoMeta.push({ key: "_yoast_wpseo_title", value: mt }); seoMeta.push({ key: "rank_math_title", value: mt }); }
+      if (md) { seoMeta.push({ key: "_yoast_wpseo_metadesc", value: md }); seoMeta.push({ key: "rank_math_description", value: md }); }
+
       const payload = {
-        name: newTitle,
-        type: product.type,
-        status: "draft", // safe default — user publishes manually
-        short_description,
-        description: product.description || "",
-        sku,
-        global_unique_id: ean,           // WC native EAN (8.6+)
-        regular_price: product.regular_price || "",
-        sale_price: product.sale_price || "",
-        manage_stock: product.manage_stock || false,
+        name: newTitle, type: product.type, status: "draft",
+        short_description, description, sku,
+        global_unique_id: ean,
+        regular_price:  product.regular_price  || "",
+        sale_price:     product.sale_price     || "",
+        manage_stock:   product.manage_stock   || false,
         stock_quantity: product.stock_quantity ?? null,
-        stock_status: product.stock_status || "instock",
+        stock_status:   product.stock_status   || "instock",
         low_stock_amount: resolvedLowStock ?? "",
-        categories: (product.categories || []).map(c => ({ id: c.id })),
-        attributes: (product.attributes || []).map(a => ({
-          id: a.id || 0, name: a.name || a.slug || "",
-          visible: !!a.visible, variation: !!a.variation,
-          options: a.values || a.options || [],
-        })),
-        images: product.featured_image ? [{ src: product.featured_image }] : undefined,
+        categories:  (product.categories || []).map(c => ({ id: c.id })),
+        attributes:  finalAttributes,
+        images: product.featured_image ? [{ src: product.featured_image, alt: newTitle, name: titleSlug }] : undefined,
         meta_data: [
           { key: "_alg_ean", value: ean },
           ...(resolvedTiers.length > 0 ? [{
             key: "_wqm_tiers",
-            value: {
-              type: resolvedTierType,
-              tiers: resolvedTiers.map(t => ({
-                qty: parseFloat(t.qty) || 0,
-                amt: parseFloat(t.price) || 0,
-              })).sort((a, b) => b.qty - a.qty),
-            },
+            value: { type: resolvedTierType, tiers: resolvedTiers.map(t => ({ qty: parseFloat(t.qty) || 0, amt: parseFloat(t.price) || 0 })).sort((a, b) => b.qty - a.qty) },
           }] : [{ key: "_wqm_tiers", value: null }]),
           ...(resolvedSettings ? [{ key: "_wqm_settings", value: resolvedSettings }] : []),
+          ...seoMeta,
         ],
       };
 
@@ -1820,46 +1938,56 @@ Rules:
       const created = await wooCall(null, "products", "POST", payload);
       if (!created?.id) throw new Error("Geen product ID ontvangen van WooCommerce");
 
-      // ── Duplicate variations if variable ──
       if (isVariable && product.variations?.length > 0) {
         setProgress(`Variaties aanmaken (${product.variations.length})...`);
         const isSingleVar = product.variations.length === 1;
         for (const v of product.variations) {
-          // Single variation: reuse same EAN as parent. Multi: fetch fresh from pool.
-          const varEan = isSingleVar ? ean : await fetchEanFromPool(
-            (sku + "-V" + (product.variations.indexOf(v) + 1)),
-            created.id
-          );
-          const varPayload = {
+          const varEan = isSingleVar ? ean : await fetchEanFromPool(sku + "-V" + (product.variations.indexOf(v) + 1), created.id);
+          await wooCall(null, `products/${created.id}/variations`, "POST", {
             sku: v.sku ? sku + "-V" + (product.variations.indexOf(v) + 1) : "",
-            regular_price: v.regular_price || "",
-            sale_price: v.sale_price || "",
-            manage_stock: v.manage_stock || false,
-            stock_quantity: v.stock_quantity ?? null,
+            regular_price: v.regular_price || "", sale_price: v.sale_price || "",
+            manage_stock: v.manage_stock || false, stock_quantity: v.stock_quantity ?? null,
             stock_status: v.stock_status || "instock",
             attributes: Object.entries(v.attributes || {}).map(([slug, option]) => ({ id: 0, name: slug, option })),
-            global_unique_id: varEan,
-            meta_data: [{ key: "_alg_ean", value: varEan }],
-          };
-          await wooCall(null, `products/${created.id}/variations`, "POST", varPayload);
+            global_unique_id: varEan, meta_data: [{ key: "_alg_ean", value: varEan }],
+          });
         }
       }
-
       setPreview(prev => ({ ...prev, createdId: created.id }));
       setStep("done");
-    } catch (e) {
-      setErrMsg("Aanmaken mislukt: " + e.message);
-      setStep("error");
-    }
+    } catch (e) { setErrMsg("Aanmaken mislukt: " + e.message); setStep("error"); }
   };
 
   const iconFor = s => ({ input: "📋", generating: "🤖", preview: "✨", creating: "⚙️", done: "✅", error: "❌" })[s] || "📋";
 
+  const EditableField = ({ field, label, multiline = false }) => {
+    const val = editValues[field] ?? preview?.[field] ?? "";
+    const isEditing = editField === field;
+    return (
+      <div style={{ padding: "10px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 10, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={() => setEditField(isEditing ? null : field)} style={{ background: "none", border: "1px solid var(--b2)", borderRadius: 4, padding: "2px 8px", fontSize: 11, cursor: "pointer", color: "var(--mx)" }}>{isEditing ? "✓ Klaar" : "✏ Bewerken"}</button>
+            <button onClick={runAI} style={{ background: "none", border: "1px solid var(--b2)", borderRadius: 4, padding: "2px 8px", fontSize: 11, cursor: "pointer", color: "var(--mx)" }} title="Alles opnieuw genereren">🔄</button>
+          </div>
+        </div>
+        {isEditing
+          ? <textarea value={val} onChange={e => setEditValues(v => ({ ...v, [field]: e.target.value }))}
+              style={{ width: "100%", minHeight: multiline ? 110 : 58, fontSize: 13, padding: 8, background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: 4, color: "var(--tx)", resize: "vertical", boxSizing: "border-box" }} />
+          : <div style={{ fontSize: 13, color: "var(--tx)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{val}</div>
+        }
+      </div>
+    );
+  };
+
+  const hasSeoResult = seoPlugin && seoPlugin !== false && (preview?.meta_title || preview?.meta_description);
+
   return (
-    <Overlay open onClose={step === "creating" ? undefined : onClose} width={520} title={`${iconFor(step)} Product dupliceren`}>
+    <Overlay open onClose={step === "creating" ? undefined : onClose} width={560} title={`${iconFor(step)} Product dupliceren`}>
       <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
 
-        {/* Source product info */}
+        {/* Source product */}
         <div style={{ display: "flex", gap: 12, padding: 12, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
           {product.featured_image && <img src={product.featured_image} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />}
           <div>
@@ -1868,20 +1996,17 @@ Rules:
           </div>
         </div>
 
-        {/* Step: Input */}
+        {/* Input */}
         {step === "input" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Field label="Nieuwe producttitel" hint="AI gebruikt deze titel voor beschrijving en SKU">
+            <Field label="Nieuwe producttitel" hint="AI gebruikt deze titel voor alle content en SKU">
               <Inp value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Bijv. Bamboehaag Premium 180cm" autoFocus
                 onKeyDown={e => e.key === "Enter" && newTitle.trim() && runAI()} />
             </Field>
-            <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.6 }}>
-              🤖 AI genereert automatisch:<br />
-              <strong>Korte beschrijving</strong> passend bij de nieuwe titel ·
-              <strong> SKU</strong> in hetzelfde stijlformaat als <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{existingSkus[0] || "bestaande SKU's"}</code> ·
-              <strong> EAN-13</strong> (geldig barcodenummer)
-              {product.type === "variable" && product.variations?.length === 1 && <><br />📦 1 variatie gevonden — dezelfde EAN wordt ook op de variatie gezet.</>}
-              {product.type === "variable" && (product.variations?.length || 0) > 1 && <><br />📦 {product.variations.length} variaties gevonden — elke variatie krijgt een unieke EAN.</>}
+            <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.7 }}>
+              🤖 AI genereert automatisch: <strong>Korte beschrijving</strong> · <strong>Productbeschrijving</strong> · <strong>SKU</strong> (patroon: <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{existingSkus[0] || "bestaand"}</code>) · <strong>EAN-13</strong>
+              {seoPlugin && seoPlugin !== false && <> · <strong>SEO meta ({seoPlugin})</strong></>}
+              {productAttributes.length > 0 && <> · <strong>Attribuut suggesties</strong></>}
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="secondary" onClick={onClose}>Annuleren</Btn>
@@ -1890,7 +2015,7 @@ Rules:
           </div>
         )}
 
-        {/* Step: Generating */}
+        {/* Generating */}
         {step === "generating" && (
           <div style={{ textAlign: "center", padding: "24px 0" }}>
             <div style={{ width: 40, height: 40, border: "3px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
@@ -1899,39 +2024,62 @@ Rules:
           </div>
         )}
 
-        {/* Step: Preview */}
+        {/* Preview */}
         {step === "preview" && preview && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontWeight: 600, fontSize: 14, color: "var(--gr)" }}>✨ AI heeft het volgende gegenereerd:</div>
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {[
-                { label: "SKU", value: preview.sku, mono: true },
-                { label: "EAN-13", value: preview.ean, mono: true },
-              ].map(({ label, value, mono }) => (
+              {[{ label: "SKU", value: preview.sku }, { label: "EAN-13", value: preview.ean }].map(({ label, value }) => (
                 <div key={label} style={{ padding: "10px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
                   <div style={{ fontSize: 10, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontWeight: 600, fontSize: 13, fontFamily: mono ? "monospace" : undefined, color: "var(--pr-h)" }}>{value}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13, fontFamily: "monospace", color: "var(--pr-h)" }}>{value}</div>
                 </div>
               ))}
             </div>
-            <div style={{ padding: "10px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
-              <div style={{ fontSize: 10, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Korte beschrijving</div>
-              <div style={{ fontSize: 13, color: "var(--tx)", lineHeight: 1.6 }}>{preview.short_description}</div>
-            </div>
+
+            <EditableField field="short_description" label="Korte beschrijving" />
+            <EditableField field="description" label="Productbeschrijving" multiline />
+
+            {hasSeoResult && (
+              <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
+                <div style={{ padding: "8px 12px", background: "rgba(16,185,129,0.07)", borderBottom: "1px solid var(--b1)", fontSize: 11, fontWeight: 600, color: "var(--gr)", textTransform: "uppercase", letterSpacing: "0.05em" }}>🔍 SEO Meta ({seoPlugin})</div>
+                <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {preview.meta_title        && <EditableField field="meta_title"        label="Meta titel" />}
+                  {preview.meta_description  && <EditableField field="meta_description"  label="Meta beschrijving" />}
+                </div>
+              </div>
+            )}
+
+            {(preview.attribute_suggestions || []).length > 0 && (
+              <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
+                <div style={{ padding: "8px 12px", background: "rgba(245,158,11,0.07)", borderBottom: "1px solid var(--b1)", fontSize: 11, fontWeight: 600, color: "var(--ac)", textTransform: "uppercase", letterSpacing: "0.05em" }}>🏷 Attribuut suggesties</div>
+                <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {preview.attribute_suggestions.map(s => (
+                    <label key={s.name} style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", padding: "8px 10px", background: attrChecks[s.name] ? "rgba(99,102,241,0.05)" : "var(--s2)", border: `1px solid ${attrChecks[s.name] ? "rgba(99,102,241,0.3)" : "var(--b1)"}`, borderRadius: "var(--rd)" }}>
+                      <input type="checkbox" checked={!!attrChecks[s.name]} onChange={e => setAttrChecks(ch => ({ ...ch, [s.name]: e.target.checked }))} style={{ marginTop: 2, flexShrink: 0 }} />
+                      <div style={{ fontSize: 12 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 2 }}>{s.name}: <span style={{ color: "var(--dm)", textDecoration: "line-through" }}>{s.original}</span> → <span style={{ color: "var(--pr-h)" }}>{s.suggested}</span></div>
+                        <div style={{ color: "var(--mx)", fontSize: 11 }}>{s.reason}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ padding: "8px 12px", background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)" }}>
-              💡 Product wordt aangemaakt als <strong>Concept</strong> — je kunt het daarna publiceren in WooCommerce.
-              EAN <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{preview.ean}</code> is opgehaald uit de <strong>EAN pool</strong> en gemarkeerd als gebruikt.
-              Opgeslagen in native WooCommerce veld <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>global_unique_id</code> én plugin veld <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>_alg_ean</code>.
+              💡 Wordt aangemaakt als <strong>Concept</strong>. Afbeelding gekopieerd met nieuwe titel als alt-tekst.
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setStep("input")}>← Terug</Btn>
-              <Btn variant="secondary" onClick={() => { setPreview(null); runAI(); }}>🔄 Opnieuw genereren</Btn>
+              <Btn variant="secondary" onClick={() => { setPreview(null); runAI(); }}>🔄 Alles opnieuw</Btn>
               <Btn variant="primary" onClick={createProduct}>✅ Product aanmaken</Btn>
             </div>
           </div>
         )}
 
-        {/* Step: Creating */}
+        {/* Creating */}
         {step === "creating" && (
           <div style={{ textAlign: "center", padding: "24px 0" }}>
             <div style={{ width: 40, height: 40, border: "3px solid var(--b2)", borderTopColor: "var(--gr)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
@@ -1940,21 +2088,16 @@ Rules:
           </div>
         )}
 
-        {/* Step: Done */}
+        {/* Done */}
         {step === "done" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ textAlign: "center", padding: "16px 0" }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
               <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Product aangemaakt!</div>
-              <div style={{ fontSize: 13, color: "var(--dm)" }}>
-                <strong>{newTitle}</strong> is aangemaakt als concept in WooCommerce.
-              </div>
+              <div style={{ fontSize: 13, color: "var(--dm)" }}><strong>{newTitle}</strong> is aangemaakt als concept in WooCommerce.</div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {[
-                { label: "SKU", value: preview.sku, mono: true },
-                { label: "EAN-13", value: preview.ean, mono: true },
-              ].map(({ label, value }) => (
+              {[{ label: "SKU", value: preview.sku }, { label: "EAN-13", value: preview.ean }].map(({ label, value }) => (
                 <div key={label} style={{ padding: "8px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", textAlign: "center" }}>
                   <div style={{ fontSize: 10, color: "var(--dm)", textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
                   <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "monospace", color: "var(--pr-h)" }}>{value}</div>
@@ -1968,14 +2111,13 @@ Rules:
           </div>
         )}
 
-        {/* Step: Error */}
+        {/* Error */}
         {step === "error" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 14, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "var(--rd)", color: "var(--re)", fontSize: 13 }}>
-              ❌ {errMsg}
-            </div>
+            <div style={{ padding: 16, background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "var(--rd)", color: "var(--re)", fontSize: 13 }}>❌ {errMsg}</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <Btn variant="secondary" onClick={() => setStep("input")}>← Terug</Btn>
+              <Btn variant="secondary" onClick={onClose}>Sluiten</Btn>
+              <Btn variant="primary" onClick={() => { setStep("input"); setErrMsg(""); }}>← Opnieuw proberen</Btn>
             </div>
           </div>
         )}
@@ -5991,6 +6133,9 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   const [dupProduct, setDupProduct] = useState(null);
   const [dupOpen, setDupOpen] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [promptSettings, setPromptSettings] = useState({});
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const productsCacheRef = useRef({});
 
   // Per-shop cache: attributes (with terms) + categories
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
@@ -6038,16 +6183,39 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   }, [user?.id]);
 
   // Load products + shop metadata (attributes, categories) when active shop changes
+  const refreshProducts = async () => {
+    if (!activeSite) return;
+    const shopId = activeSite.id;
+    delete productsCacheRef.current[shopId];
+    setProductsLoading(true);
+    try {
+      const data = await wooCall(shopId, "products?per_page=100&orderby=date&order=desc");
+      if (Array.isArray(data)) {
+        const mapped = data.map(p => ({ ...p, pending_changes: {} }));
+        productsCacheRef.current[shopId] = mapped;
+        setProducts(mapped);
+      } else { setProducts([]); }
+    } catch (e) { notify("Producten laden mislukt: " + e.message, "error"); setProducts([]); }
+    finally { setProductsLoading(false); }
+  };
+
   useEffect(() => {
     if (!activeSite) return;
     const shopId = activeSite.id;
 
     const loadProducts = async () => {
+      // Serve from cache if available
+      if (productsCacheRef.current[shopId]) {
+        setProducts(productsCacheRef.current[shopId]);
+        return;
+      }
       setProductsLoading(true);
       try {
         const data = await wooCall(shopId, "products?per_page=100&orderby=date&order=desc");
         if (Array.isArray(data)) {
-          setProducts(data.map(p => ({ ...p, pending_changes: {} })));
+          const mapped = data.map(p => ({ ...p, pending_changes: {} }));
+          productsCacheRef.current[shopId] = mapped;
+          setProducts(mapped);
         } else {
           setProducts([]);
         }
@@ -6115,6 +6283,34 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
       setProducts([]);
     }
     notify("Shop verwijderd");
+  };
+
+  // Publish a product instantly (update local state, no reload needed)
+  const handlePublish = async (productId) => {
+    try {
+      await wooCall(activeSite?.id, `products/${productId}`, "PUT", { status: "publish" });
+      setProducts(prev => prev.map(p => p.id === productId ? { ...p, status: "publish" } : p));
+      // Update cache too
+      if (activeSite?.id && productsCacheRef.current[activeSite.id]) {
+        productsCacheRef.current[activeSite.id] = productsCacheRef.current[activeSite.id].map(p =>
+          p.id === productId ? { ...p, status: "publish" } : p
+        );
+      }
+      notify("Product gepubliceerd ✓");
+    } catch (e) { notify("Publiceren mislukt: " + e.message, "error"); }
+  };
+
+  // Load + save prompt settings from user_profiles
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("user_profiles").select("prompt_settings").eq("id", user.id).single()
+      .then(({ data }) => { if (data?.prompt_settings) setPromptSettings(data.prompt_settings); });
+  }, [user?.id]);
+
+  const savePromptSettings = async (settings) => {
+    setPromptSettings(settings);
+    await supabase.from("user_profiles").update({ prompt_settings: settings }).eq("id", user.id);
+    notify("AI prompt instellingen opgeslagen ✓");
   };
 
   const pendingCount = products.reduce((sum, p) => sum + Object.keys(p.pending_changes || {}).length, 0);
@@ -6195,7 +6391,10 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
                 </div>
               ) : (
                 <ProductsTable products={products} onEdit={p => { setEditProduct(p); setEditOpen(true); }} onConnect={() => setActiveView("connected")} activeSite={activeSite}
-                  onDuplicate={p => { setDupProduct(p); setDupOpen(true); }} />
+                  onDuplicate={p => { setDupProduct(p); setDupOpen(true); }}
+                  onPublish={handlePublish}
+                  onRefresh={refreshProducts}
+                  onPromptSettings={() => setPromptModalOpen(true)} />
               )
             )}
             {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} activeSite={activeSite} wooCall={wooCall} />}
@@ -6390,6 +6589,12 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 
           // Update local state
           setProducts(prev => prev.map(p => p.id === updated.id ? { ...updated, pending_changes: {} } : p));
+          // Keep cache in sync
+          if (activeSite?.id && productsCacheRef.current[activeSite.id]) {
+            productsCacheRef.current[activeSite.id] = productsCacheRef.current[activeSite.id].map(p =>
+              p.id === updated.id ? { ...updated, pending_changes: {} } : p
+            );
+          }
         }}
         onAttributeTermAdded={async (attributeId, termName) => {
           // POST new term to WooCommerce + refresh cache
@@ -6413,16 +6618,20 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
         }}
         sites={shops} activeSite={activeSite} />
 
+      <PromptSettingsModal
+        open={promptModalOpen}
+        onClose={() => setPromptModalOpen(false)}
+        promptSettings={promptSettings}
+        onSave={savePromptSettings}
+      />
       <DuplicateProductModal
         product={dupProduct}
         open={dupOpen}
         onClose={() => { setDupOpen(false); setDupProduct(null); }}
         wooCall={(_, endpoint, method, data) => wooCall(activeSite?.id, endpoint, method, data)}
-        onCreated={async () => {
-          if (!activeSite) return;
-          const data = await wooCall(activeSite.id, "products?per_page=100&orderby=date&order=desc");
-          if (Array.isArray(data)) setProducts(data.map(p => ({ ...p, pending_changes: {} })));
-        }}
+        activeSite={activeSite}
+        promptSettings={promptSettings}
+        onCreated={() => refreshProducts()}
       />
 
       {notification && (
