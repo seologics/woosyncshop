@@ -2813,12 +2813,57 @@ const CouponManager = ({ activeSite, user }) => {
   const [creating, setCreating] = useState(false);
   const [result, setCouponResult] = useState(null); // { ok, coupon_url, coupon_code, error }
   const [codeGenerated, setCodeGenerated] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const loadHistory = async (siteId) => {
+    if (!siteId) return;
+    setHistoryLoading(true);
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/woo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ shop_id: siteId, endpoint: "coupons?per_page=20&orderby=date&order=desc", method: "GET" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHistory(Array.isArray(data) ? data : []);
+      }
+    } catch (e) { console.error("Load coupon history failed:", e); }
+    finally { setHistoryLoading(false); }
+  };
+
+  const deleteCoupon = async (couponId) => {
+    if (!window.confirm("Kortingscode verwijderen?")) return;
+    setDeletingId(couponId);
+    try {
+      const token = await getToken();
+      await fetch("/api/woo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ shop_id: activeSite.id, endpoint: `coupons/${couponId}?force=true`, method: "DELETE" }),
+      });
+      setHistory(h => h.filter(c => c.id !== couponId));
+    } catch (e) { console.error("Delete coupon failed:", e); }
+    finally { setDeletingId(null); }
+  };
+
+  const copyCode = (code, id) => {
+    navigator.clipboard.writeText(code).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  };
 
   // Check if Advanced Coupons is installed on the active shop
   useEffect(() => {
     if (!activeSite) return;
     setHasAdvCoupons(null);
     setCheckingPlugin(true);
+    setHistory([]);
+    loadHistory(activeSite.id);
     const checkPlugin = async () => {
       try {
         const token = await getToken();
@@ -2895,6 +2940,8 @@ const CouponManager = ({ activeSite, user }) => {
       // reset form code for next coupon
       setForm(f => ({ ...f, code: "", amount: "" }));
       setCodeGenerated(false);
+      // refresh history
+      loadHistory(activeSite.id);
     } catch (e) {
       setCouponResult({ ok: false, error: e.message });
     } finally {
@@ -3068,6 +3115,68 @@ const CouponManager = ({ activeSite, user }) => {
           </Btn>
         </div>
       )}
+
+      {/* ── Coupon History ── */}
+      <div style={{ marginTop: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>📋 Recente kortingscodes</div>
+          <Btn variant="ghost" size="sm" onClick={() => loadHistory(activeSite.id)} disabled={historyLoading}>
+            {historyLoading ? "↻ Laden..." : "🔄 Vernieuwen"}
+          </Btn>
+        </div>
+
+        {historyLoading && history.length === 0 ? (
+          <div style={{ padding: "24px 0", textAlign: "center", color: "var(--dm)", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block" }}>↻</span> Laden...
+          </div>
+        ) : history.length === 0 ? (
+          <div style={{ padding: "20px 0", textAlign: "center", color: "var(--dm)", fontSize: 12, border: "1px dashed var(--b2)", borderRadius: "var(--rd)" }}>
+            Nog geen kortingscodes aangemaakt voor deze shop.
+          </div>
+        ) : (
+          <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+            {/* Header */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 70px 80px 80px 100px 70px", gap: 0, background: "var(--s2)", padding: "7px 12px", borderBottom: "1px solid var(--b1)" }}>
+              {["Code", "Type", "Korting", "Gebruik", "Limiet", "Vervalt", ""].map((h, i) => (
+                <span key={i} style={{ fontSize: 10, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
+              ))}
+            </div>
+            {history.map((coupon, idx) => {
+              const typeLabel = coupon.discount_type === "percent" ? "%" : coupon.discount_type === "fixed_cart" ? "€ Cart" : "€ Product";
+              const amount = coupon.discount_type === "percent" ? `${parseFloat(coupon.amount || 0).toFixed(0)}%` : `€${parseFloat(coupon.amount || 0).toFixed(2)}`;
+              const expires = coupon.date_expires ? new Date(coupon.date_expires).toLocaleDateString("nl-NL", { day: "2-digit", month: "short", year: "2-digit" }) : "—";
+              const isExpired = coupon.date_expires && new Date(coupon.date_expires) < new Date();
+              const usageCount = coupon.usage_count ?? 0;
+              const usageLimit = coupon.usage_limit ? coupon.usage_limit : "∞";
+              return (
+                <div key={coupon.id} style={{ display: "grid", gridTemplateColumns: "1fr 110px 70px 80px 80px 100px 70px", gap: 0, padding: "8px 12px", borderBottom: idx < history.length - 1 ? "1px solid var(--b1)" : "none", alignItems: "center", background: isExpired ? "rgba(239,68,68,0.03)" : "transparent" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <code style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", color: isExpired ? "var(--dm)" : "var(--gr)", background: "var(--s3)", padding: "2px 7px", borderRadius: 4, border: "1px solid var(--b1)" }}>
+                      {coupon.code?.toUpperCase()}
+                    </code>
+                    <button onClick={() => copyCode(coupon.code?.toUpperCase(), coupon.id)}
+                      title="Kopieer code"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: copiedId === coupon.id ? "var(--gr)" : "var(--dm)", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>
+                      {copiedId === coupon.id ? "✓" : "📋"}
+                    </button>
+                  </div>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{typeLabel}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)" }}>{amount}</span>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{usageCount}× gebruikt</span>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{usageLimit}</span>
+                  <span style={{ fontSize: 11, color: isExpired ? "var(--re)" : "var(--mx)" }}>{isExpired ? "⚠ " : ""}{expires}</span>
+                  <button onClick={() => deleteCoupon(coupon.id)} disabled={deletingId === coupon.id}
+                    title="Verwijderen"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 13, padding: "2px 4px", borderRadius: 4 }}>
+                    {deletingId === coupon.id ? "↻" : "🗑"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 };
