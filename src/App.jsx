@@ -1286,6 +1286,43 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
     finally { setCatChanging(p => ({ ...p, [product.id]: false })); }
   };
 
+  // Resolve the "primary" category for a product:
+  // 1. Yoast primary term (_yoast_wpseo_primary_product_cat)
+  // 2. RankMath primary term (rank_math_primary_product_cat)
+  // 3. Deepest sub-category (highest parent depth)
+  // 4. First category
+  const getPrimaryCategory = (product) => {
+    const cats = product.categories || [];
+    if (cats.length === 0) return null;
+
+    // Check meta for primary term id
+    const meta = product.meta_data || [];
+    const yoastPrimary    = meta.find(m => m.key === "_yoast_wpseo_primary_product_cat")?.value;
+    const rankMathPrimary = meta.find(m => m.key === "rank_math_primary_product_cat")?.value;
+    const primaryId = yoastPrimary || rankMathPrimary;
+
+    if (primaryId) {
+      const found = cats.find(c => String(c.id) === String(primaryId));
+      if (found) return found;
+    }
+
+    // Fall back: deepest sub-category = the one whose id appears as a child in liveCategories
+    const parentIds = new Set(liveCategories.map(c => c.parent).filter(Boolean));
+    const catIds = new Set(cats.map(c => c.id));
+    // Cats that are children of something (have parent > 0) AND in product's cats
+    const subCats = liveCategories.filter(lc => lc.parent > 0 && catIds.has(lc.id));
+    if (subCats.length > 0) {
+      // Pick the one not itself a parent of another product cat (deepest leaf)
+      const leaf = subCats.find(sc => !cats.some(c => {
+        const live = liveCategories.find(lc => lc.id === c.id);
+        return live?.parent === sc.id;
+      })) || subCats[0];
+      return cats.find(c => c.id === leaf.id) || leaf;
+    }
+
+    return cats[0];
+  };
+
   const toggle = id => setExpanded(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
   const toggleVar = id => setExpandedVars(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
@@ -1370,15 +1407,18 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
               <div style={{ minWidth: 0 }}>
                 {catChanging[product.id]
                   ? <span style={{ fontSize: 11, color: "var(--dm)" }}>⏳</span>
-                  : <select
-                      value={(product.categories?.[0]?.id) || "none"}
-                      onChange={e => handleCatChange(product, e.target.value)}
-                      style={{ fontSize: 11, background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: 4, color: "var(--tx)", padding: "2px 4px", maxWidth: "100%", cursor: "pointer" }}>
-                      <option value="none" disabled>{(product.categories?.[0]?.name) || "— geen —"}</option>
-                      {(liveCategories || []).map(cat => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
-                      ))}
-                    </select>
+                  : (() => {
+                      const primaryCat = getPrimaryCategory(product);
+                      return <select
+                        value={primaryCat?.id || "none"}
+                        onChange={e => handleCatChange(product, e.target.value)}
+                        style={{ fontSize: 11, background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: 4, color: "var(--tx)", padding: "2px 4px", maxWidth: "100%", cursor: "pointer" }}>
+                        <option value="none" disabled>{primaryCat?.name || "— geen —"}</option>
+                        {(liveCategories || []).map(cat => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>;
+                    })()
                 }
               </div>
               <Badge color={product.status === "publish" ? "green" : "amber"}>{product.status === "publish" ? "Actief" : "Concept"}</Badge>
@@ -1790,6 +1830,7 @@ const DuplicateProductModal = ({ product, open, onClose, wooCall, onCreated, act
   const [editField, setEditField]   = useState(null);
   const [editValues, setEditValues] = useState({});
   const [seoPlugin, setSeoPlugin]   = useState(null); // null=unchecked, false=none, "yoast"|"rankmath"
+  const [galleryMode, setGalleryMode] = useState("rename"); // "rename" | "same" | "none"
 
   // Detect SEO plugin once per shop when modal opens (skip if no activeSite)
   useEffect(() => {
@@ -1810,7 +1851,7 @@ const DuplicateProductModal = ({ product, open, onClose, wooCall, onCreated, act
     if (open && product) {
       setNewTitle(product.name + " (kopie)");
       setStep("input"); setPreview(null); setErrMsg("");
-      setAttrChecks({}); setEditField(null); setEditValues({});
+      setAttrChecks({}); setEditField(null); setEditValues({}); setGalleryMode("rename");
     }
   }, [open, product?.id]);
 
@@ -1946,8 +1987,14 @@ Rules:
 
       // Upload images with new filenames via server-side proxy
       let uploadedImages = undefined;
-      const sourceImages = product.images || (product.featured_image ? [{ src: product.featured_image, alt: product.featured_image_alt || "" }] : []);
-      if (sourceImages.length > 0) {
+      const allSourceImages = product.images || (product.featured_image ? [{ src: product.featured_image, alt: product.featured_image_alt || "" }] : []);
+      // galleryMode controls which images to include: featured always included
+      // "rename" = all images renamed+reuploaded, "same" = all images copied as-is, "none" = featured only (no gallery)
+      const sourceImages = galleryMode === "none"
+        ? allSourceImages.slice(0, 1)   // featured only
+        : allSourceImages;
+
+      if (sourceImages.length > 0 && galleryMode === "rename") {
         try {
           setProgress("Afbeeldingen uploaden met nieuwe bestandsnamen...");
           const tok = await getToken();
@@ -2084,6 +2131,28 @@ Rules:
               <Inp value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Bijv. Bamboehaag Premium 180cm" autoFocus
                 onKeyDown={e => e.key === "Enter" && newTitle.trim() && runAI()} />
             </Field>
+            {/* Gallery image mode */}
+            {(product.images || []).length > 1 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>🖼 Galerijafbeeldingen</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[
+                    { value: "rename", label: "↑ Hernoemen & opnieuw uploaden", hint: "Nieuwe bestandsnamen op basis van producttitel" },
+                    { value: "same",   label: "= Zelfde als origineel",          hint: "Originele afbeeldingen overnemen" },
+                    { value: "none",   label: "✕ Geen galerijafbeeldingen",      hint: "Alleen uitgelichte afbeelding kopiëren" },
+                  ].map(opt => (
+                    <button key={opt.value} onClick={() => setGalleryMode(opt.value)}
+                      title={opt.hint}
+                      style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--rd)", border: galleryMode === opt.value ? "2px solid var(--pr)" : "1px solid var(--b2)",
+                        background: galleryMode === opt.value ? "rgba(99,102,241,0.12)" : "var(--s2)",
+                        color: galleryMode === opt.value ? "var(--pr-h)" : "var(--mx)",
+                        fontSize: 11, fontWeight: galleryMode === opt.value ? 700 : 400, cursor: "pointer", textAlign: "center", lineHeight: 1.4 }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.7 }}>
               🤖 AI genereert automatisch: <strong>Korte beschrijving</strong> · <strong>Productbeschrijving</strong> · <strong>SKU</strong> (patroon: <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{existingSkus[0] || "bestaand"}</code>) · <strong>EAN-13</strong>
               {seoPlugin && seoPlugin !== false && <> · <strong>SEO meta ({seoPlugin})</strong></>}
