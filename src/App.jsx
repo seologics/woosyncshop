@@ -6212,6 +6212,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 
   // Per-shop cache: attributes (with terms) + categories
   const [shopCache, setShopCache] = useState({}); // { [shopId]: { attributes: [], categories: [], loaded: false } }
+  const liveCategories = shopCache[activeSite?.id]?.categories || [];
 
   // getToken imported from supabase.js — no local wrapper
 
@@ -6361,7 +6362,6 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   // Publish a product instantly (update local state, no reload needed)
   const handleCategoryChange = async (product, catId) => {
     try {
-      const liveCategories = shopCache[activeSite?.id]?.categories || [];
       const cat = liveCategories.find(c => c.id === catId);
       if (!cat) return;
       await wooCall(activeSite?.id, `products/${product.id}`, "PUT", { categories: [{ id: catId }] });
