@@ -2139,14 +2139,14 @@ Rules:
                 onKeyDown={e => e.key === "Enter" && newTitle.trim() && runAI()} />
             </Field>
             {/* Gallery image mode */}
-            {(product.images || []).length > 1 && (
+            {(() => { // Always show image options
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>🖼 Galerijafbeeldingen</div>
                 <div style={{ display: "flex", gap: 8 }}>
                   {[
-                    { value: "rename", label: "↑ Hernoemen & opnieuw uploaden", hint: "Nieuwe bestandsnamen op basis van producttitel" },
-                    { value: "same",   label: "= Zelfde als origineel",          hint: "Originele afbeeldingen overnemen" },
-                    { value: "none",   label: "✕ Geen galerijafbeeldingen",      hint: "Alleen uitgelichte afbeelding kopiëren" },
+                    { value: "rename", label: "↑ Hernoemen & uploaden",   hint: "Alle afbeeldingen downloaden en opnieuw uploaden met nieuwe bestandsnamen" },
+                    { value: "same",   label: "= Zelfde als origineel",    hint: "Afbeeldingen overnemen zonder te hernoemen" },
+                    { value: "none",   label: "✕ Alleen uitgelichte afb.", hint: "Geen galerijafbeeldingen — alleen de uitgelichte afbeelding kopiëren" },
                   ].map(opt => (
                     <button key={opt.value} onClick={() => setGalleryMode(opt.value)}
                       title={opt.hint}
@@ -2159,7 +2159,7 @@ Rules:
                   ))}
                 </div>
               </div>
-            )}
+            })()}
             <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.7 }}>
               🤖 AI genereert automatisch: <strong>Korte beschrijving</strong> · <strong>Productbeschrijving</strong> · <strong>SKU</strong> (patroon: <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{existingSkus[0] || "bestaand"}</code>) · <strong>EAN-13</strong>
               {seoPlugin && seoPlugin !== false && <> · <strong>SEO meta ({seoPlugin})</strong></>}
