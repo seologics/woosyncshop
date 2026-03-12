@@ -1960,11 +1960,11 @@ Rules:
 
   const iconFor = s => ({ input: "📋", generating: "🤖", preview: "✨", creating: "⚙️", done: "✅", error: "❌" })[s] || "📋";
 
-  const EditableField = ({ field, label, multiline = false }) => {
+  const renderEditableField = (field, label, multiline = false) => {
     const val = editValues[field] ?? preview?.[field] ?? "";
     const isEditing = editField === field;
     return (
-      <div style={{ padding: "10px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
+      <div key={field} style={{ padding: "10px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 10, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
           <div style={{ display: "flex", gap: 4 }}>
@@ -1973,7 +1973,7 @@ Rules:
           </div>
         </div>
         {isEditing
-          ? <textarea value={val} onChange={e => setEditValues(v => ({ ...v, [field]: e.target.value }))}
+          ? <textarea value={val} onChange={e => setEditValues(v => ({ ...v, [field]: e.target.value }))} autoFocus
               style={{ width: "100%", minHeight: multiline ? 110 : 58, fontSize: 13, padding: 8, background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: 4, color: "var(--tx)", resize: "vertical", boxSizing: "border-box" }} />
           : <div style={{ fontSize: 13, color: "var(--tx)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{val}</div>
         }
@@ -2038,15 +2038,15 @@ Rules:
               ))}
             </div>
 
-            <EditableField field="short_description" label="Korte beschrijving" />
-            <EditableField field="description" label="Productbeschrijving" multiline />
+            {renderEditableField("short_description", "Korte beschrijving")}
+            {renderEditableField("description", "Productbeschrijving", true)}
 
             {hasSeoResult && (
               <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd)", overflow: "hidden" }}>
                 <div style={{ padding: "8px 12px", background: "rgba(16,185,129,0.07)", borderBottom: "1px solid var(--b1)", fontSize: 11, fontWeight: 600, color: "var(--gr)", textTransform: "uppercase", letterSpacing: "0.05em" }}>🔍 SEO Meta ({seoPlugin})</div>
                 <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                  {preview.meta_title        && <EditableField field="meta_title"        label="Meta titel" />}
-                  {preview.meta_description  && <EditableField field="meta_description"  label="Meta beschrijving" />}
+                  {preview.meta_title        && {renderEditableField("meta_title", "Meta titel")}}
+                  {preview.meta_description  && {renderEditableField("meta_description", "Meta beschrijving")}}
                 </div>
               </div>
             )}
