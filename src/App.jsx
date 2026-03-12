@@ -2150,27 +2150,25 @@ Rules:
                 onKeyDown={e => e.key === "Enter" && newTitle.trim() && runAI()} />
             </Field>
             {/* Gallery image mode */}
-            {(() => { // Always show image options
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>🖼 Galerijafbeeldingen</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[
-                    { value: "rename", label: "↑ Hernoemen & uploaden",   hint: "Alle afbeeldingen downloaden en opnieuw uploaden met nieuwe bestandsnamen" },
-                    { value: "same",   label: "= Zelfde als origineel",    hint: "Afbeeldingen overnemen zonder te hernoemen" },
-                    { value: "none",   label: "✕ Alleen uitgelichte afb.", hint: "Geen galerijafbeeldingen — alleen de uitgelichte afbeelding kopiëren" },
-                  ].map(opt => (
-                    <button key={opt.value} onClick={() => setGalleryMode(opt.value)}
-                      title={opt.hint}
-                      style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--rd)", border: galleryMode === opt.value ? "2px solid var(--pr)" : "1px solid var(--b2)",
-                        background: galleryMode === opt.value ? "rgba(99,102,241,0.12)" : "var(--s2)",
-                        color: galleryMode === opt.value ? "var(--pr-h)" : "var(--mx)",
-                        fontSize: 11, fontWeight: galleryMode === opt.value ? 700 : 400, cursor: "pointer", textAlign: "center", lineHeight: 1.4 }}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>🖼 Afbeeldingen</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[
+                  { value: "rename", label: "↑ Hernoemen & uploaden",   hint: "Alle afbeeldingen opnieuw uploaden met nieuwe bestandsnamen" },
+                  { value: "same",   label: "= Zelfde als origineel",    hint: "Afbeeldingen overnemen zonder te hernoemen" },
+                  { value: "none",   label: "✕ Alleen uitgelichte afb.", hint: "Geen galerijafbeeldingen — alleen de uitgelichte afbeelding" },
+                ].map(opt => (
+                  <button key={opt.value} onClick={() => setGalleryMode(opt.value)}
+                    title={opt.hint}
+                    style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--rd)", border: galleryMode === opt.value ? "2px solid var(--pr)" : "1px solid var(--b2)",
+                      background: galleryMode === opt.value ? "rgba(99,102,241,0.12)" : "var(--s2)",
+                      color: galleryMode === opt.value ? "var(--pr-h)" : "var(--mx)",
+                      fontSize: 11, fontWeight: galleryMode === opt.value ? 700 : 400, cursor: "pointer", textAlign: "center", lineHeight: 1.4 }}>
+                    {opt.label}
+                  </button>
+                ))}
               </div>
-            })()}
+            </div>
             <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 12, color: "var(--mx)", lineHeight: 1.7 }}>
               🤖 AI genereert automatisch: <strong>Korte beschrijving</strong> · <strong>Productbeschrijving</strong> · <strong>SKU</strong> (patroon: <code style={{ background: "var(--s3)", padding: "1px 4px", borderRadius: 3 }}>{existingSkus[0] || "bestaand"}</code>) · <strong>EAN-13</strong>
               {seoPlugin && seoPlugin !== false && <> · <strong>SEO meta ({seoPlugin})</strong></>}
@@ -8713,6 +8711,8 @@ const PlatformSettings = () => {
     ai_provider_image: "gemini", ai_provider_normalization: "gemini",
     ai_model_matching: "", ai_model_translation: "", ai_model_image: "",
     claude_model_content: "",
+    content_provider: "claude",
+    openai_model_content: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -8779,6 +8779,8 @@ const PlatformSettings = () => {
           ai_model_translation: d.ai_model_translation || "",
           ai_model_image: d.ai_model_image || "",
           claude_model_content: d.claude_model_content || "",
+          content_provider: d.content_provider || "claude",
+          openai_model_content: d.openai_model_content || "",
         }));
       } catch {}
       setLoading(false);
@@ -8965,27 +8967,39 @@ const PlatformSettings = () => {
           })}
         </div>
 
-        {/* ── Claude — Content generatie ── */}
+        {/* ── Content generatie (Claude / OpenAI) ── */}
         <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>✨ Content generatie</div>
               <div style={{ fontSize: 11, color: "var(--dm)" }}>Productbeschrijvingen, SEO meta & attribuut suggesties bij dupliceren</div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "var(--pr-h)", flexShrink: 0 }}>
-              ◆ Claude
-            </div>
-          </div>
-          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "var(--dm)", flexShrink: 0 }}>Model:</span>
-            <Sel
-              value={ps.claude_model_content || "claude-sonnet-4-6"}
-              onChange={e => setPs(p => ({ ...p, claude_model_content: e.target.value }))}
-              options={CLAUDE_MODELS.map(m => ({ value: m.value, label: m.label }))}
-              style={{ flex: 1, fontSize: 12 }}
+            <ProviderToggle
+              value={ps.content_provider || "claude"}
+              onChange={v => setPs(p => ({ ...p, content_provider: v, claude_model_content: "", openai_model_content: "" }))}
+              extraProviders={[{ value: "claude", label: "◆ Claude" }]}
+              claudeOnly={false}
             />
-            {ps.claude_model_content && (
-              <button onClick={() => setPs(p => ({ ...p, claude_model_content: "" }))} style={{ fontSize: 10, color: "var(--dm)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px" }} title="Reset naar standaard">✕ reset</button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: "var(--dm)", flexShrink: 0 }}>Model:</span>
+            {(ps.content_provider || "claude") === "claude" ? (
+              <Sel
+                value={ps.claude_model_content || "claude-sonnet-4-6"}
+                onChange={e => setPs(p => ({ ...p, claude_model_content: e.target.value }))}
+                options={CLAUDE_MODELS.map(m => ({ value: m.value, label: m.label }))}
+                style={{ flex: 1, fontSize: 12 }}
+              />
+            ) : (
+              <Sel
+                value={ps.openai_model_content || "gpt-5.4"}
+                onChange={e => setPs(p => ({ ...p, openai_model_content: e.target.value }))}
+                options={[
+                  { value: "gpt-5.4",             label: "gpt-5.4 (flagship, snel)" },
+                  { value: "gpt-5.3-chat-latest",  label: "gpt-5.3 Instant (snel)" },
+                ]}
+                style={{ flex: 1, fontSize: 12 }}
+              />
             )}
           </div>
         </div>
