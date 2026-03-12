@@ -1271,12 +1271,20 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
 };
 
 // ─── Products Table ───────────────────────────────────────────────────────────
-const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, onPublish, onRefresh, onPromptSettings, shopCategories = [] }) => {
+const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, onPublish, onRefresh, onPromptSettings, shopCategories = [], liveCategories = [], onCategoryChange }) => {
   const [expanded, setExpanded] = useState([]);
   const [expandedVars, setExpandedVars] = useState([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+
+  const [catChanging, setCatChanging] = useState({});
+
+  const handleCatChange = async (product, catId) => {
+    setCatChanging(p => ({ ...p, [product.id]: true }));
+    try { await onCategoryChange?.(product, Number(catId)); }
+    finally { setCatChanging(p => ({ ...p, [product.id]: false })); }
+  };
 
   const toggle = id => setExpanded(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
   const toggleVar = id => setExpandedVars(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
