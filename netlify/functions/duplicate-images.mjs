@@ -60,9 +60,9 @@ export default async (req) => {
         const contentType = srcRes.headers.get('content-type') || 'image/jpeg'
         const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : contentType.includes('gif') ? 'gif' : 'jpg'
 
-        // 2. Build new filename with timestamp to avoid WP duplicate suffix (-1, -2)
-        const ts = Date.now()
-        const filename = i === 0 ? `${titleSlug}-${ts}.${ext}` : `${titleSlug}-${i + 1}-${ts}.${ext}`
+        // 2. Build new filename — short random suffix prevents WP deduplication (-1, -2)
+        const uid = Math.random().toString(36).slice(2, 7)
+        const filename = i === 0 ? `${titleSlug}-${uid}.${ext}` : `${titleSlug}-${i + 1}-${uid}.${ext}`
 
         const imageBuffer = await srcRes.arrayBuffer()
 
@@ -71,7 +71,7 @@ export default async (req) => {
           method: 'POST',
           headers: {
             'Authorization': wpAuth,
-            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
             'Content-Type': contentType,
           },
           body: imageBuffer,
