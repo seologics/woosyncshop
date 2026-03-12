@@ -1358,7 +1358,13 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
               ...shopCategories
                 .filter(cat => cat.parent === 0)
                 .sort((a, b) => a.name.localeCompare(b.name))
-                .map(cat => ({ value: String(cat.id), label: cat.name }))
+                .flatMap(parent => [
+                  { value: String(parent.id), label: parent.name },
+                  ...shopCategories
+                    .filter(sub => sub.parent === parent.id)
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(sub => ({ value: String(sub.id), label: "  ↳ " + sub.name }))
+                ])
             ]}
             style={{ maxWidth: 200 }}
           />
@@ -6584,6 +6590,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
                   onRefresh={refreshProducts}
                   onPromptSettings={() => setPromptModalOpen(true)}
                   liveCategories={liveCategories}
+                  shopCategories={liveCategories}
                   onCategoryChange={handleCategoryChange} />
               )
             )}

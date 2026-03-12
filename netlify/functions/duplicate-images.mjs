@@ -60,8 +60,9 @@ export default async (req) => {
         const contentType = srcRes.headers.get('content-type') || 'image/jpeg'
         const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : contentType.includes('gif') ? 'gif' : 'jpg'
 
-        // 2. Build new filename: titleSlug-1.jpg, titleSlug-2.jpg, etc.
-        const filename = i === 0 ? `${titleSlug}.${ext}` : `${titleSlug}-${i + 1}.${ext}`
+        // 2. Build new filename with timestamp to avoid WP duplicate suffix (-1, -2)
+        const ts = Date.now()
+        const filename = i === 0 ? `${titleSlug}-${ts}.${ext}` : `${titleSlug}-${i + 1}-${ts}.${ext}`
 
         const imageBuffer = await srcRes.arrayBuffer()
 
