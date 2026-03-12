@@ -5416,7 +5416,18 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
           </div>
         )}
         {settingsTab === "ai" && (
-          <AiTranslationSettings enabled={aiEnabled} onToggleEnabled={setAiEnabled} locked={!aiTaxonomyUnlocked} />
+          <AiTranslationSettings
+            enabled={aiEnabled}
+            onToggleEnabled={async (val) => {
+              // Only allow turning OFF (superadmin controls turning ON via admin panel)
+              if (val && !aiTaxonomyUnlocked) return; // can't turn on if not unlocked
+              setAiEnabled(val);
+              try {
+                await supabase.from("user_profiles").update({ ai_taxonomy_enabled: val }).eq("id", user.id);
+              } catch (e) { console.error("Save ai_taxonomy_enabled failed:", e); }
+            }}
+            locked={!aiTaxonomyUnlocked}
+          />
         )}
         {settingsTab === "billing" && (
           <BillingTab userProfile={userProfile} />
