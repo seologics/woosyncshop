@@ -19,6 +19,10 @@ export default async (req) => {
     const anthropicKey = Netlify.env.get('ANTHROPIC_API_KEY')
     if (!anthropicKey) return new Response(JSON.stringify({ error: 'Geen Anthropic API key geconfigureerd' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
 
+    // Read model preference from platform_settings
+    const { data: settings } = await supabase.from('platform_settings').select('claude_model_content').eq('id', 1).single()
+    const model = settings?.claude_model_content || 'claude-sonnet-4-6'
+
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -27,7 +31,7 @@ export default async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model,
         max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),
