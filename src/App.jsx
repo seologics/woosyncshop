@@ -1271,11 +1271,12 @@ const ProductEditModal = ({ product, open, onClose, onSaveDirect, onAttributeTer
 };
 
 // ─── Products Table ───────────────────────────────────────────────────────────
-const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, onPublish, onRefresh, onPromptSettings }) => {
+const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, onPublish, onRefresh, onPromptSettings, shopCategories = [] }) => {
   const [expanded, setExpanded] = useState([]);
   const [expandedVars, setExpandedVars] = useState([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   const toggle = id => setExpanded(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
   const toggleVar = id => setExpandedVars(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -1284,6 +1285,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
     if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.sku.toLowerCase().includes(search.toLowerCase())) return false;
     if (filter === "instock" && p.stock_status !== "instock") return false;
     if (filter === "variable" && p.type !== "variable") return false;
+    if (categoryFilter !== "all" && !(p.categories || []).some(cat => String(cat.id) === categoryFilter)) return false;
     return true;
   });
 
@@ -1295,6 +1297,21 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
       <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
         <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍  Zoek op naam of SKU..." style={{ maxWidth: 280 }} />
         <Sel value={filter} onChange={e => setFilter(e.target.value)} options={[{ value: "all", label: "Alle producten" }, { value: "variable", label: "Variabel" }, { value: "instock", label: "Op voorraad" }]} style={{ maxWidth: 160 }} />
+        {shopCategories.length > 0 && (
+          <Sel
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            options={[
+              { value: "all", label: "Alle categorieën" },
+              ...shopCategories
+                .filter(cat => cat.parent === 0)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(cat => ({ value: String(cat.id), label: cat.name }))
+            ]}
+            style={{ maxWidth: 200 }}
+          />
+        )}
+
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <Btn variant="ghost" size="sm" onClick={onRefresh} title="Productenlijst vernieuwen">🔄 Vernieuwen</Btn>
           <Btn variant="ghost" size="sm" onClick={onPromptSettings} title="AI prompt instellingen">⚙️ AI prompts</Btn>
@@ -1306,8 +1323,8 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
       {/* Table */}
       <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
         {/* Header */}
-        <div className="product-table-header-row" style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 100px 170px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
-          {["", "", "Product", "SKU", "Prijs", "Voorraad", "Status", "Acties"].map((h, i) => (
+        <div className="product-table-header-row" style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 130px 100px 170px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 12px", alignItems: "center" }}>
+          {["", "", "Product", "SKU", "Prijs", "Voorraad", "Categorie", "Status", "Acties"].map((h, i) => (
             <span key={i} style={{ fontSize: 11, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
           ))}
         </div>
@@ -1315,14 +1332,14 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
         {filtered.map((product, pi) => (
           <div key={product.id}>
             {/* Product Row */}
-            <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 100px 170px", gap: 0, padding: "10px 12px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: pi % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", transition: "background 0.1s" }}
+            <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 130px 100px 170px", gap: 0, padding: "10px 12px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: pi % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", transition: "background 0.1s" }}
               onMouseEnter={e => e.currentTarget.style.background = "var(--s2)"}
               onMouseLeave={e => e.currentTarget.style.background = pi % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)"}>
               <button onClick={() => product.type === "variable" && toggle(product.id)} style={{ background: "none", border: "none", cursor: product.type === "variable" ? "pointer" : "default", color: "var(--mx)", fontSize: 12, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, transition: "transform 0.15s", transform: expanded.includes(product.id) ? "rotate(90deg)" : "none" }}>
                 {product.type === "variable" ? "▶" : ""}
               </button>
               <div style={{ width: 36, height: 36, borderRadius: 6, overflow: "hidden", background: "var(--s3)" }}>
-                {product.featured_image && <img src={product.featured_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                {(product.images?.[0]?.src || product.featured_image) && <img src={product.images?.[0]?.src || product.featured_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                 <div style={{ fontWeight: 500, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
@@ -1341,6 +1358,21 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
                   <span style={{ fontSize: 13, fontWeight: 600, color: product.stock_quantity > 10 ? "var(--gr)" : product.stock_quantity > 0 ? "var(--ac)" : "var(--re)" }}>{product.stock_quantity}</span>
                 ) : <span style={{ fontSize: 12, color: "var(--dm)" }}>—</span>}
               </div>
+              {/* Category inline dropdown */}
+              <div style={{ minWidth: 0 }}>
+                {catChanging[product.id]
+                  ? <span style={{ fontSize: 11, color: "var(--dm)" }}>⏳</span>
+                  : <select
+                      value={(product.categories?.[0]?.id) || "none"}
+                      onChange={e => handleCatChange(product, e.target.value)}
+                      style={{ fontSize: 11, background: "var(--s3)", border: "1px solid var(--b2)", borderRadius: 4, color: "var(--tx)", padding: "2px 4px", maxWidth: "100%", cursor: "pointer" }}>
+                      <option value="none" disabled>{(product.categories?.[0]?.name) || "— geen —"}</option>
+                      {(liveCategories || []).map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))}
+                    </select>
+                }
+              </div>
               <Badge color={product.status === "publish" ? "green" : "amber"}>{product.status === "publish" ? "Actief" : "Concept"}</Badge>
               <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                 <Btn variant="secondary" size="sm" onClick={() => onConnect(product)} title="Verbind met andere shops">🔗</Btn>
@@ -1353,7 +1385,7 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
             {/* Variations */}
             {expanded.includes(product.id) && product.variations.map((v, vi) => (
               <div key={v.id}>
-                <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 100px 170px", gap: 0, padding: "8px 12px 8px 28px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: "var(--s1)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "28px 44px 1fr 90px 90px 80px 130px 100px 170px", gap: 0, padding: "8px 12px 8px 28px", alignItems: "center", borderBottom: "1px solid var(--b1)", background: "var(--s1)" }}>
                   <button onClick={() => toggleVar(v.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 11, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s", transform: expandedVars.includes(v.id) ? "rotate(90deg)" : "none" }}>▶</button>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: v.enabled ? "var(--gr)" : "var(--dm)" }} />
@@ -1819,6 +1851,7 @@ Respond ONLY with valid JSON, no markdown fences:
   "short_description": "...",
   "description": "...",
   "sku": "...",
+  "image_alt": "...",
   "attribute_suggestions": []${seoFields}
 }
 
@@ -1922,7 +1955,15 @@ Rules:
         low_stock_amount: resolvedLowStock ?? "",
         categories:  (product.categories || []).map(c => ({ id: c.id })),
         attributes:  finalAttributes,
-        images: product.featured_image ? [{ src: product.featured_image, alt: newTitle, name: titleSlug }] : undefined,
+        images: (() => {
+          const aiAlt = preview?.image_alt || newTitle;
+          const allImgs = product.images || (product.featured_image ? [{ src: product.featured_image }] : []);
+          if (allImgs.length === 0) return undefined;
+          return allImgs.map((img, i) => i === 0
+            ? { src: img.src, alt: aiAlt, name: titleSlug, description: aiAlt }
+            : { src: img.src, alt: img.alt || newTitle }
+          );
+        })(),
         meta_data: [
           { key: "_alg_ean", value: ean },
           ...(resolvedTiers.length > 0 ? [{
@@ -6191,7 +6232,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
     try {
       const data = await wooCall(shopId, "products?per_page=100&orderby=date&order=desc");
       if (Array.isArray(data)) {
-        const mapped = data.map(p => ({ ...p, pending_changes: {} }));
+        const mapped = data.map(p => ({ ...p, pending_changes: {}, featured_image: p.images?.[0]?.src || null }));
         productsCacheRef.current[shopId] = mapped;
         setProducts(mapped);
       } else { setProducts([]); }
@@ -6213,7 +6254,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
       try {
         const data = await wooCall(shopId, "products?per_page=100&orderby=date&order=desc");
         if (Array.isArray(data)) {
-          const mapped = data.map(p => ({ ...p, pending_changes: {} }));
+          const mapped = data.map(p => ({ ...p, pending_changes: {}, featured_image: p.images?.[0]?.src || null }));
           productsCacheRef.current[shopId] = mapped;
           setProducts(mapped);
         } else {
@@ -6286,6 +6327,20 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   };
 
   // Publish a product instantly (update local state, no reload needed)
+  const handleCategoryChange = async (product, catId) => {
+    try {
+      const cat = liveCategories.find(c => c.id === catId);
+      if (!cat) return;
+      await wooCall(activeSite?.id, `products/${product.id}`, "PUT", { categories: [{ id: catId }] });
+      // Update local state + cache
+      setProducts(prev => {
+        const updated = prev.map(p => p.id === product.id ? { ...p, categories: [{ id: catId, name: cat.name, slug: cat.slug }] } : p);
+        if (activeSite?.id) productsCacheRef.current[activeSite.id] = updated;
+        return updated;
+      });
+    } catch (e) { notify("Categorie wijzigen mislukt: " + e.message, "error"); }
+  };
+
   const handlePublish = async (productId) => {
     try {
       await wooCall(activeSite?.id, `products/${productId}`, "PUT", { status: "publish" });
@@ -6394,7 +6449,9 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
                   onDuplicate={p => { setDupProduct(p); setDupOpen(true); }}
                   onPublish={handlePublish}
                   onRefresh={refreshProducts}
-                  onPromptSettings={() => setPromptModalOpen(true)} />
+                  onPromptSettings={() => setPromptModalOpen(true)}
+                  liveCategories={liveCategories}
+                  onCategoryChange={handleCategoryChange} />
               )
             )}
             {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} activeSite={activeSite} wooCall={wooCall} />}
