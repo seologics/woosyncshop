@@ -1736,11 +1736,14 @@ Rules:
 - short_description: 1–2 sentences in the same language as the original, unique for this new title. No HTML.
 - sku: follow the exact same format/pattern as the existing SKUs. If original SKU was "FA-5L-100-CM", derive a logical new SKU for the new title. If no existing SKU pattern, generate a clean uppercase alphanumeric SKU.`;
 
-      const { data: { session } } = await supabase.auth.getSession();
-      const resp = await fetch("/.netlify/functions/duplicate-ai", {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ prompt }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 300,
+          messages: [{ role: "user", content: prompt }],
+        }),
       });
       const data = await resp.json();
       const raw = data.content?.[0]?.text || "";
@@ -1776,21 +1779,33 @@ Rules:
         description: product.description || "",
         sku,
         global_unique_id: ean,           // WC native EAN (8.6+)
-        meta_data: [
-          { key: "_alg_ean", value: ean }, // EAN plugin
-        ],
         regular_price: product.regular_price || "",
         sale_price: product.sale_price || "",
         manage_stock: product.manage_stock || false,
         stock_quantity: product.stock_quantity ?? null,
         stock_status: product.stock_status || "instock",
+        low_stock_amount: product.low_stock_amount ?? "",
         categories: (product.categories || []).map(c => ({ id: c.id })),
-        attributes: isVariable ? (product.attributes || []).map(a => ({
+        attributes: (product.attributes || []).map(a => ({
           id: a.id || 0, name: a.name || a.slug || "",
           visible: !!a.visible, variation: !!a.variation,
           options: a.values || a.options || [],
-        })) : undefined,
+        })),
         images: product.featured_image ? [{ src: product.featured_image }] : undefined,
+        meta_data: [
+          { key: "_alg_ean", value: ean },
+          ...(product.wqm_tiers?.length > 0 ? [{
+            key: "_wqm_tiers",
+            value: {
+              type: product.wqm_tier_type || product.wqm_settings?.tiered_pricing_type || "fixed",
+              tiers: product.wqm_tiers.map(t => ({
+                qty: parseFloat(t.qty) || 0,
+                amt: parseFloat(t.price) || 0,
+              })).sort((a, b) => b.qty - a.qty),
+            },
+          }] : [{ key: "_wqm_tiers", value: null }]),
+          ...(product.wqm_settings ? [{ key: "_wqm_settings", value: product.wqm_settings }] : []),
+        ],
       };
 
       setProgress("Product aanmaken...");
