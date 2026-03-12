@@ -1936,6 +1936,30 @@ Rules:
 
       const titleSlug = newTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
+      // Upload images with new filenames via server-side proxy
+      let uploadedImages = undefined;
+      const sourceImages = product.images || (product.featured_image ? [{ src: product.featured_image, alt: product.featured_image_alt || "" }] : []);
+      if (sourceImages.length > 0) {
+        try {
+          setProgress("Afbeeldingen uploaden met nieuwe bestandsnamen...");
+          const tok = await getToken();
+          const imgRes = await fetch("/api/duplicate-images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tok}` },
+            body: JSON.stringify({
+              shopId: activeSite?.id,
+              images: sourceImages.map((img, i) => ({ src: img.src, alt: img.alt || "", isFeatured: i === 0 })),
+              titleSlug,
+              newTitle,
+            }),
+          });
+          if (imgRes.ok) {
+            const imgData = await imgRes.json();
+            uploadedImages = imgData.images;
+          }
+        } catch {} // non-fatal — fall through to inline src copy below
+      }
+
       // SEO meta keys (write both Yoast + RankMath — harmless if plugin not present)
       const seoMeta = [];
       const mt = editValues.meta_title ?? preview.meta_title;
@@ -1956,8 +1980,16 @@ Rules:
         categories:  (product.categories || []).map(c => ({ id: c.id })),
         attributes:  finalAttributes,
         images: (() => {
+          if (uploadedImages?.length > 0) {
+            // Use freshly uploaded media (renamed files, proper alt text)
+            return uploadedImages.map(img => img.id
+              ? { id: img.id, alt: img.alt }
+              : { src: img.src, alt: img.alt, name: titleSlug }
+            );
+          }
+          // Fallback: sideload from src (WooCommerce copies from URL)
           const aiAlt = preview?.image_alt || newTitle;
-          const allImgs = product.images || (product.featured_image ? [{ src: product.featured_image }] : []);
+          const allImgs = sourceImages;
           if (allImgs.length === 0) return undefined;
           return allImgs.map((img, i) => i === 0
             ? { src: img.src, alt: aiAlt, name: titleSlug, description: aiAlt }
@@ -6329,6 +6361,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   // Publish a product instantly (update local state, no reload needed)
   const handleCategoryChange = async (product, catId) => {
     try {
+      const liveCategories = shopCache[activeSite?.id]?.categories || [];
       const cat = liveCategories.find(c => c.id === catId);
       if (!cat) return;
       await wooCall(activeSite?.id, `products/${product.id}`, "PUT", { categories: [{ id: catId }] });
