@@ -2818,37 +2818,39 @@ const CouponManager = ({ activeSite, user }) => {
   const [deletingId, setDeletingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
+  // Load history from Supabase coupons table (has expires_at stored correctly)
   const loadHistory = async (siteId) => {
     if (!siteId) return;
     setHistoryLoading(true);
     try {
-      const token = await getToken();
-      // Request meta_data so we can read acfw_schedule_date_range for expiry
-      const res = await fetch("/api/woo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: siteId, endpoint: "coupons?per_page=20&orderby=date&order=desc", method: "GET" }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setHistory(Array.isArray(data) ? data : []);
-      }
-    } catch (e) { console.error("Load coupon history failed:", e); }
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('shop_id', siteId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (!error) setHistory(data || []);
+    } catch (e) { console.error('Load coupon history failed:', e); }
     finally { setHistoryLoading(false); }
   };
 
-  const deleteCoupon = async (couponId) => {
-    if (!window.confirm("Kortingscode verwijderen?")) return;
+  const deleteCoupon = async (couponId, wooCouponId) => {
+    if (!window.confirm('Kortingscode verwijderen?')) return;
     setDeletingId(couponId);
     try {
       const token = await getToken();
-      await fetch("/api/woo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: activeSite.id, endpoint: `coupons/${couponId}?force=true`, method: "DELETE" }),
-      });
+      // Delete from WooCommerce
+      if (wooCouponId) {
+        await fetch('/api/woo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ shop_id: activeSite.id, endpoint: `coupons/${wooCouponId}?force=true`, method: 'DELETE' }),
+        });
+      }
+      // Delete from Supabase
+      await supabase.from('coupons').delete().eq('id', couponId);
       setHistory(h => h.filter(cc => cc.id !== couponId));
-    } catch (e) { console.error("Delete coupon failed:", e); }
+    } catch (e) { console.error('Delete coupon failed:', e); }
     finally { setDeletingId(null); }
   };
 
@@ -3116,7 +3118,7 @@ const CouponManager = ({ activeSite, user }) => {
         </div>
       )}
 
-      {/* ── Coupon history ── */}
+      {/* ── Coupon history (from Supabase — has correct expires_at) ── */}
       <div style={{ marginTop: 8 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>📋 Recente kortingscodes</div>
@@ -3135,7 +3137,7 @@ const CouponManager = ({ activeSite, user }) => {
           </div>
         ) : (
           <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 90px 70px 130px 36px", background: "var(--s2)", padding: "7px 12px", borderBottom: "1px solid var(--b1)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 90px 70px 150px 36px", background: "var(--s2)", padding: "7px 12px", borderBottom: "1px solid var(--b1)" }}>
               {["Code", "Type", "Korting", "Gebruik", "Limiet", "Vervalt", ""].map((h, i) => (
                 <span key={i} style={{ fontSize: 10, fontWeight: 600, color: "var(--dm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
               ))}
@@ -3145,32 +3147,16 @@ const CouponManager = ({ activeSite, user }) => {
               const amount = coupon.discount_type === "percent"
                 ? `${parseFloat(coupon.amount || 0).toFixed(0)}%`
                 : `€${parseFloat(coupon.amount || 0).toFixed(2)}`;
-              const usageCount = coupon.usage_count ?? 0;
-              const usageLimit = coupon.usage_limit ? coupon.usage_limit : "∞";
 
-              // Expiry: try native date_expires first, then acfw_schedule_date_range meta
-              let expiryDate = null;
-              if (coupon.date_expires) {
-                expiryDate = new Date(coupon.date_expires);
-              } else {
-                const acfwMeta = (coupon.meta_data || []).find(m => m.key === "acfw_schedule_date_range");
-                if (acfwMeta?.value) {
-                  // acfw stores as JSON: { "date_range": { "to": "2026-03-11 17:04" } }
-                  try {
-                    const parsed = typeof acfwMeta.value === "string" ? JSON.parse(acfwMeta.value) : acfwMeta.value;
-                    const toStr = parsed?.date_range?.to || parsed?.to || null;
-                    if (toStr) expiryDate = new Date(toStr);
-                  } catch {}
-                }
-              }
-
+              // expires_at is stored as ISO string in Supabase
+              const expiryDate = coupon.expires_at ? new Date(coupon.expires_at) : null;
               const isExpired = expiryDate && expiryDate < new Date();
               const expires = expiryDate
                 ? expiryDate.toLocaleString("nl-NL", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" })
                 : "—";
 
               return (
-                <div key={coupon.id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 90px 70px 130px 36px", padding: "8px 12px", borderBottom: idx < history.length - 1 ? "1px solid var(--b1)" : "none", alignItems: "center", background: isExpired ? "rgba(239,68,68,0.03)" : "transparent" }}>
+                <div key={coupon.id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 90px 70px 150px 36px", padding: "8px 12px", borderBottom: idx < history.length - 1 ? "1px solid var(--b1)" : "none", alignItems: "center", background: isExpired ? "rgba(239,68,68,0.03)" : "transparent" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <code style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", color: isExpired ? "var(--dm)" : "var(--gr)", background: "var(--s3)", padding: "2px 7px", borderRadius: 4, border: "1px solid var(--b1)" }}>
                       {coupon.code?.toUpperCase()}
@@ -3183,12 +3169,12 @@ const CouponManager = ({ activeSite, user }) => {
                   </div>
                   <span style={{ fontSize: 11, color: "var(--mx)" }}>{typeLabel}</span>
                   <span style={{ fontSize: 12, fontWeight: 600 }}>{amount}</span>
-                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{usageCount}× gebruikt</span>
-                  <span style={{ fontSize: 11, color: "var(--mx)" }}>{usageLimit}</span>
-                  <span style={{ fontSize: 11, color: isExpired ? "var(--re)" : "var(--mx)" }} title={expiryDate?.toISOString() || ""}>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>—</span>
+                  <span style={{ fontSize: 11, color: "var(--mx)" }}>—</span>
+                  <span style={{ fontSize: 11, color: isExpired ? "var(--re)" : "var(--mx)" }}>
                     {isExpired ? "⚠ " : ""}{expires}
                   </span>
-                  <button onClick={() => deleteCoupon(coupon.id)} disabled={deletingId === coupon.id}
+                  <button onClick={() => deleteCoupon(coupon.id, coupon.woo_coupon_id)} disabled={deletingId === coupon.id}
                     title="Verwijderen"
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dm)", fontSize: 13, padding: "2px 4px", borderRadius: 4, opacity: deletingId === coupon.id ? 0.5 : 1 }}>
                     {deletingId === coupon.id ? "↻" : "🗑"}
