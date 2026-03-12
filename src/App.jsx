@@ -1918,11 +1918,22 @@ Rules:
 - attribute_suggestions: array of {"name","original","suggested","reason"} where the new title clearly implies a different attribute value. Scan ALL attributes vs the new title. If a pot size, plant height, length etc is explicitly stated in the new title and differs from the original attribute, include it. If unclear, return [].${seoRules}`;
 
       const { data: { session } } = await supabase.auth.getSession();
-      const resp = await fetch("/api/duplicate-ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ prompt }),
-      });
+      const aiAbort = new AbortController();
+      const aiTimeout = setTimeout(() => aiAbort.abort(), 25000);
+      let resp;
+      try {
+        resp = await fetch("/api/duplicate-ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ prompt }),
+          signal: aiAbort.signal,
+        });
+      } catch (fetchErr) {
+        clearTimeout(aiTimeout);
+        if (fetchErr.name === "AbortError") throw new Error("AI generatie duurde te lang (timeout). Probeer opnieuw.");
+        throw fetchErr;
+      }
+      clearTimeout(aiTimeout);
       const data = await resp.json();
       const raw   = data.content?.[0]?.text || "";
       const clean = raw.replace(/```json|```/g, "").trim();
@@ -6388,16 +6399,22 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
     const loadShopMeta = async () => {
       if (shopCache[shopId]?.loaded) return; // already cached
       try {
-        // Fetch attributes + their terms in parallel
+        // Fetch attributes + categories in parallel
         const [rawAttrs, rawCats] = await Promise.all([
           wooCall(shopId, "products/attributes?per_page=100"),
           wooCall(shopId, "products/categories?per_page=100&hide_empty=false"),
         ]);
 
         const attrs = Array.isArray(rawAttrs) ? rawAttrs : [];
-        const cats = Array.isArray(rawCats) ? rawCats : [];
+        const cats  = Array.isArray(rawCats)  ? rawCats  : [];
 
-        // Fetch terms for each attribute sequentially to avoid overwhelming WooCommerce
+        // ✅ Set categories immediately — don't wait for attribute terms
+        setShopCache(prev => ({
+          ...prev,
+          [shopId]: { attributes: attrs, categories: cats, loaded: true },
+        }));
+
+        // Fetch attribute terms in background (sequential to avoid WC overload)
         const attrsWithTerms = [];
         for (const attr of attrs) {
           try {
@@ -6408,9 +6425,10 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
           }
         }
 
+        // Update cache again with full attribute terms (categories already visible)
         setShopCache(prev => ({
           ...prev,
-          [shopId]: { attributes: attrsWithTerms, categories: cats, loaded: true },
+          [shopId]: { ...prev[shopId], attributes: attrsWithTerms },
         }));
       } catch (e) {
         console.error("Shop meta load failed:", e);

@@ -21,7 +21,7 @@ export default async (req) => {
 
     // Read model preference from platform_settings
     const { data: settings } = await supabase.from('platform_settings').select('claude_model_content').eq('id', 1).single()
-    const model = settings?.claude_model_content || 'claude-sonnet-4-6'
+    const model = settings?.claude_model_content || 'claude-haiku-4-5-20251001'
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
