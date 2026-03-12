@@ -1736,14 +1736,11 @@ Rules:
 - short_description: 1–2 sentences in the same language as the original, unique for this new title. No HTML.
 - sku: follow the exact same format/pattern as the existing SKUs. If original SKU was "FA-5L-100-CM", derive a logical new SKU for the new title. If no existing SKU pattern, generate a clean uppercase alphanumeric SKU.`;
 
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch("/.netlify/functions/duplicate-ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 300,
-          messages: [{ role: "user", content: prompt }],
-        }),
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ prompt }),
       });
       const data = await resp.json();
       const raw = data.content?.[0]?.text || "";
