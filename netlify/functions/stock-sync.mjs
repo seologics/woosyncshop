@@ -237,7 +237,7 @@ export default async (req) => {
           try { await wooFetch(targetShop, `products/${tp.id}`, 'PUT', { status: 'publish' }) } catch {}
         }
 
-        synced.push({ source_id: src.id, target_id: tp.id, name: src.name, sku: src.sku || '' })
+        synced.push({ source_id: src.id, target_id: tp.id, name: src.name, sku: src.sku || '', target_name: tp.name, target_sku: tp.sku || '' })
 
       } catch (err) {
         failed.push({ id: src.id, name: src.name, sku: src.sku || '', error: err.message })

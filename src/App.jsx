@@ -6606,6 +6606,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
 
   // Step 4 — sync run
   const [sourceProducts, setSourceProducts] = useState([]);
+  const [targetProducts, setTargetProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState(new Set());
   const [search, setSearch] = useState("");
@@ -6652,19 +6653,30 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   // ── Step 4: Load source products ───────────────────────────────────────────
   const loadSourceProducts = async () => {
     if (!sourceShopId) return;
-    setLoadingProducts(true); setSourceProducts([]); setSyncResult(null);
+    setLoadingProducts(true); setSourceProducts([]); setTargetProducts([]); setSyncResult(null);
     try {
       const token = await getToken();
-      const res = await fetch("/api/woo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: sourceShopId, endpoint: "products?per_page=100&orderby=title&order=asc&_fields=id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,description,short_description,categories,images,attributes,meta_data", method: "GET" }),
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setSourceProducts(data);
-        setSelectedProducts(new Set(data.map(p => p.id)));
+      const FIELDS = "products?per_page=100&orderby=title&order=asc&_fields=id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,description,short_description,categories,images,attributes,meta_data";
+      // Load source and target products in parallel
+      const [srcRes, tgtRes] = await Promise.all([
+        fetch("/api/woo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ shop_id: sourceShopId, endpoint: FIELDS, method: "GET" }),
+        }),
+        targetShopId ? fetch("/api/woo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ shop_id: targetShopId, endpoint: FIELDS, method: "GET" }),
+        }) : Promise.resolve(null),
+      ]);
+      const srcData = await srcRes.json();
+      const tgtData = tgtRes ? await tgtRes.json() : [];
+      if (Array.isArray(srcData)) {
+        setSourceProducts(srcData);
+        setSelectedProducts(new Set(srcData.map(p => p.id)));
       }
+      if (Array.isArray(tgtData)) setTargetProducts(tgtData);
     } catch (e) { alert("Laden mislukt: " + e.message); }
     finally { setLoadingProducts(false); }
   };
@@ -7044,114 +7056,199 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
       )}
 
       {/* ── STEP 4: Product selection + sync run + result ─────────────────────── */}
-      {step === 4 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Config summary bar */}
-          <div style={{ padding: "10px 16px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
-            <span>📤 <strong>{sourceShop?.name}</strong> → <strong>{targetShop?.name}</strong></span>
-            <span>🔑 {matchStrategy === "sku" ? "SKU exact" : matchStrategy === "identifier" ? "Identifier" : "Opgeslagen koppeling"}</span>
-            <span>📋 {selectedFields.length} veld(en)</span>
-            <button onClick={() => setStep(1)} style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--pr)", fontSize: 12, cursor: "pointer" }}>✏ Wijzigen</button>
-          </div>
+      {step === 4 && (() => {
+        // Build preview match map client-side (SKU strategy only — AI/identifier resolved server-side)
+        const tgtSkuMap = {};
+        targetProducts.forEach(tp => { if (tp.sku) tgtSkuMap[tp.sku] = tp; });
+        const previewMatch = (src) => {
+          if (matchStrategy === "sku") return tgtSkuMap[src.sku] || null;
+          return undefined; // undefined = "will be determined during sync"
+        };
+        // Build post-sync result maps
+        const syncedMap   = {};
+        const failedMap   = {};
+        const unmatchedSet = new Set();
+        (syncResult?.synced   || []).forEach(s => { syncedMap[s.source_id]  = s; });
+        (syncResult?.failed   || []).forEach(f => { failedMap[f.id]         = f; });
+        (syncResult?.unmatched|| []).forEach(u => { unmatchedSet.add(u.id); });
+        const hasSyncResult = !!syncResult;
 
-          {/* Product list */}
-          <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>Producten selecteren</span>
-              <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoeken..." style={{ fontSize: 12, maxWidth: 200 }} />
-              <Btn variant="secondary" size="sm" onClick={loadSourceProducts} disabled={loadingProducts}>↻ Herladen</Btn>
-              <button onClick={() => setSelectedProducts(new Set(filteredProducts.map(p => p.id)))} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✓</button>
-              <button onClick={() => setSelectedProducts(new Set())} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✗</button>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                <Btn variant="primary" onClick={handleSync} disabled={syncing || loadingProducts || selectedProducts.size === 0}>
-                  {syncing ? "Bezig..." : `🔄 Sync ${selectedProducts.size} product${selectedProducts.size !== 1 ? "en" : ""}`}
-                </Btn>
-              </div>
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Config summary bar */}
+            <div style={{ padding: "10px 16px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, alignItems: "center" }}>
+              <span>📤 <strong>{sourceShop?.name}</strong> → <strong>{targetShop?.name}</strong></span>
+              <span>🔑 {matchStrategy === "sku" ? "SKU exact" : matchStrategy === "identifier" ? "Identifier attribuut" : "Opgeslagen koppeling"}</span>
+              <span>📋 {selectedFields.length} veld(en)</span>
+              <button onClick={() => setStep(1)} style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--pr)", fontSize: 12, cursor: "pointer" }}>✏ Wijzigen</button>
             </div>
-            {loadingProducts ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 16px", color: "var(--mx)", fontSize: 13 }}>
-                <div style={{ width: 16, height: 16, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                Producten laden...
-              </div>
-            ) : filteredProducts.length === 0 ? (
-              <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mx)", fontSize: 13 }}>
-                {sourceProducts.length === 0 ? "Geen producten gevonden." : "Geen resultaten."}
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 130px 90px 80px", padding: "7px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontSize: 10, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  <div></div><div>Product</div><div>SKU</div><div>Prijs</div><div style={{ textAlign: "right" }}>Voorraad</div>
-                </div>
-                {filteredProducts.map((p, i) => {
-                  const isSelected = selectedProducts.has(p.id);
-                  return (
-                    <div key={p.id} onClick={() => toggleProduct(p.id)}
-                      style={{ display: "grid", gridTemplateColumns: "32px 1fr 130px 90px 80px", padding: "9px 14px", borderBottom: i < filteredProducts.length - 1 ? "1px solid var(--b1)" : "none", background: isSelected ? "rgba(99,102,241,0.03)" : "transparent", cursor: "pointer", alignItems: "center" }}>
-                      <div>
-                        <div style={{ width: 15, height: 15, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          {isSelected && <span style={{ color: "#fff", fontSize: 9, fontWeight: 700 }}>✓</span>}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
-                        {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel</div>}
-                      </div>
-                      <div style={{ fontSize: 11, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku || "—"}</div>
-                      <div style={{ fontSize: 12, color: "var(--tx)" }}>€{p.regular_price || p.price || "—"}</div>
-                      <div style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: p.stock_quantity > 0 ? "var(--gr)" : "var(--mx)" }}>
-                        {p.manage_stock ? (p.stock_quantity ?? 0) : "—"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
 
-          {/* Sync result */}
-          {syncResult && (
+            {/* Product table */}
             <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>📊 Synchronisatie resultaat</div>
-              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", gap: 16 }}>
-                  {[
-                    { label: "Gesynchroniseerd", val: syncResult.synced?.length ?? 0, color: "var(--gr)" },
-                    { label: "Mislukt", val: syncResult.failed?.length ?? 0, color: "var(--re)" },
-                    { label: "Niet gevonden", val: syncResult.unmatched?.length ?? 0, color: "var(--ac)" },
-                  ].map(s => (
-                    <div key={s.label} style={{ flex: 1, padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
-                      <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>{s.label}</div>
-                    </div>
-                  ))}
+              {/* Toolbar */}
+              <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Producten selecteren</span>
+                <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoeken..." style={{ fontSize: 12, maxWidth: 180 }} />
+                <Btn variant="secondary" size="sm" onClick={loadSourceProducts} disabled={loadingProducts}>↻ Herladen</Btn>
+                <button onClick={() => setSelectedProducts(new Set(filteredProducts.map(p => p.id)))} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✓</button>
+                <button onClick={() => setSelectedProducts(new Set())} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✗</button>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  {loadingProducts && <span style={{ fontSize: 11, color: "var(--mx)" }}>Doelshop laden...</span>}
+                  <Btn variant="primary" onClick={handleSync} disabled={syncing || loadingProducts || selectedProducts.size === 0}>
+                    {syncing ? "Bezig..." : `🔄 Sync ${selectedProducts.size} product${selectedProducts.size !== 1 ? "en" : ""}`}
+                  </Btn>
                 </div>
-                {syncResult.failed?.length > 0 && (
-                  <div style={{ fontSize: 12, color: "var(--re)" }}>
-                    {syncResult.failed.map(f => <div key={f.id}>⚠ {f.name}: {f.error}</div>)}
-                  </div>
-                )}
-                {syncResult.unmatched?.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12, color: "var(--ac)", fontWeight: 600, marginBottom: 6 }}>
-                      {syncResult.unmatched.length} product(en) niet gevonden in doelshop.
-                    </div>
-                    <Btn variant="primary" size="sm" onClick={() => setStep(5)}>
-                      ✨ Aanmaken in {targetShop?.name} →
-                    </Btn>
-                  </div>
-                )}
               </div>
-            </div>
-          )}
 
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <Btn variant="secondary" onClick={() => setStep(3)}>← Terug</Btn>
-            {syncResult?.unmatched?.length > 0 && (
-              <Btn variant="secondary" onClick={() => setStep(5)}>Ontbrekende producten aanmaken →</Btn>
+              {/* Column headers — two-sided */}
+              <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 110px 18px 1fr 110px 72px", padding: "7px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontSize: 10, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em", gap: 6 }}>
+                <div />
+                <div>Bron — {sourceShop?.name}</div>
+                <div style={{ fontSize: 9 }}>SKU / PRIJS</div>
+                <div />
+                <div>Doel — {targetShop?.name}</div>
+                <div style={{ fontSize: 9 }}>SKU / VOORRAAD</div>
+                <div style={{ textAlign: "right" }}>Status</div>
+              </div>
+
+              {loadingProducts ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 16px", color: "var(--mx)", fontSize: 13 }}>
+                  <div style={{ width: 16, height: 16, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  Producten laden van beide shops...
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mx)", fontSize: 13 }}>
+                  {sourceProducts.length === 0 ? "Geen producten gevonden." : "Geen resultaten."}
+                </div>
+              ) : filteredProducts.map((p, i) => {
+                const isSelected = selectedProducts.has(p.id);
+                const preview    = previewMatch(p); // null = no match, undefined = unknown
+                // Post-sync state
+                const syncedItem   = syncedMap[p.id];
+                const failedItem   = failedMap[p.id];
+                const isUnmatched  = unmatchedSet.has(p.id);
+                // Determine target to show: post-sync trumps preview
+                const targetToShow = syncedItem
+                  ? { name: syncedItem.target_name || "—", sku: syncedItem.target_sku || "" }
+                  : preview;
+
+                // Row status
+                let rowStatus = null;
+                if (hasSyncResult) {
+                  if (syncedItem)  rowStatus = { icon: "✅", color: "var(--gr)",             label: "Gesync" };
+                  else if (failedItem) rowStatus = { icon: "❌", color: "rgba(239,68,68,1)", label: "Fout" };
+                  else if (isUnmatched) rowStatus = { icon: "—",  color: "var(--ac)",         label: "Geen match" };
+                } else if (preview === null) {
+                  rowStatus = { icon: "?", color: "var(--ac)", label: "Geen match" };
+                }
+
+                const rowBg = syncedItem ? "rgba(34,197,94,0.04)"
+                  : failedItem ? "rgba(239,68,68,0.04)"
+                  : isUnmatched ? "rgba(245,158,11,0.04)"
+                  : isSelected ? "rgba(99,102,241,0.03)" : "transparent";
+
+                return (
+                  <div key={p.id} onClick={() => toggleProduct(p.id)}
+                    style={{ display: "grid", gridTemplateColumns: "32px 1fr 110px 18px 1fr 110px 72px", padding: "9px 14px", borderBottom: i < filteredProducts.length - 1 ? "1px solid var(--b1)" : "none", background: rowBg, cursor: "pointer", alignItems: "center", gap: 6 }}>
+                    {/* Checkbox */}
+                    <div>
+                      <div style={{ width: 15, height: 15, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {isSelected && <span style={{ color: "#fff", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                      </div>
+                    </div>
+                    {/* Source product */}
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3 }}>{p.name}</div>
+                      {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel</div>}
+                    </div>
+                    {/* Source SKU + price */}
+                    <div>
+                      <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku || "—"}</div>
+                      <div style={{ fontSize: 10, color: "var(--mx)" }}>€{p.regular_price || p.price || "—"}</div>
+                    </div>
+                    {/* Arrow */}
+                    <div style={{ fontSize: 12, color: "var(--mx)", textAlign: "center" }}>→</div>
+                    {/* Target product */}
+                    <div>
+                      {targetToShow ? (
+                        <>
+                          <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3, color: syncedItem ? "var(--gr)" : "var(--tx)" }}>{targetToShow.name}</div>
+                        </>
+                      ) : targetToShow === undefined ? (
+                        <div style={{ fontSize: 11, color: "var(--mx)", fontStyle: "italic" }}>
+                          {matchStrategy === "sku" ? "Geen SKU" : "Bepaald tijdens sync"}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "var(--ac)", fontStyle: "italic" }}>Niet gevonden in doelshop</div>
+                      )}
+                    </div>
+                    {/* Target SKU + stock */}
+                    <div>
+                      {targetToShow ? (
+                        <>
+                          <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--dm)" }}>{targetToShow.sku || "—"}</div>
+                          {syncedItem && <div style={{ fontSize: 10, color: "var(--gr)" }}>✓ gesync</div>}
+                        </>
+                      ) : null}
+                    </div>
+                    {/* Row status badge */}
+                    <div style={{ textAlign: "right" }}>
+                      {rowStatus && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, color: rowStatus.color, background: `${rowStatus.color}18`, whiteSpace: "nowrap" }}>
+                          {rowStatus.icon} {rowStatus.label}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Sync result summary */}
+            {syncResult && (
+              <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+                <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>📊 Synchronisatie resultaat</div>
+                <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    {[
+                      { label: "Gesynchroniseerd", val: syncResult.synced?.length ?? 0, color: "var(--gr)" },
+                      { label: "Mislukt",           val: syncResult.failed?.length ?? 0, color: "rgba(239,68,68,1)" },
+                      { label: "Geen match",        val: syncResult.unmatched?.length ?? 0, color: "var(--ac)" },
+                    ].map(s => (
+                      <div key={s.label} style={{ flex: 1, padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
+                        <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {syncResult.failed?.length > 0 && (
+                    <div style={{ fontSize: 12, color: "rgba(239,68,68,1)" }}>
+                      {syncResult.failed.map(f => <div key={f.id}>⚠ {f.name}: {f.error}</div>)}
+                    </div>
+                  )}
+                  {syncResult.unmatched?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, color: "var(--ac)", fontWeight: 600, marginBottom: 6 }}>
+                        {syncResult.unmatched.length} product(en) niet gevonden in doelshop.
+                      </div>
+                      <Btn variant="primary" size="sm" onClick={() => setStep(5)}>
+                        ✨ Aanmaken in {targetShop?.name} →
+                      </Btn>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <Btn variant="secondary" onClick={() => setStep(3)}>← Terug</Btn>
+              {syncResult?.unmatched?.length > 0 && (
+                <Btn variant="secondary" onClick={() => setStep(5)}>Ontbrekende producten aanmaken →</Btn>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── STEP 5: Create unmatched ───────────────────────────────────────────── */}
       {step === 5 && (
