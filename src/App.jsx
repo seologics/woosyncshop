@@ -5367,7 +5367,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                   <Field label="Naam" required><Inp value={newShop.name} onChange={e => setNewShop(s => ({ ...s, name: e.target.value }))} placeholder="bijv. HaagDirect NL" /></Field>
                   <Field label="Site URL" required><Inp value={newShop.site_url} onChange={e => setNewShop(s => ({ ...s, site_url: e.target.value }))} onBlur={e => setNewShop(s => ({ ...s, site_url: e.target.value.replace(/\/$/, "") }))} placeholder="https://mijnshop.nl" /></Field>
                   <Field label="Taal / Locale" required>
-                    <Sel value={newShop.locale} onChange={v => {
+                    <Sel value={newShop.locale} onChange={e => {
+                      const v = e.target.value;
                       const autoFlag = LOCALE_FLAG_MAP[v] || "🌐";
                       setNewShop(s => ({ ...s, locale: v, flag: autoFlag, flagShape: s.flagShape || "emoji" }));
                     }} options={LOCALE_OPTIONS} />
@@ -6563,199 +6564,75 @@ const PluginWizardModal = ({ shop, onSave, onSkip }) => {
 
 
 // ─── Stock Sync View ──────────────────────────────────────────────────────────
-// Full 5-step wizard: Shop pair → Field scan → Field select → Match strategy → Sync run → Create unmatched
-
-const SYNC_LANGUAGES = [
-  { code: "NL", label: "Nederlands", lang: "Dutch" },
-  { code: "FR", label: "Frans",      lang: "French" },
-  { code: "DE", label: "Duits",      lang: "German" },
-  { code: "EN", label: "Engels",     lang: "English" },
-  { code: "ES", label: "Spaans",     lang: "Spanish" },
-  { code: "IT", label: "Italiaans",  lang: "Italian" },
-  { code: "PL", label: "Pools",      lang: "Polish" },
-  { code: "PT", label: "Portugees",  lang: "Portuguese" },
-  { code: "SE", label: "Zweeds",     lang: "Swedish" },
-];
-
 const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
-  const [step, setStep] = useState(1); // 1=shops, 2=scan+fields, 3=strategy, 4=sync-result, 5=create
-
-  // Step 1 — shop pair
-  const [sourceShopId, setSourceShopId] = useState(activeSite?.id || shops[0]?.id || null);
-  const [targetShopId, setTargetShopId] = useState(null);
-
-  // Step 2 — scan + field selection
-  const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState(null); // { fields, has_wqm, sample_products }
-  const [selectedFields, setSelectedFields] = useState(["stock_quantity"]);
-
-  // Step 3 — match strategy
-  const [matchStrategy, setMatchStrategy] = useState("sku"); // sku | identifier | mapping
-
-  // Step 4 — sync run
-  const [sourceProducts, setSourceProducts] = useState([]);
-  const [loadingProducts, setLoadingProducts] = useState(false);
-  const [selectedProducts, setSelectedProducts] = useState(new Set());
-  const [search, setSearch] = useState("");
+  const [sourceShop, setSourceShop] = useState(activeSite?.id || shops[0]?.id || null);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState(null); // { synced, failed, unmatched }
+  const [syncResult, setSyncResult] = useState(null);
+  const [selected, setSelected] = useState(new Set()); // selected product ids
+  const [search, setSearch] = useState("");
 
-  // Step 5 — create unmatched
-  const [createConfig, setCreateConfig] = useState({
-    language: "Dutch",
-    lang_code: "NL",
-    translate_fields: ["name", "description", "short_description", "attributes"],
-    translate_meta: true,
-    rewrite_seo: true,
-    tone: "formal",
-    sku_mode: "lang_prefix",
-  });
-  const [selectedToCreate, setSelectedToCreate] = useState(new Set());
-  const [creating, setCreating] = useState(false);
-  const [createResult, setCreateResult] = useState(null);
+  const currentShop = shops.find(s => s.id === sourceShop);
+  const otherShops = shops.filter(s => s.id !== sourceShop);
 
-  const sourceShop = shops.find(s => s.id === sourceShopId);
-  const targetShop = shops.find(s => s.id === targetShopId);
-
-  // ── Step 2: Scan fields ────────────────────────────────────────────────────
-  const runScan = async () => {
-    if (!sourceShopId) return;
-    setScanning(true); setScanResult(null);
-    try {
-      const token = await getToken();
-      const res = await fetch("/api/sync-scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: sourceShopId }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setScanResult(data);
-      // Pre-select all detected fields
-      setSelectedFields(data.fields.filter(f => f.detected).map(f => f.key));
-    } catch (e) { alert("Scan mislukt: " + e.message); }
-    finally { setScanning(false); }
-  };
-
-  // ── Step 4: Load source products ───────────────────────────────────────────
-  const loadSourceProducts = async () => {
-    if (!sourceShopId) return;
-    setLoadingProducts(true); setSourceProducts([]); setSyncResult(null);
+  const loadProducts = async () => {
+    if (!sourceShop) return;
+    setLoading(true);
+    setProducts([]);
+    setSyncResult(null);
     try {
       const token = await getToken();
       const res = await fetch("/api/woo", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: sourceShopId, endpoint: "products?per_page=100&orderby=title&order=asc&_fields=id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,description,short_description,categories,images,attributes,meta_data", method: "GET" }),
+        body: JSON.stringify({ shop_id: sourceShop, endpoint: "products?per_page=100&orderby=title&order=asc", method: "GET" }),
       });
       const data = await res.json();
       if (Array.isArray(data)) {
-        setSourceProducts(data);
-        setSelectedProducts(new Set(data.map(p => p.id)));
+        // Only show products with SKU (needed for cross-shop matching)
+        const withSku = data.filter(p => p.sku);
+        setProducts(withSku);
+        // Auto-select all
+        setSelected(new Set(withSku.map(p => p.id)));
       }
     } catch (e) { alert("Laden mislukt: " + e.message); }
-    finally { setLoadingProducts(false); }
+    finally { setLoading(false); }
   };
 
-  // ── Step 4: Run sync ───────────────────────────────────────────────────────
+  useEffect(() => { loadProducts(); }, [sourceShop]);
+
+  const toggleSelect = (id) => setSelected(s => {
+    const n = new Set(s);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
   const handleSync = async () => {
-    if (selectedProducts.size === 0) return alert("Selecteer minimaal één product.");
-    if (!targetShopId) return alert("Selecteer een doelshop.");
-    if (!confirm(`${selectedProducts.size} product(en) synchroniseren van ${sourceShop?.name} naar ${targetShop?.name}?`)) return;
+    if (selected.size === 0) return alert("Selecteer minimaal één product.");
+    if (otherShops.length === 0) return alert("Je hebt geen andere shops om naartoe te synchroniseren.");
+    if (!confirm(`Voorraad van ${selected.size} product(en) synchroniseren naar ${otherShops.length} andere shop(s)?`)) return;
 
     setSyncing(true); setSyncResult(null);
     try {
-      const toSync = sourceProducts.filter(p => selectedProducts.has(p.id));
+      const selectedProducts = products
+        .filter(p => selected.has(p.id))
+        .map(p => ({ sku: p.sku, stock_quantity: p.stock_quantity, manage_stock: p.manage_stock }));
+
       const token = await getToken();
       const res = await fetch("/api/stock-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({
-          source_shop_id: sourceShopId,
-          target_shop_id: targetShopId,
-          products: toSync,
-          fields: selectedFields,
-          match_strategy: matchStrategy,
-        }),
+        body: JSON.stringify({ source_shop_id: sourceShop, products: selectedProducts }),
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
       setSyncResult(data);
-      // Pre-select all unmatched for create step
-      setSelectedToCreate(new Set((data.unmatched || []).map(p => p.id)));
-      setStep(4);
     } catch (e) { alert("Sync mislukt: " + e.message); }
     finally { setSyncing(false); }
   };
 
-  // ── Step 5: Create unmatched ───────────────────────────────────────────────
-  const handleCreate = async () => {
-    if (selectedToCreate.size === 0) return alert("Selecteer minimaal één product om aan te maken.");
-    if (!targetShopId) return alert("Selecteer een doelshop.");
-
-    const toCreate = (syncResult?.unmatched || [])
-      .filter(p => selectedToCreate.has(p.id))
-      .map(sp => sourceProducts.find(fp => fp.id === sp.id))
-      .filter(Boolean);
-
-    if (toCreate.length === 0) return alert("Producten niet gevonden in brondata.");
-    if (!confirm(`${toCreate.length} product(en) aanmaken in ${targetShop?.name}?`)) return;
-
-    setCreating(true); setCreateResult(null);
-    try {
-      const token = await getToken();
-      const res = await fetch("/api/sync-create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({
-          source_shop_id: sourceShopId,
-          target_shop_id: targetShopId,
-          products: toCreate,
-          config: createConfig,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setCreateResult(data);
-    } catch (e) { alert("Aanmaken mislukt: " + e.message); }
-    finally { setCreating(false); }
-  };
-
-  const toggleField = (key) => setSelectedFields(f => f.includes(key) ? f.filter(x => x !== key) : [...f, key]);
-  const toggleProduct = (id) => setSelectedProducts(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleCreate = (id) => setSelectedToCreate(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
-  const filteredProducts = sourceProducts.filter(p =>
-    !search || p.name?.toLowerCase().includes(search.toLowerCase()) || (p.sku || "").toLowerCase().includes(search.toLowerCase())
-  );
-
-  const stepLabels = ["Shops", "Velden", "Strategie", "Sync", "Aanmaken"];
-
-  const StepBar = () => (
-    <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20 }}>
-      {stepLabels.map((label, i) => {
-        const n = i + 1;
-        const done = step > n;
-        const active = step === n;
-        return (
-          <div key={n} style={{ display: "flex", alignItems: "center", flex: n < stepLabels.length ? 1 : undefined }}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: done ? "pointer" : "default" }}
-              onClick={() => done && setStep(n)}>
-              <div style={{ width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700,
-                background: done ? "var(--gr)" : active ? "var(--pr)" : "var(--s3)",
-                color: done || active ? "#fff" : "var(--mx)",
-                border: `2px solid ${done ? "var(--gr)" : active ? "var(--pr)" : "var(--b2)"}` }}>
-                {done ? "✓" : n}
-              </div>
-              <span style={{ fontSize: 10, color: active ? "var(--pr)" : "var(--mx)", fontWeight: active ? 600 : 400 }}>{label}</span>
-            </div>
-            {n < stepLabels.length && (
-              <div style={{ flex: 1, height: 2, background: done ? "var(--gr)" : "var(--b2)", margin: "0 6px", marginBottom: 18 }} />
-            )}
-          </div>
-        );
-      })}
-    </div>
+  const filtered = products.filter(p =>
+    !search || p.name?.toLowerCase().includes(search.toLowerCase()) || p.sku?.toLowerCase().includes(search.toLowerCase())
   );
 
   if (shops.length < 2) {
@@ -6763,427 +6640,131 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
       <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--mx)" }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>🔗</div>
         <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Minimaal 2 shops vereist</div>
-        <div style={{ fontSize: 13 }}>Voeg een tweede shop toe om te synchroniseren.</div>
+        <div style={{ fontSize: 13 }}>Voeg een tweede shop toe om voorraad te synchroniseren.</div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 860 }}>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>🔄 Multi-Shop Sync</div>
-        <div style={{ fontSize: 12, color: "var(--mx)" }}>Synchroniseer voorraad, prijzen en andere velden tussen shops. Maak ontbrekende producten aan met AI-vertaling.</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header + controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>🔄 Voorraad Synchronisatie</div>
+          <div style={{ fontSize: 12, color: "var(--mx)" }}>Sync voorraadaantallen van de bronshop naar alle andere shops via SKU-koppeling.</div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <Btn variant="secondary" size="sm" onClick={loadProducts} disabled={loading}>↻ Herladen</Btn>
+          <Btn variant="primary" onClick={handleSync} disabled={syncing || loading || selected.size === 0}>
+            {syncing ? "Bezig..." : `🔄 Sync ${selected.size} product${selected.size !== 1 ? "en" : ""}`}
+          </Btn>
+        </div>
       </div>
 
-      <StepBar />
-
-      {/* ── STEP 1: Shop pair ─────────────────────────────────────────────────── */}
-      {step === 1 && (
-        <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>
-            Stap 1 — Kies bronshop en doelshop
-          </div>
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>Bronshop (van)</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {shops.map(s => (
-                  <button key={s.id} onClick={() => { setSourceShopId(s.id); if (s.id === targetShopId) setTargetShopId(null); }}
-                    style={{ padding: "8px 16px", borderRadius: "var(--rd)", border: `2px solid ${sourceShopId === s.id ? "var(--pr)" : "var(--b1)"}`, background: sourceShopId === s.id ? "rgba(99,102,241,0.1)" : "var(--s3)", color: "var(--tx)", fontSize: 13, fontWeight: sourceShopId === s.id ? 700 : 400, cursor: "pointer" }}>
-                    {s.flag || "🌐"} {s.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>Doelshop (naar)</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {shops.filter(s => s.id !== sourceShopId).map(s => (
-                  <button key={s.id} onClick={() => setTargetShopId(s.id)}
-                    style={{ padding: "8px 16px", borderRadius: "var(--rd)", border: `2px solid ${targetShopId === s.id ? "var(--gr)" : "var(--b1)"}`, background: targetShopId === s.id ? "rgba(34,197,94,0.1)" : "var(--s3)", color: "var(--tx)", fontSize: 13, fontWeight: targetShopId === s.id ? 700 : 400, cursor: "pointer" }}>
-                    {s.flag || "🌐"} {s.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {sourceShopId && targetShopId && (
-              <div style={{ padding: "10px 14px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)", fontSize: 13 }}>
-                <strong>{sourceShop?.name}</strong> → <strong>{targetShop?.name}</strong>
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Btn variant="primary" disabled={!sourceShopId || !targetShopId} onClick={() => { setStep(2); runScan(); }}>
-                Volgende: Velden scannen →
-              </Btn>
-            </div>
-          </div>
+      {/* Shop selector */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+        <span style={{ fontSize: 12, color: "var(--mx)", fontWeight: 600, flexShrink: 0 }}>Bronshop:</span>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {shops.map(s => (
+            <button key={s.id} onClick={() => setSourceShop(s.id)}
+              style={{ padding: "5px 12px", borderRadius: "var(--rd)", border: `1px solid ${sourceShop === s.id ? "var(--pr)" : "var(--b1)"}`, background: sourceShop === s.id ? "var(--pr)" : "var(--s3)", color: sourceShop === s.id ? "#fff" : "var(--tx)", fontSize: 12, fontWeight: sourceShop === s.id ? 600 : 400, cursor: "pointer" }}>
+              {s.flag || "🌐"} {s.name}
+            </button>
+          ))}
         </div>
-      )}
+        <span style={{ fontSize: 11, color: "var(--dm)", marginLeft: "auto" }}>→ synct naar: {otherShops.map(s => s.name).join(", ") || "—"}</span>
+      </div>
 
-      {/* ── STEP 2: Field scan + selection ────────────────────────────────────── */}
-      {step === 2 && (
-        <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>Stap 2 — Kies te synchroniseren velden</span>
-            <Btn variant="secondary" size="sm" onClick={runScan} disabled={scanning} style={{ marginLeft: "auto" }}>↻ Opnieuw scannen</Btn>
-          </div>
-          <div style={{ padding: 20 }}>
-            {scanning ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "var(--mx)", fontSize: 13 }}>
-                <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                Velden scannen in {sourceShop?.name}...
-              </div>
-            ) : scanResult ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div style={{ fontSize: 12, color: "var(--mx)" }}>
-                  Gebaseerd op de eerste 5 producten van <strong>{sourceShop?.name}</strong>. Aangevinkte velden zijn gedetecteerd met data.
-                </div>
-                {/* Standard fields */}
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Standaard velden</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {scanResult.fields.filter(f => !f.group).map(f => (
-                      <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "8px 12px", borderRadius: "var(--rd)", background: selectedFields.includes(f.key) ? "rgba(99,102,241,0.06)" : "transparent", border: `1px solid ${selectedFields.includes(f.key) ? "rgba(99,102,241,0.2)" : "var(--b1)"}` }}>
-                        <input type="checkbox" checked={selectedFields.includes(f.key)} onChange={() => toggleField(f.key)} style={{ width: 15, height: 15, accentColor: "var(--pr)", cursor: "pointer" }} />
-                        <span style={{ fontSize: 13, flex: 1 }}>{f.label}</span>
-                        {!f.detected && <span style={{ fontSize: 10, color: "var(--dm)", background: "var(--s3)", padding: "2px 6px", borderRadius: 4 }}>leeg</span>}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                {/* WQM fields */}
-                {scanResult.has_wqm && (
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ac)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>WQM Velden (Quantity Manager)</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {scanResult.fields.filter(f => f.group === "wqm").map(f => (
-                        <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "8px 12px", borderRadius: "var(--rd)", background: selectedFields.includes(f.key) ? "rgba(245,158,11,0.06)" : "transparent", border: `1px solid ${selectedFields.includes(f.key) ? "rgba(245,158,11,0.3)" : "var(--b1)"}` }}>
-                          <input type="checkbox" checked={selectedFields.includes(f.key)} onChange={() => toggleField(f.key)} style={{ width: 15, height: 15, accentColor: "var(--ac)", cursor: "pointer" }} />
-                          <span style={{ fontSize: 13, flex: 1 }}>{f.label}</span>
-                          {!f.detected && <span style={{ fontSize: 10, color: "var(--dm)", background: "var(--s3)", padding: "2px 6px", borderRadius: 4 }}>leeg</span>}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div style={{ fontSize: 12, color: "var(--mx)" }}>{selectedFields.length} veld(en) geselecteerd</div>
-              </div>
-            ) : (
-              <div style={{ padding: "20px 0", color: "var(--mx)", fontSize: 13 }}>Klik op "Opnieuw scannen" om te starten.</div>
-            )}
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
-              <Btn variant="secondary" onClick={() => setStep(1)}>← Terug</Btn>
-              <Btn variant="primary" disabled={selectedFields.length === 0 || !scanResult} onClick={() => setStep(3)}>
-                Volgende: Koppelstrategie →
-              </Btn>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── STEP 3: Match strategy ─────────────────────────────────────────────── */}
-      {step === 3 && (
-        <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>
-            Stap 3 — Koppelstrategie kiezen
-          </div>
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 13, color: "var(--mx)" }}>Hoe moeten producten tussen shops worden gekoppeld?</div>
-            {[
-              { val: "sku", icon: "🔑", title: "SKU exact", desc: "Koppelt producten met identieke SKU-codes. Snel, geen AI nodig. Werkt wanneer beide shops consistente SKUs hebben." },
-              { val: "identifier", icon: "🏷️", title: "Identifier attribuut", desc: "Koppelt via het _wss_identifier meta-veld dat door WooSyncShop wordt toegevoegd. Betrouwbaarder bij verschillende SKUs maar zelfde product." },
-              { val: "mapping", icon: "🤖", title: "Opgeslagen koppeling", desc: "Gebruikt eerder opgeslagen koppelingen (bijv. na AI-matching of handmatig aangemaakt). Snelste optie na eerste setup." },
-            ].map(opt => (
-              <label key={opt.val} style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px", borderRadius: "var(--rd)", border: `2px solid ${matchStrategy === opt.val ? "var(--pr)" : "var(--b1)"}`, background: matchStrategy === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer" }}>
-                <input type="radio" name="strategy" value={opt.val} checked={matchStrategy === opt.val} onChange={() => setMatchStrategy(opt.val)} style={{ marginTop: 2, accentColor: "var(--pr)" }} />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.icon} {opt.title}</div>
-                  <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 3 }}>{opt.desc}</div>
-                </div>
-              </label>
-            ))}
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-              <Btn variant="secondary" onClick={() => setStep(2)}>← Terug</Btn>
-              <Btn variant="primary" onClick={() => { setStep(4); loadSourceProducts(); }}>
-                Volgende: Producten laden →
-              </Btn>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── STEP 4: Product selection + sync run + result ─────────────────────── */}
-      {step === 4 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Config summary bar */}
-          <div style={{ padding: "10px 16px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
-            <span>📤 <strong>{sourceShop?.name}</strong> → <strong>{targetShop?.name}</strong></span>
-            <span>🔑 {matchStrategy === "sku" ? "SKU exact" : matchStrategy === "identifier" ? "Identifier" : "Opgeslagen koppeling"}</span>
-            <span>📋 {selectedFields.length} veld(en)</span>
-            <button onClick={() => setStep(1)} style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--pr)", fontSize: 12, cursor: "pointer" }}>✏ Wijzigen</button>
-          </div>
-
-          {/* Product list */}
-          <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>Producten selecteren</span>
-              <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoeken..." style={{ fontSize: 12, maxWidth: 200 }} />
-              <Btn variant="secondary" size="sm" onClick={loadSourceProducts} disabled={loadingProducts}>↻ Herladen</Btn>
-              <button onClick={() => setSelectedProducts(new Set(filteredProducts.map(p => p.id)))} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✓</button>
-              <button onClick={() => setSelectedProducts(new Set())} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✗</button>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                <Btn variant="primary" onClick={handleSync} disabled={syncing || loadingProducts || selectedProducts.size === 0}>
-                  {syncing ? "Bezig..." : `🔄 Sync ${selectedProducts.size} product${selectedProducts.size !== 1 ? "en" : ""}`}
-                </Btn>
-              </div>
-            </div>
-            {loadingProducts ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 16px", color: "var(--mx)", fontSize: 13 }}>
-                <div style={{ width: 16, height: 16, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                Producten laden...
-              </div>
-            ) : filteredProducts.length === 0 ? (
-              <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mx)", fontSize: 13 }}>
-                {sourceProducts.length === 0 ? "Geen producten gevonden." : "Geen resultaten."}
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 130px 90px 80px", padding: "7px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontSize: 10, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  <div></div><div>Product</div><div>SKU</div><div>Prijs</div><div style={{ textAlign: "right" }}>Voorraad</div>
-                </div>
-                {filteredProducts.map((p, i) => {
-                  const isSelected = selectedProducts.has(p.id);
-                  return (
-                    <div key={p.id} onClick={() => toggleProduct(p.id)}
-                      style={{ display: "grid", gridTemplateColumns: "32px 1fr 130px 90px 80px", padding: "9px 14px", borderBottom: i < filteredProducts.length - 1 ? "1px solid var(--b1)" : "none", background: isSelected ? "rgba(99,102,241,0.03)" : "transparent", cursor: "pointer", alignItems: "center" }}>
-                      <div>
-                        <div style={{ width: 15, height: 15, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          {isSelected && <span style={{ color: "#fff", fontSize: 9, fontWeight: 700 }}>✓</span>}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
-                        {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel</div>}
-                      </div>
-                      <div style={{ fontSize: 11, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku || "—"}</div>
-                      <div style={{ fontSize: 12, color: "var(--tx)" }}>€{p.regular_price || p.price || "—"}</div>
-                      <div style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: p.stock_quantity > 0 ? "var(--gr)" : "var(--mx)" }}>
-                        {p.manage_stock ? (p.stock_quantity ?? 0) : "—"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
-
-          {/* Sync result */}
-          {syncResult && (
-            <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>📊 Synchronisatie resultaat</div>
-              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", gap: 16 }}>
-                  {[
-                    { label: "Gesynchroniseerd", val: syncResult.synced?.length ?? 0, color: "var(--gr)" },
-                    { label: "Mislukt", val: syncResult.failed?.length ?? 0, color: "var(--re)" },
-                    { label: "Niet gevonden", val: syncResult.unmatched?.length ?? 0, color: "var(--ac)" },
-                  ].map(s => (
-                    <div key={s.label} style={{ flex: 1, padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
-                      <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-                {syncResult.failed?.length > 0 && (
-                  <div style={{ fontSize: 12, color: "var(--re)" }}>
-                    {syncResult.failed.map(f => <div key={f.id}>⚠ {f.name}: {f.error}</div>)}
-                  </div>
-                )}
-                {syncResult.unmatched?.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12, color: "var(--ac)", fontWeight: 600, marginBottom: 6 }}>
-                      {syncResult.unmatched.length} product(en) niet gevonden in doelshop.
-                    </div>
-                    <Btn variant="primary" size="sm" onClick={() => setStep(5)}>
-                      ✨ Aanmaken in {targetShop?.name} →
-                    </Btn>
-                  </div>
-                )}
-              </div>
+      {/* Sync result */}
+      {syncResult && (
+        <div style={{ padding: "12px 16px", background: syncResult.synced > 0 ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)", border: `1px solid ${syncResult.synced > 0 ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`, borderRadius: "var(--rd)", fontSize: 13 }}>
+          {syncResult.synced > 0 ? (
+            <>
+              <div style={{ fontWeight: 600, color: "var(--gr)", marginBottom: 4 }}>✓ {syncResult.synced} product{syncResult.synced !== 1 ? "en" : ""} gesynchroniseerd</div>
+              {syncResult.shops_updated?.map(s => (
+                <div key={s.shop_id} style={{ fontSize: 12, color: "var(--mx)" }}>• {s.name}: {s.synced} product{s.synced !== 1 ? "en" : ""}</div>
+              ))}
+            </>
+          ) : (
+            <div style={{ color: "var(--re)" }}>⚠ Geen producten gesynchroniseerd — controleer of de SKUs overeenkomen.</div>
+          )}
+          {syncResult.errors?.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              {syncResult.errors.map(e => (
+                <div key={e.shop_id} style={{ fontSize: 11, color: "var(--ac)" }}>⚠ {e.name}: {e.error}</div>
+              ))}
             </div>
           )}
-
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <Btn variant="secondary" onClick={() => setStep(3)}>← Terug</Btn>
-            {syncResult?.unmatched?.length > 0 && (
-              <Btn variant="secondary" onClick={() => setStep(5)}>Ontbrekende producten aanmaken →</Btn>
-            )}
-          </div>
         </div>
       )}
 
-      {/* ── STEP 5: Create unmatched ───────────────────────────────────────────── */}
-      {step === 5 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Language + translation config */}
-          <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-            <div style={{ padding: "12px 16px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>
-              ✨ Stap 5 — Producten aanmaken in {targetShop?.name}
-            </div>
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Language */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      {/* Search + select all */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek op naam of SKU..." style={{ flex: 1, fontSize: 12 }} />
+        <button onClick={() => setSelected(new Set(filtered.map(p => p.id)))}
+          style={{ padding: "6px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer", color: "var(--mx)" }}>
+          Alles selecteren
+        </button>
+        <button onClick={() => setSelected(new Set())}
+          style={{ padding: "6px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer", color: "var(--mx)" }}>
+          Deselecteren
+        </button>
+      </div>
+
+      {/* Product list */}
+      {loading ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "30px 0", color: "var(--mx)", fontSize: 13 }}>
+          <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          Producten laden...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: "30px 0", textAlign: "center", color: "var(--mx)", fontSize: 13 }}>
+          {products.length === 0 ? "Geen producten met SKU gevonden in deze shop." : "Geen resultaten voor je zoekopdracht."}
+        </div>
+      ) : (
+        <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+          {/* Table header */}
+          <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 120px 100px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 14px", fontSize: 11, fontWeight: 600, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            <div></div>
+            <div>Product</div>
+            <div>SKU</div>
+            <div style={{ textAlign: "right" }}>Voorraad</div>
+          </div>
+          {filtered.map((p, i) => {
+            const isSelected = selected.has(p.id);
+            const hasStock = p.manage_stock;
+            return (
+              <div key={p.id}
+                onClick={() => toggleSelect(p.id)}
+                style={{ display: "grid", gridTemplateColumns: "32px 1fr 120px 100px", gap: 0, padding: "10px 14px", borderBottom: i < filtered.length - 1 ? "1px solid var(--b1)" : "none", background: isSelected ? "rgba(99,102,241,0.04)" : "transparent", cursor: "pointer", alignItems: "center", transition: "background 0.1s" }}>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 6 }}>Doeltaal</div>
-                  <select value={createConfig.lang_code}
-                    onChange={e => {
-                      const lang = SYNC_LANGUAGES.find(l => l.code === e.target.value);
-                      setCreateConfig(c => ({ ...c, lang_code: e.target.value, language: lang?.lang || "Dutch" }));
-                    }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", fontSize: 13 }}>
-                    {SYNC_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                  </select>
+                  <div style={{ width: 16, height: 16, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {isSelected && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 6 }}>Toon</div>
-                  <select value={createConfig.tone} onChange={e => setCreateConfig(c => ({ ...c, tone: e.target.value }))}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "var(--s3)", color: "var(--tx)", fontSize: 13 }}>
-                    <option value="formal">Formeel</option>
-                    <option value="casual">Informeel</option>
-                  </select>
+                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 1 }}>{p.name}</div>
+                  {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel product</div>}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku}</div>
+                <div style={{ textAlign: "right" }}>
+                  {hasStock ? (
+                    <span style={{ fontSize: 13, fontWeight: 600, color: p.stock_quantity > 0 ? "var(--gr)" : "var(--re)" }}>
+                      {p.stock_quantity ?? 0}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--dm)" }}>—</span>
+                  )}
                 </div>
               </div>
+            );
+          })}
+        </div>
+      )}
 
-              {/* Translate fields */}
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8 }}>Te vertalen velden</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {[
-                    { key: "name", label: "Naam" },
-                    { key: "description", label: "Beschrijving" },
-                    { key: "short_description", label: "Korte beschrijving" },
-                    { key: "attributes", label: "Attributen" },
-                  ].map(f => {
-                    const on = createConfig.translate_fields.includes(f.key);
-                    return (
-                      <button key={f.key} onClick={() => setCreateConfig(c => ({
-                        ...c,
-                        translate_fields: on ? c.translate_fields.filter(x => x !== f.key) : [...c.translate_fields, f.key]
-                      }))}
-                        style={{ padding: "6px 14px", borderRadius: "var(--rd)", border: `1px solid ${on ? "var(--pr)" : "var(--b2)"}`, background: on ? "rgba(99,102,241,0.1)" : "var(--s3)", color: on ? "var(--pr)" : "var(--mx)", fontSize: 12, fontWeight: on ? 700 : 400, cursor: "pointer" }}>
-                        {f.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* SEO options */}
-              <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
-                  <input type="checkbox" checked={createConfig.rewrite_seo} onChange={e => setCreateConfig(c => ({ ...c, rewrite_seo: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
-                  SEO herschrijven (niet letterlijk vertalen)
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
-                  <input type="checkbox" checked={createConfig.translate_meta} onChange={e => setCreateConfig(c => ({ ...c, translate_meta: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
-                  Meta titel &amp; beschrijving genereren
-                </label>
-              </div>
-
-              {/* SKU mode */}
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8 }}>SKU generatie methode</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {[
-                    { val: "lang_prefix", label: "Taalcode + originele SKU", example: `${createConfig.lang_code}-NBP-10L-100CM` },
-                    { val: "lang_random", label: "Taalcode + 7-cijferig willekeurig", example: `${createConfig.lang_code}-3847291` },
-                    { val: "category_initials", label: "Initialen primaire categorie + teller", example: "FA-1001, FNBP-2001, FA-1002" },
-                    { val: "identifier", label: "Zelfde waarde als identifier attribuut (verborgen)", example: "Originele SKU als hidden attribuut" },
-                  ].map(opt => (
-                    <label key={opt.val} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: "var(--rd)", border: `1px solid ${createConfig.sku_mode === opt.val ? "var(--pr)" : "var(--b1)"}`, background: createConfig.sku_mode === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer" }}>
-                      <input type="radio" name="sku_mode" value={opt.val} checked={createConfig.sku_mode === opt.val} onChange={() => setCreateConfig(c => ({ ...c, sku_mode: opt.val }))} style={{ accentColor: "var(--pr)" }} />
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{opt.label}</div>
-                        <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "monospace" }}>{opt.example}</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Product selection for create */}
-          <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>Ontbrekende producten — selecteer om aan te maken</span>
-              <button onClick={() => setSelectedToCreate(new Set((syncResult?.unmatched || []).map(p => p.id)))} style={{ marginLeft: "auto", padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✓</button>
-              <button onClick={() => setSelectedToCreate(new Set())} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✗</button>
-            </div>
-            <div>
-              {(syncResult?.unmatched || []).map((p, i) => {
-                const on = selectedToCreate.has(p.id);
-                return (
-                  <div key={p.id} onClick={() => toggleCreate(p.id)}
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: i < (syncResult.unmatched.length - 1) ? "1px solid var(--b1)" : "none", background: on ? "rgba(99,102,241,0.03)" : "transparent", cursor: "pointer" }}>
-                    <div style={{ width: 15, height: 15, border: `2px solid ${on ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: on ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {on && <span style={{ color: "#fff", fontSize: 9, fontWeight: 700 }}>✓</span>}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
-                      <div style={{ fontSize: 11, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku || "geen SKU"}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Create result */}
-          {createResult && (
-            <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontWeight: 600, fontSize: 13 }}>📊 Resultaat aanmaken</div>
-              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", gap: 14 }}>
-                  <div style={{ flex: 1, padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gr)" }}>{createResult.created?.length ?? 0}</div>
-                    <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>Aangemaakt</div>
-                  </div>
-                  <div style={{ flex: 1, padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", textAlign: "center" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: "var(--re)" }}>{createResult.failed?.length ?? 0}</div>
-                    <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>Mislukt</div>
-                  </div>
-                </div>
-                {createResult.created?.length > 0 && (
-                  <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-                    {createResult.created.map(c => (
-                      <div key={c.target_id} style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--gr)" }}>
-                        ✓ <span style={{ color: "var(--tx)" }}>{c.target_name}</span>
-                        <span style={{ fontFamily: "monospace", color: "var(--dm)" }}>SKU: {c.target_sku}</span>
-                        {c.ean && <span style={{ fontFamily: "monospace", color: "var(--ac)" }}>EAN: {c.ean}</span>}
-                        <span style={{ fontSize: 10, background: "var(--s3)", padding: "2px 6px", borderRadius: 4, color: "var(--mx)" }}>concept</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {createResult.failed?.length > 0 && (
-                  <div style={{ fontSize: 12, color: "var(--re)" }}>
-                    {createResult.failed.map(f => <div key={f.source_id}>⚠ {f.name}: {f.error}</div>)}
-                  </div>
-                )}
-                {createResult.seo_plugin && (
-                  <div style={{ fontSize: 11, color: "var(--mx)" }}>SEO plugin gedetecteerd: {createResult.seo_plugin === "rankmath" ? "Rank Math" : "Yoast"}</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <Btn variant="secondary" onClick={() => setStep(4)}>← Terug naar sync resultaat</Btn>
-            <Btn variant="primary" onClick={handleCreate} disabled={creating || selectedToCreate.size === 0}>
-              {creating ? "Bezig..." : `✨ ${selectedToCreate.size} product${selectedToCreate.size !== 1 ? "en" : ""} aanmaken in ${targetShop?.name}`}
-            </Btn>
-          </div>
+      {products.length > 0 && (
+        <div style={{ fontSize: 11, color: "var(--dm)", textAlign: "center" }}>
+          {products.length} product{products.length !== 1 ? "en" : ""} met SKU gevonden · {selected.size} geselecteerd
         </div>
       )}
     </div>
