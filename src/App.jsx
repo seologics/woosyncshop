@@ -3958,8 +3958,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                     <div className="settings-2col">
                       <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
                         <Sel value={createUser.gemini_model || limits.gemini_model} onChange={e => setCreateUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
-                          { value: "gemini-2.5-flash",  label: "Flash Lite — zuinig (Starter/Free)" },
-                          { value: "gemini-2.5-flash",       label: "Flash — gebalanceerd (Growth)" },
+                          { value: "gemini-2.5-flash",       label: "Flash — gebalanceerd (Starter/Growth)" },
                           { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
                           { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
                         ]} />
@@ -4083,8 +4082,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       <div className="settings-2col">
                         <Field label="Gemini model" hint="Hogere modellen = meer Gemini kosten">
                           <Sel value={editUser.gemini_model || planLimits.gemini_model} onChange={e => setEditUser(u => ({ ...u, gemini_model: e.target.value }))} options={[
-                            { value: "gemini-2.5-flash", label: "Flash Lite — zuinig (Starter/Free)" },
-                            { value: "gemini-2.5-flash",      label: "Flash — gebalanceerd (Growth)" },
+                            { value: "gemini-2.5-flash",       label: "Flash — gebalanceerd (Starter/Growth)" },
                             { value: "gemini-2.5-flash-image", label: "Flash Image — hoge kwaliteit (Pro)" },
                             { value: "gemini-2.5-pro",         label: "Pro — max kwaliteit (custom)" },
                           ]} />
@@ -4122,8 +4120,7 @@ Dit kan niet ongedaan worden gemaakt. Alle data wordt gewist.`)) return;
                       <Sel value={editUser.ai_taxonomy_model ?? "gemini-2.5-flash"}
                         onChange={e => setEditUser(u => ({ ...u, ai_taxonomy_model: e.target.value }))}
                         options={[
-                          { value: "gemini-2.5-flash", label: "Flash Lite – zuinig, geschikt voor eenvoudige vertalingen" },
-                          { value: "gemini-2.5-flash",      label: "Flash – gebalanceerd (aanbevolen)" },
+                          { value: "gemini-2.5-flash", label: "Flash – gebalanceerd (aanbevolen)" },
                           { value: "gemini-2.5-pro",        label: "2.5 Pro – hoogste kwaliteit, meer tokens" },
                         ]} />
                     </Field>
@@ -5498,7 +5495,6 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
               const quality   = userProfile.img_quality    ?? planLimits.img_quality;
               const maxWidth  = userProfile.img_max_width  ?? planLimits.img_max_width;
               const modelLabel = {
-                "gemini-2.5-flash-lite":  "Flash Lite",
                 "gemini-2.5-flash":       "Flash",
                 "gemini-2.5-flash-image": "Flash Image",
                 "gemini-2.5-pro":         "Pro",
