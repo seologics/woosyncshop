@@ -7357,6 +7357,12 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 
   useEffect(() => {
     if (!activeSite) return;
+    // Skip API calls for plugin-mode shops that haven't been connected yet (no credentials)
+    if (!activeSite.consumer_key || !activeSite.consumer_secret) {
+      setProducts([]);
+      setProductsLoading(false);
+      return;
+    }
     const shopId = activeSite.id;
 
     const loadProducts = async () => {
@@ -7428,7 +7434,11 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 
   const handleShopAdded = (newShop) => {
     setShops(s => [...s, newShop]);
-    setActiveSite(newShop);
+    // Only switch active site if the shop already has credentials.
+    // Plugin-mode shops start without CK/CS — switching to them triggers 401s.
+    if (newShop.consumer_key && newShop.consumer_secret) {
+      setActiveSite(newShop);
+    }
     notify("Shop toegevoegd ✓");
   };
 
