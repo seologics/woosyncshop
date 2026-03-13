@@ -109,10 +109,14 @@ export default async (req) => {
       }
       const planKey = plan && PLAN_PRICES[plan] ? plan : 'growth'
       const billingKey = billing_period === 'annual' ? 'annual_mo' : 'monthly'
-      const amount = price_total ? price_total.toString() : PLAN_PRICES[planKey][billingKey]
+      const isTrial = body.is_trial === true
+      // Trial: always €0.01 for mandate capture regardless of price_total
+      const amount = isTrial ? '0.01' : (price_total ? price_total.toString() : PLAN_PRICES[planKey][billingKey])
       const planNames = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
       const billingLabel = billing_period === 'annual' ? 'jaarabonnement' : 'maandabonnement'
-      const description = `WooSyncShop ${planNames[planKey] || 'Pro'} – ${billingLabel}`
+      const description = isTrial
+        ? `WooSyncShop Starter – 7 dagen proefperiode (verificatie)`
+        : `WooSyncShop ${planNames[planKey] || 'Pro'} – ${billingLabel}`
       const paymentBody = {
         amount: { currency: 'EUR', value: parseFloat(amount).toFixed(2) },
         description,
@@ -120,7 +124,7 @@ export default async (req) => {
         webhookUrl: 'https://woosyncshop.com/api/mollie-webhook',
         customerId,
         sequenceType: 'first',
-        metadata: { supabase_user_id: user.id, plan: planKey, billing_period: billing_period || 'monthly' },
+        metadata: { supabase_user_id: user.id, plan: planKey, billing_period: billing_period || 'monthly', is_trial: isTrial ? 'true' : undefined },
       }
       if (method) paymentBody.method = method
 

@@ -250,6 +250,41 @@ export default async (req) => {
         return new Response('OK', { status: 200 })
       }
 
+      // ── TRIAL MANDATE CAPTURE (€0.01) ──────────────────────────────────────
+      if (payment.metadata?.is_trial === 'true') {
+        const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+        const customerId  = payment.customerId || profile?.mollie_customer_id
+
+        await supabase.from('user_profiles').update({
+          plan: 'trial',
+          trial_ends_at: trialEndsAt,
+          mollie_customer_id: customerId,
+          mollie_payment_id: paymentId,
+          max_shops: 2,
+          max_connected_products: 500,
+          pending_downgrade_plan: null,
+        }).eq('id', userId)
+
+        // Create subscription starting in 7 days — auto-charges €7.99/month
+        if (customerId) {
+          const startDate = trialEndsAt.split('T')[0]
+          await createOrReplaceSubscription(supabase, mollieKey, customerId, userId, 'starter', 'monthly', trialEndsAt, profile?.mollie_subscription_id)
+        }
+
+        await supabase.from('user_plan_history').insert({
+          user_id: userId,
+          event_type: 'trial_started',
+          from_plan: profile?.plan || null,
+          to_plan: 'trial',
+          billing_period: 'monthly',
+          payment_id: paymentId,
+          amount_paid: parseFloat(payment.amount?.value || 0),
+          notes: `Proefperiode gestart — €0,01 verificatie, abonnement start ${trialEndsAt.split('T')[0]}`,
+        })
+        await supabase.from('system_logs').insert({ level: 'info', function_name: 'mollie-webhook', message: `Trial started for user ${userId} — ends ${trialEndsAt}`, metadata: { payment_id: paymentId } })
+        return new Response('OK', { status: 200 })
+      }
+
       const now = new Date().toISOString()
       const activatedPlan = ['starter', 'growth', 'pro'].includes(subscriptionPlan || payment.metadata?.plan)
         ? (subscriptionPlan || payment.metadata?.plan)

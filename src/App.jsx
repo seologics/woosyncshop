@@ -4464,7 +4464,11 @@ const PLAN_ORDER_BILLING = { starter: 1, growth: 2, pro: 3 };
 const BillingTab = ({ userProfile }) => {
   const isFreeForever = userProfile?.plan === "free_forever";
   const isPendingPayment = userProfile?.plan === "pending_payment";
-  const planKey = userProfile?.plan && PLANS[userProfile.plan] ? userProfile.plan : null;
+  const isTrialActive = userProfile?.plan === "trial";
+  const isTrialExpired = userProfile?.plan === "trial_expired";
+  // For billing display, trial maps to starter limits; trial_expired has no plan
+  const planKey = userProfile?.plan && PLANS[userProfile.plan] && !["trial","trial_expired"].includes(userProfile.plan)
+    ? userProfile.plan : null;
   const currentPlan = planKey ? PLANS[planKey] : null;
   const billingPeriod = userProfile?.billing_period || "monthly";
 
@@ -4635,10 +4639,30 @@ const BillingTab = ({ userProfile }) => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Current plan card */}
-      <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--b2)" }}>
+      <div style={{ padding: 20, background: isFreeForever ? "linear-gradient(135deg,rgba(34,197,94,0.08),var(--s2))" : isTrialActive ? "linear-gradient(135deg,rgba(99,102,241,0.1),var(--s2))" : isTrialExpired ? "linear-gradient(135deg,rgba(239,68,68,0.07),var(--s2))" : "linear-gradient(135deg, var(--pr-l), var(--s2))", borderRadius: "var(--rd-lg)", border: isFreeForever ? "1px solid rgba(34,197,94,0.3)" : isTrialActive ? "1px solid rgba(99,102,241,0.3)" : isTrialExpired ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--b2)" }}>
         <div style={{ fontSize: 13, color: "var(--mx)", marginBottom: 4 }}>Huidig abonnement</div>
         {isFreeForever ? (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--gr)" }}>Gratis <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)" }}>voor altijd</span></div>
+        ) : isTrialActive ? (() => {
+          const endsAt = userProfile?.trial_ends_at ? new Date(userProfile.trial_ends_at) : null;
+          const daysLeft = endsAt ? Math.max(0, Math.ceil((endsAt - Date.now()) / 86400000)) : 7;
+          return (
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>
+                Starter <span style={{ fontSize: 14, fontWeight: 400, color: "var(--mx)", marginLeft: 8 }}>Proefperiode</span>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <span>⏳ Nog {daysLeft} dag{daysLeft !== 1 ? "en" : ""} gratis</span>
+                {endsAt && <span>📅 Verloopt: {endsAt.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })}</span>}
+                <span>🏪 Tot 2 shops · 500 verbonden producten</span>
+              </div>
+            </div>
+          );
+        })() : isTrialExpired ? (
+          <div>
+            <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--re)" }}>Proefperiode verlopen</div>
+            <div style={{ fontSize: 12, color: "var(--mx)", marginTop: 4 }}>Kies een abonnement hieronder om door te gaan.</div>
+          </div>
         ) : currentPlan ? (
           <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-h)", color: "var(--pr-h)" }}>
             {currentPlan.name}
@@ -4665,11 +4689,15 @@ const BillingTab = ({ userProfile }) => {
         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
           {isFreeForever
             ? <Badge color="green">✓ Free forever account</Badge>
-            : isPendingPayment
-              ? <Badge color="amber">⏳ Betaling in afwachting</Badge>
-              : currentPlan
-                ? <Badge color="blue">✓ {currentPlan.name} · actief via Mollie</Badge>
-                : <Badge color="amber">⚠ Onbekend plan</Badge>}
+            : isTrialActive
+              ? <Badge color="blue">🚀 Proefperiode actief · starter limieten</Badge>
+              : isTrialExpired
+                ? <Badge color="red">🔒 Proefperiode verlopen</Badge>
+                : isPendingPayment
+                  ? <Badge color="amber">⏳ Betaling in afwachting</Badge>
+                  : currentPlan
+                    ? <Badge color="blue">✓ {currentPlan.name} · actief via Mollie</Badge>
+                    : <Badge color="amber">⚠ Onbekend plan</Badge>}
           {hasPendingDowngrade && (
             <Badge color="amber">↓ Downgrade naar {PLANS[userProfile.pending_downgrade_plan]?.name} gepland</Badge>
           )}
@@ -6756,7 +6784,7 @@ const TrialBanner = ({ userProfile, onUpgrade }) => {
         <span style={{ fontWeight: 700, color: isUrgent ? "var(--re)" : "var(--pr-h)" }}>
           {isUrgent ? "⚠" : "⏳"} Proefperiode: nog {daysLeft} dag{daysLeft !== 1 ? "en" : ""} gratis
         </span>
-        <span style={{ color: "var(--mx)" }}>Na je proefperiode heb je een abonnement nodig om door te gaan.</span>
+        <span style={{ color: "var(--mx)" }}>Je wordt na je proefperiode automatisch gefactureerd tenzij je annuleert.</span>
         <Btn variant="primary" size="sm" onClick={onUpgrade} style={{ marginLeft: "auto", padding: "4px 14px", fontSize: 11 }}>
           Abonneer nu — €7,99/m →
         </Btn>
@@ -6850,7 +6878,12 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("user_profiles").select("plan, trial_ends_at, full_name, max_shops, max_connected_products").eq("id", user.id).single()
-      .then(({ data }) => { if (data) setUserProfile(data); });
+      .then(({ data, error }) => {
+        if (data) setUserProfile(data);
+        // 400 can occur if trial_ends_at column doesn't exist yet — fall back gracefully
+        if (error) supabase.from("user_profiles").select("plan, full_name, max_shops, max_connected_products").eq("id", user.id).single()
+          .then(({ data: d2 }) => { if (d2) setUserProfile(d2); });
+      });
   }, [user?.id, profileRefreshKey]);
 
   // Load shops from Supabase on mount
@@ -7569,18 +7602,8 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
 
       if (isFree) {
         setStep("success");
-      } else if (isTrial) {
-        // Activate trial — no payment required
-        const tok = await getToken();
-        const trialRes = await fetch("/api/trial-start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tok}` },
-        });
-        const trialData = await trialRes.json();
-        if (!trialRes.ok) { setError(trialData.error || "Proefperiode starten mislukt."); return; }
-        setStep("trial_success");
       } else {
-        setStep("payment");
+        setStep("payment"); // trial goes through payment for mandate capture (€0.01)
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
@@ -7603,10 +7626,11 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
         body: JSON.stringify({
           email: form.email,
           name: form.name,
-          plan: form.plan,
+          plan: isTrial ? "starter" : form.plan,
           billing_period: form.billingPeriod,
-          price_total: vi.total,
+          price_total: isTrial ? "0.01" : vi.total, // €0.01 mandate capture for trial
           method: selectedMethod,
+          is_trial: isTrial,
           return_url: window.location.origin + "/#payment-return",
         }),
       });
@@ -7735,7 +7759,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
           {isTrial ? (
             <div style={{ background: "linear-gradient(135deg,rgba(99,102,241,0.12),var(--s2))", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--rd)", padding: "12px 16px", marginBottom: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>🚀 7 dagen gratis proberen</div>
-              <div style={{ fontSize: 12, color: "var(--mx)" }}>Starter plan. Geen betaalgegevens vereist. Na 7 dagen kies jij of je wilt doorgaan voor €7,99/m.</div>
+              <div style={{ fontSize: 12, color: "var(--mx)" }}>Verificatiebetaling van €0,01. Na 7 dagen automatisch €7,99/maand — annuleer elk moment vóór dag 7.</div>
             </div>
           ) : (
             <>
@@ -7841,8 +7865,8 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
               <span onClick={() => setStep("form")} style={{ fontSize: 12, color: "var(--pr-h)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>← Terug</span>
             </div>
           )}
-          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Betaling</h2>
-          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>Start je {PLANS[form.plan]?.name || "Growth"} abonnement</p>
+          <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{isTrial ? "Verifieer je betaalmethode" : "Betaling"}</h2>
+          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 16 }}>{isTrial ? "Eenmalige verificatie van €0,01 — je proefperiode start direct." : `Start je ${PLANS[form.plan]?.name || "Growth"} abonnement`}</p>
 
           {/* Plan switcher — shown from paywall (mode=payment) so user can change their mind */}
           {mode === "payment" && (
@@ -7868,16 +7892,30 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
             </div>
           )}
 
-          <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 13, color: "var(--mx)" }}>WooSyncShop {PLANS[form.plan]?.name || "Growth"} · {form.billingPeriod === "annual" ? "jaarabonnement" : "maandabonnement"}</div>
-              <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{PLANS[form.plan]?.sites} shops · {(PLANS[form.plan]?.connected_products || 0).toLocaleString("nl-NL")} verbonden producten</div>
+          {isTrial ? (
+            <div style={{ padding: 14, background: "linear-gradient(135deg,rgba(99,102,241,0.08),var(--s2))", borderRadius: "var(--rd)", border: "1px solid rgba(99,102,241,0.3)", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>🚀 7 dagen gratis proefperiode</div>
+              <div style={{ fontSize: 12, color: "var(--mx)", lineHeight: 1.7, marginBottom: 8 }}>
+                Verificatiebetaling: <strong style={{ color: "var(--tx)" }}>€0,01</strong> (eenmalig, wordt direct teruggestort)<br />
+                Na 7 dagen: automatisch <strong style={{ color: "var(--tx)" }}>€7,99/maand</strong> Starter — tenzij je annuleert.
+              </div>
+              <div style={{ fontSize: 11, color: "var(--dm)", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <span>🏪 2 shops · 500 verbonden producten</span>
+                <span>✓ Annuleer op elk moment vóór dag 7</span>
+              </div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>€{vatInfo.total}</div>
-              <div style={{ fontSize: 10, color: "var(--dm)" }}>incl. BTW</div>
+          ) : (
+            <div style={{ padding: 14, background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 13, color: "var(--mx)" }}>WooSyncShop {PLANS[form.plan]?.name || "Growth"} · {form.billingPeriod === "annual" ? "jaarabonnement" : "maandabonnement"}</div>
+                <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{PLANS[form.plan]?.sites} shops · {(PLANS[form.plan]?.connected_products || 0).toLocaleString("nl-NL")} verbonden producten</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>€{vatInfo.total}</div>
+                <div style={{ fontSize: 10, color: "var(--dm)" }}>incl. BTW</div>
+              </div>
             </div>
-          </div>
+          )}
           <div style={{ fontSize: 12, color: "var(--mx)", marginBottom: 8, fontWeight: 600 }}>Kies betaalmethode</div>
           {methodsLoading ? (
             <div style={{ padding: "16px 0", color: "var(--dm)", fontSize: 13 }}>Betaalmethoden laden...</div>
@@ -7897,7 +7935,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
             </div>
           )}
           <Btn variant="primary" size="lg" onClick={handlePayment} disabled={loading || !selectedMethod || methodsLoading} style={{ width: "100%", opacity: selectedMethod ? 1 : 0.6 }}>
-            {loading ? "Doorsturen naar Mollie..." : "Betalen →"}
+            {loading ? "Doorsturen naar Mollie..." : isTrial ? "Verificatie starten — €0,01 →" : "Betalen →"}
           </Btn>
           <div style={{ textAlign: "center", fontSize: 11, color: "var(--dm)", marginTop: 8 }}>🔒 Veilige betaling via Mollie</div>
         </>}

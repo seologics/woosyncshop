@@ -15,7 +15,7 @@ export default async (req) => {
     // Find all users still on trial whose period has ended
     const { data: expiredUsers, error } = await supabase
       .from('user_profiles')
-      .select('id, trial_ends_at, full_name')
+      .select('id, trial_ends_at, full_name, mollie_subscription_id')
       .eq('plan', 'trial')
       .lt('trial_ends_at', now)
 
@@ -27,8 +27,18 @@ export default async (req) => {
 
     let expired = 0
     for (const u of expiredUsers) {
+      // If user has an active Mollie subscription, the webhook will activate them —
+      // don't mark expired, Mollie is handling it (check again in 24h)
+      if (u.mollie_subscription_id) {
+        await supabase.from('system_logs').insert({ level: 'info', function_name: 'check-trials', message: `Skipping user ${u.id} — Mollie subscription ${u.mollie_subscription_id} should handle activation` })
+        continue
+      }
+
+      // No subscription captured (user skipped payment somehow) — expire them
       await supabase.from('user_profiles').update({
         plan: 'trial_expired',
+        max_shops: 0,
+        max_connected_products: 0,
       }).eq('id', u.id)
 
       await supabase.from('user_plan_history').insert({
