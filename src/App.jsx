@@ -5498,7 +5498,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
               const quality   = userProfile.img_quality    ?? planLimits.img_quality;
               const maxWidth  = userProfile.img_max_width  ?? planLimits.img_max_width;
               const modelLabel = {
-                "gemini-2.5-flash":  "Flash Lite",
+                "gemini-2.5-flash-lite":  "Flash Lite",
                 "gemini-2.5-flash":       "Flash",
                 "gemini-2.5-flash-image": "Flash Image",
                 "gemini-2.5-pro":         "Pro",
