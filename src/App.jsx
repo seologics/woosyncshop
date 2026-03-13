@@ -6638,7 +6638,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
       const res = await fetch("/api/sync-scan", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: sourceShopId }),
+        body: JSON.stringify({ source_shop_id: sourceShopId, target_shop_id: targetShopId }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -6843,14 +6843,104 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
             {scanning ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "var(--mx)", fontSize: 13 }}>
                 <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                Velden scannen in {sourceShop?.name}...
+                Velden en plugins scannen in {sourceShop?.name} en {targetShop?.name}...
               </div>
             ) : scanResult ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+                {/* ── Scan context ── */}
                 <div style={{ fontSize: 12, color: "var(--mx)" }}>
                   Gebaseerd op de eerste 5 producten van <strong>{sourceShop?.name}</strong>. Aangevinkte velden zijn gedetecteerd met data.
                 </div>
-                {/* Standard fields */}
+
+                {/* ── Plugin compatibility panel ── */}
+                {(() => {
+                  const compat = scanResult.compat_groups || [];
+                  const srcPlugins = scanResult.source_plugins || [];
+                  const tgtPlugins = scanResult.target_plugins || [];
+                  const hasIssues = compat.some(g => g.status !== "compatible");
+                  if (srcPlugins.length === 0 && tgtPlugins.length === 0) return null;
+
+                  const statusMeta = {
+                    compatible:  { icon: "✅", color: "var(--gr)",                         bg: "rgba(34,197,94,0.06)",   border: "rgba(34,197,94,0.2)",   label: "Compatibel" },
+                    convertible: { icon: "🔄", color: "var(--pr)",                         bg: "rgba(99,102,241,0.06)",  border: "rgba(99,102,241,0.2)",  label: "Automatisch omgezet" },
+                    global_only: { icon: "⚠️", color: "var(--ac)",                         bg: "rgba(245,158,11,0.06)", border: "rgba(245,158,11,0.3)",  label: "Globaal — niet per product" },
+                    missing:     { icon: "❌", color: "rgba(239,68,68,1)",                  bg: "rgba(239,68,68,0.05)",  border: "rgba(239,68,68,0.2)",   label: "Plugin ontbreekt" },
+                  };
+
+                  return (
+                    <div style={{ borderRadius: "var(--rd)", border: `1px solid ${hasIssues ? "rgba(245,158,11,0.3)" : "rgba(34,197,94,0.2)"}`, overflow: "hidden" }}>
+                      {/* Header */}
+                      <div style={{ padding: "8px 12px", background: hasIssues ? "rgba(245,158,11,0.06)" : "rgba(34,197,94,0.06)", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${hasIssues ? "rgba(245,158,11,0.2)" : "rgba(34,197,94,0.15)"}` }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: hasIssues ? "var(--ac)" : "var(--gr)" }}>
+                          🔌 Plugin compatibiliteit
+                        </span>
+                        <span style={{ fontSize: 11, color: "var(--mx)", marginLeft: "auto" }}>
+                          {sourceShop?.name} → {targetShop?.name}
+                        </span>
+                      </div>
+                      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                        {/* Plugin comparison row */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 24px 1fr", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--mx)", textTransform: "uppercase" }}>Bron</div>
+                          <div />
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--mx)", textTransform: "uppercase" }}>Doel</div>
+                        </div>
+                        {compat.map((g, i) => {
+                          const sm = statusMeta[g.status] || statusMeta.missing;
+                          return (
+                            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", background: sm.bg, border: `1px solid ${sm.border}`, borderRadius: "var(--rd)" }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 24px 1fr", gap: 8, alignItems: "center" }}>
+                                {/* Source plugin */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, background: "var(--s3)", padding: "2px 5px", borderRadius: 3, color: "var(--mx)", letterSpacing: "0.03em" }}>{g.source_plugin?.icon}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)" }}>{g.source_plugin?.name}</span>
+                                </div>
+                                {/* Arrow */}
+                                <div style={{ fontSize: 14, color: "var(--mx)", textAlign: "center" }}>→</div>
+                                {/* Target plugin */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  {g.target_plugin ? (
+                                    <>
+                                      <span style={{ fontSize: 10, fontWeight: 700, background: "var(--s3)", padding: "2px 5px", borderRadius: 3, color: "var(--mx)", letterSpacing: "0.03em" }}>{g.target_plugin?.icon}</span>
+                                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)" }}>{g.target_plugin?.name}</span>
+                                    </>
+                                  ) : (
+                                    <span style={{ fontSize: 12, color: "rgba(239,68,68,0.9)", fontStyle: "italic" }}>Niet gedetecteerd</span>
+                                  )}
+                                </div>
+                              </div>
+                              {/* Status badge + message */}
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: sm.border, color: sm.color, whiteSpace: "nowrap", flexShrink: 0 }}>
+                                  {sm.icon} {sm.label}
+                                </span>
+                                <span style={{ fontSize: 11, color: "var(--mx)", lineHeight: 1.5 }}>{g.message}</span>
+                              </div>
+                              {/* Suggestion */}
+                              {g.suggestion && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 2 }}>
+                                  <span style={{ fontSize: 11, color: "var(--ac)" }}>💡 {g.suggestion}</span>
+                                  {g.suggestion_url && (
+                                    <a href={g.suggestion_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--pr)", textDecoration: "underline", flexShrink: 0 }}>Plugin →</a>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {/* Also show detected plugins on target that aren't on source */}
+                        {tgtPlugins.filter(t => !compat.some(g => g.target_plugin?.id === t.id)).map(t => (
+                          <div key={t.id} style={{ padding: "6px 10px", background: "var(--s3)", borderRadius: "var(--rd)", fontSize: 11, color: "var(--mx)" }}>
+                            🔌 <strong>{t.name}</strong> actief op doelshop — geen corresponderend bronveld geselecteerd.
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── Standard fields ── */}
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Standaard velden</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -6863,21 +6953,50 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                     ))}
                   </div>
                 </div>
-                {/* WQM fields */}
-                {scanResult.has_wqm && (
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ac)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>WQM Velden (Quantity Manager)</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {scanResult.fields.filter(f => f.group === "wqm").map(f => (
-                        <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "8px 12px", borderRadius: "var(--rd)", background: selectedFields.includes(f.key) ? "rgba(245,158,11,0.06)" : "transparent", border: `1px solid ${selectedFields.includes(f.key) ? "rgba(245,158,11,0.3)" : "var(--b1)"}` }}>
-                          <input type="checkbox" checked={selectedFields.includes(f.key)} onChange={() => toggleField(f.key)} style={{ width: 15, height: 15, accentColor: "var(--ac)", cursor: "pointer" }} />
-                          <span style={{ fontSize: 13, flex: 1 }}>{f.label}</span>
-                          {!f.detected && <span style={{ fontSize: 10, color: "var(--dm)", background: "var(--s3)", padding: "2px 6px", borderRadius: 4 }}>leeg</span>}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
+
+                {/* ── Plugin-specific field groups ── */}
+                {(() => {
+                  // Group fields by their group key, render each group with plugin header
+                  const groups = [...new Set(scanResult.fields.filter(f => f.group).map(f => f.group))];
+                  return groups.map(grp => {
+                    const compat = (scanResult.compat_groups || []).find(g => g.field_group === grp);
+                    const statusMeta = {
+                      compatible:  { color: "var(--gr)",            label: "✅ Compatibel",             accent: "rgba(34,197,94,0.2)" },
+                      convertible: { color: "var(--pr)",            label: "🔄 Automatisch omgezet",    accent: "rgba(99,102,241,0.2)" },
+                      global_only: { color: "var(--ac)",            label: "⚠️ Globaal — niet syncbaar", accent: "rgba(245,158,11,0.3)" },
+                      missing:     { color: "rgba(239,68,68,1)",    label: "❌ Plugin ontbreekt",        accent: "rgba(239,68,68,0.2)" },
+                    };
+                    const sm = compat ? statusMeta[compat.status] : { color: "var(--ac)", label: "", accent: "rgba(245,158,11,0.3)" };
+                    const isBlocked = compat?.status === "global_only" || compat?.status === "missing";
+
+                    // Get plugin name for group header
+                    const srcPlugin = compat?.source_plugin?.name || grp.toUpperCase();
+
+                    return (
+                      <div key={grp}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ac)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{srcPlugin}</div>
+                          {compat && (
+                            <span style={{ fontSize: 10, fontWeight: 600, color: sm.color, padding: "1px 6px", borderRadius: 3, background: sm.accent }}>
+                              {sm.label}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, opacity: isBlocked ? 0.5 : 1 }}>
+                          {scanResult.fields.filter(f => f.group === grp).map(f => (
+                            <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: isBlocked ? "not-allowed" : "pointer", padding: "8px 12px", borderRadius: "var(--rd)", background: selectedFields.includes(f.key) ? "rgba(245,158,11,0.06)" : "transparent", border: `1px solid ${selectedFields.includes(f.key) ? "rgba(245,158,11,0.3)" : "var(--b1)"}` }}>
+                              <input type="checkbox" disabled={isBlocked} checked={selectedFields.includes(f.key)} onChange={() => !isBlocked && toggleField(f.key)} style={{ width: 15, height: 15, accentColor: "var(--ac)", cursor: isBlocked ? "not-allowed" : "pointer" }} />
+                              <span style={{ fontSize: 13, flex: 1 }}>{f.label}</span>
+                              {!f.detected && <span style={{ fontSize: 10, color: "var(--dm)", background: "var(--s3)", padding: "2px 6px", borderRadius: 4 }}>leeg</span>}
+                              {isBlocked && <span style={{ fontSize: 10, color: "rgba(239,68,68,0.8)", background: "rgba(239,68,68,0.08)", padding: "2px 6px", borderRadius: 4 }}>niet syncbaar</span>}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+
                 <div style={{ fontSize: 12, color: "var(--mx)" }}>{selectedFields.length} veld(en) geselecteerd</div>
               </div>
             ) : (
