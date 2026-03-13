@@ -10014,13 +10014,10 @@ export default function App() {
         const mollieStatus = data.status; // paid | open | canceled | expired | failed | pending
         if (mollieStatus === "paid" || data.plan === "free_forever" || (data.plan && PLANS[data.plan])) {
           setPaymentReturnStatus("paid");
-          setPendingPaymentWall(false); // always clear paywall on confirmed payment
+          setPendingPaymentWall(false);
           sessionStorage.removeItem("wss_pending_payment_id");
-
-          // Force Dashboard to reload userProfile (it's in a different component scope)
           setProfileRefreshKey(k => k + 1);
-          // Auto-dismiss after 6s
-          setTimeout(() => setPaymentReturn(false), 6000);
+          // No auto-dismiss — user must click a button to continue
         } else if (mollieStatus === "canceled" || mollieStatus === "expired" || mollieStatus === "failed") {
           setPaymentReturnStatus("failed");
           // Restore paywall so user can retry payment
@@ -10187,31 +10184,31 @@ export default function App() {
               <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling controleren...</h2>
               <p style={{ fontSize: 14, color: "var(--mx)", lineHeight: 1.6 }}>Even geduld, we verifiëren je betaling.</p>
             </>}
-            {paymentReturnStatus === "paid" && <>
-              <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
-              <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling geslaagd!</h2>
-              <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 8, lineHeight: 1.6 }}>
-                Je account is actief. Factuur is per e-mail verstuurd.
-              </p>
-              <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 24, lineHeight: 1.6 }}>
-                Voeg je eerste shop toe om te beginnen, of bekijk eerst hoe WooSyncShop werkt.
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <Btn variant="primary" size="lg" style={{ width: "100%" }} onClick={async () => {
-                  setPaymentReturn(false); setPendingPaymentWall(false);
-                  try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
-                  try { const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single(); setWelcomePlan(profile?.plan || "growth"); } catch { setWelcomePlan("growth"); }
-                  window.location.hash = "settings";
-                  setView("app");
-                }}>🏪 Eerste shop toevoegen →</Btn>
-                <Btn variant="secondary" size="lg" style={{ width: "100%" }} onClick={async () => {
-                  setPaymentReturn(false); setPendingPaymentWall(false);
-                  try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
-                  try { const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single(); setWelcomePlan(profile?.plan || "growth"); } catch { setWelcomePlan("growth"); }
-                  setView("how-it-works");
-                }}>💡 Hoe werkt het?</Btn>
-              </div>
-            </>}
+            {paymentReturnStatus === "paid" && (() => {
+              const isTrialReturn = profileRefreshKey > 0; // profile was refreshed = we have fresh data
+              return <>
+                <div style={{ fontSize: 56, marginBottom: 16 }}>🚀</div>
+                <h2 style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Welkom bij WooSyncShop!</h2>
+                <p style={{ fontSize: 14, color: "var(--mx)", marginBottom: 8, lineHeight: 1.6 }}>
+                  Je account is actief. Bevestigingsmail is verstuurd.
+                </p>
+                <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 24, lineHeight: 1.6 }}>
+                  Voeg je eerste WooCommerce shop toe om te beginnen.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <Btn variant="primary" size="lg" style={{ width: "100%" }} onClick={async () => {
+                    setPaymentReturn(false); setPendingPaymentWall(false);
+                    try { window.dataLayer = window.dataLayer || []; window.dataLayer.push({ event: "registration_complete" }); } catch {}
+                    try { const { data: profile } = await supabase.from("user_profiles").select("plan").eq("id", user?.id).single(); setWelcomePlan(profile?.plan || "starter"); } catch { setWelcomePlan("starter"); }
+                    setView("welcome");
+                  }}>🏪 Aan de slag →</Btn>
+                  <Btn variant="ghost" size="sm" style={{ width: "100%", color: "var(--dm)" }} onClick={() => {
+                    setPaymentReturn(false); setPendingPaymentWall(false);
+                    setView("app");
+                  }}>Ga direct naar dashboard</Btn>
+                </div>
+              </>;
+            })()}
             {paymentReturnStatus === "pending" && <>
               <div style={{ fontSize: 44, marginBottom: 16 }}>🕐</div>
               <h2 style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--font-h)", marginBottom: 8 }}>Betaling wordt verwerkt</h2>
