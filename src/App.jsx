@@ -1437,6 +1437,9 @@ const ProductsTable = ({ products, onEdit, onConnect, activeSite, onDuplicate, o
               <Badge color={product.status === "publish" ? "green" : "amber"}>{product.status === "publish" ? "Actief" : "Concept"}</Badge>
               <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                 <Btn variant="secondary" size="sm" onClick={() => onConnect(product)} title="Verbind met andere shops">🔗</Btn>
+                {product.sku && product.manage_stock && (
+                  <Btn variant="ghost" size="sm" title={`Voorraad (${product.stock_quantity ?? 0}) synchroniseren naar andere shops`} onClick={() => onStockSync?.(product)}>🔄</Btn>
+                )}
                 <Btn variant="ghost" size="sm" onClick={() => onDuplicate?.(product)} title="Dupliceren met AI">⧉</Btn>
                 <Btn variant="ghost" size="sm" title={product.status === "publish" ? "Al gepubliceerd" : "Publiceren"} disabled={product.status === "publish"} onClick={() => onPublish?.(product.id)} style={{ opacity: product.status === "publish" ? 0.35 : 1 }}>🌐</Btn>
                 <Btn variant="primary" size="sm" onClick={() => onEdit(product)}>Bewerken</Btn>
@@ -4259,7 +4262,6 @@ const AiTranslationSettings = ({ enabled, onToggleEnabled, locked = false }) => 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
-
       {/* Locked state */}
       {locked && (
         <div style={{ padding: 20, background: "var(--s2)", borderRadius: "var(--rd-lg)", border: "1px solid var(--b1)", textAlign: "center" }}>
@@ -4919,6 +4921,7 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
   const [testResults, setTestResults] = useState({}); // {shopId: {ok, wc_version, ...}}
   const [savingShop, setSavingShop] = useState(false);
   const [newlyAddedToken, setNewlyAddedToken] = useState(null); // show token after shop creation
+  const [pluginWizardShop, setPluginWizardShop] = useState(null); // shop waiting for plugin wizard
   const [expandedShop, setExpandedShop] = useState(null);
   const [shopGoogle, setShopGoogle] = useState({});
 
@@ -5065,6 +5068,8 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
         setNewlyAddedToken(data.api_token);
       }
       setAddShopOpen(false);
+      // Trigger plugin wizard for new shops
+      setPluginWizardShop(data);
     } catch (e) { alert("Shop toevoegen mislukt: " + e.message); }
     finally { setSavingShop(false); }
   };
@@ -5112,7 +5117,18 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Instellingen</h2>
       <Tabs tabs={[{ id: "sites", label: "🏪 Mijn shops" }, { id: "ai", label: "🤖 AI Vertaling" }, { id: "billing", label: "💳 Abonnement" }, { id: "profile", label: "👤 Profiel" }, { id: "support", label: "💬 Support" }]} active={settingsTab} onChange={setSettingsTab} />
       <div style={{ marginTop: 20 }}>
-        {settingsTab === "sites" && (
+        {pluginWizardShop && (
+        <PluginWizardModal
+          shop={pluginWizardShop}
+          onSave={(updatedShop) => {
+            onShopUpdated?.(updatedShop);
+            setPluginWizardShop(null);
+          }}
+          onSkip={() => setPluginWizardShop(null)}
+        />
+      )}
+
+      {settingsTab === "sites" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {newlyAddedToken && (
               <div style={{ padding: 16, background: "rgba(34,197,94,0.08)", border: "1px solid var(--gr)", borderRadius: "var(--rd-lg)" }}>
@@ -5150,6 +5166,11 @@ const SettingsView = ({ user, shops = [], onShopAdded, onShopUpdated, onShopDele
                     <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                       {shop.last_connected && <Badge color="green">✓ Verbonden</Badge>}
                       {shop.has_wqm && <Badge color="blue">WQM</Badge>}
+                      {Array.isArray(shop.active_plugins) && shop.active_plugins.map(pid => {
+                        const plug = KNOWN_PLUGINS.find(p => p.id === pid);
+                        return plug ? <Badge key={pid} color="purple">{plug.icon} {plug.name.split(" ")[0]}</Badge> : null;
+                      })}
+                      <Btn variant="ghost" size="sm" title="Plugins bewerken" onClick={() => setPluginWizardShop(shop)}>🔌</Btn>
                       <Btn variant="ghost" size="sm" onClick={() => handleDeleteShop(shop.id)}>🗑</Btn>
                     </div>
                   </div>
@@ -5570,7 +5591,7 @@ const TopNav = ({ activeSite, setActiveSite, sites, activeView, setActiveView, p
     finally { setPushing(false); }
   };
 
-  const tabDefs = [["products", "📦", "Producten"], ["connected", "🔗", "Verbonden"], ["hreflang", "🌐", "Hreflang"], ["marketing", "📣", "Marketing"], ["analytics", "📊", "Analytics"], ["settings", "⚙", "Instellingen"], ...(isAdmin ? [["admin", "🛡", "Admin"]] : [])];
+  const tabDefs = [["products", "📦", "Producten"], ["connected", "🔗", "Verbonden"], ["voorraad", "🔄", "Voorraad Sync"], ["hreflang", "🌐", "Hreflang"], ["marketing", "📣", "Marketing"], ["analytics", "📊", "Analytics"], ["settings", "⚙", "Instellingen"], ...(isAdmin ? [["admin", "🛡", "Admin"]] : [])];
 
   const TabBtn = ({ id, icon, label }) => (
     <button onClick={() => setActiveView(id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", background: activeView === id ? (id === "admin" ? "rgba(239,68,68,0.15)" : "var(--s2)") : "transparent", border: activeView === id ? (id === "admin" ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--b2)") : "1px solid transparent", borderRadius: "var(--rd)", cursor: "pointer", color: activeView === id ? (id === "admin" ? "var(--re)" : "var(--tx)") : id === "admin" ? "rgba(239,68,68,0.7)" : "var(--mx)", fontSize: 12, fontWeight: activeView === id ? 600 : 400, transition: "all 0.15s", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -6451,8 +6472,319 @@ function AnalyticsView({ shops, user, analyticsCache, onAnalyticsCacheUpdate }) 
   );
 }
 
+
+
+// ─── Plugin Wizard Modal ──────────────────────────────────────────────────────
+const KNOWN_PLUGINS = [
+  { id: "wqm", name: "WooCommerce Quantity Manager", desc: "Minimum/maximum bestelhoeveelheden, stapsgrootte en hoeveelheidsopties per product.", icon: "🔢" },
+  { id: "tiered-pricing-table", name: "Tiered Pricing Table", desc: "Kortingstabel op basis van besteld aantal. Toont automatisch prijzentabel op productpagina.", icon: "📊" },
+  { id: "wholesale-prices", name: "Wholesale Prices for WooCommerce", desc: "Groothandelsprijzen per gebruikersrol. Aparte prijzen voor B2B-klanten.", icon: "🏭" },
+  { id: "wpml", name: "WPML", desc: "Meertalige WooCommerce-winkel. Inhoud vertaling per taal via admin.", icon: "🌍" },
+];
+
+const PluginWizardModal = ({ shop, onSave, onSkip }) => {
+  const [selected, setSelected] = useState(
+    Array.isArray(shop?.active_plugins) ? shop.active_plugins : []
+  );
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await supabase.from("shops").update({ active_plugins: selected }).eq("id", shop.id);
+      onSave({ ...shop, active_plugins: selected });
+    } catch (e) { alert("Opslaan mislukt: " + e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Overlay open onClose={onSkip} width={500} title="🔌 Welke plugins gebruik je?">
+      <div style={{ padding: 24 }}>
+        <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20, lineHeight: 1.6 }}>
+          Selecteer de actieve plugins op <strong style={{ color: "var(--tx)" }}>{shop?.name}</strong>. WooSyncShop past de interface aan op basis van je installatie.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {KNOWN_PLUGINS.map(p => {
+            const active = selected.includes(p.id);
+            return (
+              <div key={p.id}
+                onClick={() => toggle(p.id)}
+                style={{ padding: "12px 14px", background: active ? "linear-gradient(135deg,rgba(99,102,241,0.1),var(--s2))" : "var(--s2)", border: `1px solid ${active ? "rgba(99,102,241,0.4)" : "var(--b1)"}`, borderRadius: "var(--rd)", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 12, transition: "all 0.15s" }}>
+                <div style={{ marginTop: 1, flexShrink: 0 }}>
+                  <div style={{ width: 18, height: 18, border: `2px solid ${active ? "var(--pr)" : "var(--b2)"}`, borderRadius: 4, background: active ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>
+                    {active && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{p.icon} {p.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--mx)", lineHeight: 1.5 }}>{p.desc}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 16 }}>
+          Meer plugins worden binnenkort ondersteund. Je kunt dit altijd wijzigen via Instellingen → Mijn shops.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>{saving ? "Opslaan..." : "Opslaan en doorgaan →"}</Btn>
+          <Btn variant="ghost" onClick={onSkip}>Overslaan</Btn>
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
+
+// ─── Stock Sync View ──────────────────────────────────────────────────────────
+const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
+  const [sourceShop, setSourceShop] = useState(activeSite?.id || shops[0]?.id || null);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [selected, setSelected] = useState(new Set()); // selected product ids
+  const [search, setSearch] = useState("");
+
+  const currentShop = shops.find(s => s.id === sourceShop);
+  const otherShops = shops.filter(s => s.id !== sourceShop);
+
+  const loadProducts = async () => {
+    if (!sourceShop) return;
+    setLoading(true);
+    setProducts([]);
+    setSyncResult(null);
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/woo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ shop_id: sourceShop, endpoint: "products?per_page=100&orderby=title&order=asc", method: "GET" }),
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        // Only show products with SKU (needed for cross-shop matching)
+        const withSku = data.filter(p => p.sku);
+        setProducts(withSku);
+        // Auto-select all
+        setSelected(new Set(withSku.map(p => p.id)));
+      }
+    } catch (e) { alert("Laden mislukt: " + e.message); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadProducts(); }, [sourceShop]);
+
+  const toggleSelect = (id) => setSelected(s => {
+    const n = new Set(s);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const handleSync = async () => {
+    if (selected.size === 0) return alert("Selecteer minimaal één product.");
+    if (otherShops.length === 0) return alert("Je hebt geen andere shops om naartoe te synchroniseren.");
+    if (!confirm(`Voorraad van ${selected.size} product(en) synchroniseren naar ${otherShops.length} andere shop(s)?`)) return;
+
+    setSyncing(true); setSyncResult(null);
+    try {
+      const selectedProducts = products
+        .filter(p => selected.has(p.id))
+        .map(p => ({ sku: p.sku, stock_quantity: p.stock_quantity, manage_stock: p.manage_stock }));
+
+      const token = await getToken();
+      const res = await fetch("/api/stock-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ source_shop_id: sourceShop, products: selectedProducts }),
+      });
+      const data = await res.json();
+      setSyncResult(data);
+    } catch (e) { alert("Sync mislukt: " + e.message); }
+    finally { setSyncing(false); }
+  };
+
+  const filtered = products.filter(p =>
+    !search || p.name?.toLowerCase().includes(search.toLowerCase()) || p.sku?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (shops.length < 2) {
+    return (
+      <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--mx)" }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>🔗</div>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Minimaal 2 shops vereist</div>
+        <div style={{ fontSize: 13 }}>Voeg een tweede shop toe om voorraad te synchroniseren.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header + controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>🔄 Voorraad Synchronisatie</div>
+          <div style={{ fontSize: 12, color: "var(--mx)" }}>Sync voorraadaantallen van de bronshop naar alle andere shops via SKU-koppeling.</div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <Btn variant="secondary" size="sm" onClick={loadProducts} disabled={loading}>↻ Herladen</Btn>
+          <Btn variant="primary" onClick={handleSync} disabled={syncing || loading || selected.size === 0}>
+            {syncing ? "Bezig..." : `🔄 Sync ${selected.size} product${selected.size !== 1 ? "en" : ""}`}
+          </Btn>
+        </div>
+      </div>
+
+      {/* Shop selector */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "12px 14px", background: "var(--s2)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+        <span style={{ fontSize: 12, color: "var(--mx)", fontWeight: 600, flexShrink: 0 }}>Bronshop:</span>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {shops.map(s => (
+            <button key={s.id} onClick={() => setSourceShop(s.id)}
+              style={{ padding: "5px 12px", borderRadius: "var(--rd)", border: `1px solid ${sourceShop === s.id ? "var(--pr)" : "var(--b1)"}`, background: sourceShop === s.id ? "var(--pr)" : "var(--s3)", color: sourceShop === s.id ? "#fff" : "var(--tx)", fontSize: 12, fontWeight: sourceShop === s.id ? 600 : 400, cursor: "pointer" }}>
+              {s.flag || "🌐"} {s.name}
+            </button>
+          ))}
+        </div>
+        <span style={{ fontSize: 11, color: "var(--dm)", marginLeft: "auto" }}>→ synct naar: {otherShops.map(s => s.name).join(", ") || "—"}</span>
+      </div>
+
+      {/* Sync result */}
+      {syncResult && (
+        <div style={{ padding: "12px 16px", background: syncResult.synced > 0 ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)", border: `1px solid ${syncResult.synced > 0 ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`, borderRadius: "var(--rd)", fontSize: 13 }}>
+          {syncResult.synced > 0 ? (
+            <>
+              <div style={{ fontWeight: 600, color: "var(--gr)", marginBottom: 4 }}>✓ {syncResult.synced} product{syncResult.synced !== 1 ? "en" : ""} gesynchroniseerd</div>
+              {syncResult.shops_updated?.map(s => (
+                <div key={s.shop_id} style={{ fontSize: 12, color: "var(--mx)" }}>• {s.name}: {s.synced} product{s.synced !== 1 ? "en" : ""}</div>
+              ))}
+            </>
+          ) : (
+            <div style={{ color: "var(--re)" }}>⚠ Geen producten gesynchroniseerd — controleer of de SKUs overeenkomen.</div>
+          )}
+          {syncResult.errors?.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              {syncResult.errors.map(e => (
+                <div key={e.shop_id} style={{ fontSize: 11, color: "var(--ac)" }}>⚠ {e.name}: {e.error}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Search + select all */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek op naam of SKU..." style={{ flex: 1, fontSize: 12 }} />
+        <button onClick={() => setSelected(new Set(filtered.map(p => p.id)))}
+          style={{ padding: "6px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer", color: "var(--mx)" }}>
+          Alles selecteren
+        </button>
+        <button onClick={() => setSelected(new Set())}
+          style={{ padding: "6px 12px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer", color: "var(--mx)" }}>
+          Deselecteren
+        </button>
+      </div>
+
+      {/* Product list */}
+      {loading ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "30px 0", color: "var(--mx)", fontSize: 13 }}>
+          <div style={{ width: 18, height: 18, border: "2px solid var(--b2)", borderTopColor: "var(--pr-h)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          Producten laden...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: "30px 0", textAlign: "center", color: "var(--mx)", fontSize: 13 }}>
+          {products.length === 0 ? "Geen producten met SKU gevonden in deze shop." : "Geen resultaten voor je zoekopdracht."}
+        </div>
+      ) : (
+        <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
+          {/* Table header */}
+          <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 120px 100px", gap: 0, background: "var(--s2)", borderBottom: "1px solid var(--b1)", padding: "8px 14px", fontSize: 11, fontWeight: 600, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            <div></div>
+            <div>Product</div>
+            <div>SKU</div>
+            <div style={{ textAlign: "right" }}>Voorraad</div>
+          </div>
+          {filtered.map((p, i) => {
+            const isSelected = selected.has(p.id);
+            const hasStock = p.manage_stock;
+            return (
+              <div key={p.id}
+                onClick={() => toggleSelect(p.id)}
+                style={{ display: "grid", gridTemplateColumns: "32px 1fr 120px 100px", gap: 0, padding: "10px 14px", borderBottom: i < filtered.length - 1 ? "1px solid var(--b1)" : "none", background: isSelected ? "rgba(99,102,241,0.04)" : "transparent", cursor: "pointer", alignItems: "center", transition: "background 0.1s" }}>
+                <div>
+                  <div style={{ width: 16, height: 16, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {isSelected && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 1 }}>{p.name}</div>
+                  {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel product</div>}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku}</div>
+                <div style={{ textAlign: "right" }}>
+                  {hasStock ? (
+                    <span style={{ fontSize: 13, fontWeight: 600, color: p.stock_quantity > 0 ? "var(--gr)" : "var(--re)" }}>
+                      {p.stock_quantity ?? 0}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--dm)" }}>—</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {products.length > 0 && (
+        <div style={{ fontSize: 11, color: "var(--dm)", textAlign: "center" }}>
+          {products.length} product{products.length !== 1 ? "en" : ""} met SKU gevonden · {selected.size} geselecteerd
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Trial Banner ─────────────────────────────────────────────────────────────
+const TrialBanner = ({ userProfile, onUpgrade }) => {
+  if (!userProfile) return null;
+  const plan = userProfile.plan;
+
+  if (plan === "trial") {
+    const endsAt = userProfile.trial_ends_at ? new Date(userProfile.trial_ends_at) : null;
+    const daysLeft = endsAt ? Math.max(0, Math.ceil((endsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 7;
+    const isUrgent = daysLeft <= 2;
+    return (
+      <div style={{ background: isUrgent ? "linear-gradient(90deg,rgba(239,68,68,0.1),rgba(239,68,68,0.05))" : "linear-gradient(90deg,rgba(99,102,241,0.1),rgba(99,102,241,0.05))", borderBottom: `1px solid ${isUrgent ? "rgba(239,68,68,0.3)" : "rgba(99,102,241,0.25)"}`, padding: "8px 20px", display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
+        <span style={{ fontWeight: 700, color: isUrgent ? "var(--re)" : "var(--pr-h)" }}>
+          {isUrgent ? "⚠" : "⏳"} Proefperiode: nog {daysLeft} dag{daysLeft !== 1 ? "en" : ""} gratis
+        </span>
+        <span style={{ color: "var(--mx)" }}>Na je proefperiode heb je een abonnement nodig om door te gaan.</span>
+        <Btn variant="primary" size="sm" onClick={onUpgrade} style={{ marginLeft: "auto", padding: "4px 14px", fontSize: 11 }}>
+          Abonneer nu — €7,99/m →
+        </Btn>
+      </div>
+    );
+  }
+
+  if (plan === "trial_expired") {
+    return (
+      <div style={{ background: "linear-gradient(90deg,rgba(239,68,68,0.15),rgba(239,68,68,0.05))", borderBottom: "1px solid rgba(239,68,68,0.4)", padding: "10px 20px", display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
+        <span style={{ fontWeight: 700, color: "var(--re)" }}>🔒 Proefperiode verlopen</span>
+        <span style={{ color: "var(--mx)" }}>Kies een abonnement om weer volledig toegang te krijgen tot je shops.</span>
+        <Btn variant="primary" size="sm" onClick={onUpgrade} style={{ marginLeft: "auto", padding: "4px 14px", fontSize: 11, background: "var(--re)", boxShadow: "none" }}>
+          Abonnement kiezen →
+        </Btn>
+      </div>
+    );
+  }
+
+  return null;
+};
+
 // ─── User Dashboard ────────────────────────────────────────────────────────────
-const VALID_VIEWS = ["products", "connected", "hreflang", "marketing", "analytics", "settings"];
+const VALID_VIEWS = ["products", "connected", "voorraad", "hreflang", "marketing", "analytics", "settings"];
 
 const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefreshKey = 0 }) => {
   const [shops, setShops] = useState([]);
@@ -6517,6 +6849,13 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
   };
+
+  const [userProfile, setUserProfile] = useState(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("user_profiles").select("plan, trial_ends_at, full_name, max_shops, max_connected_products").eq("id", user.id).single()
+      .then(({ data }) => { if (data) setUserProfile(data); });
+  }, [user?.id, profileRefreshKey]);
 
   // Load shops from Supabase on mount
   useEffect(() => {
@@ -6743,6 +7082,10 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
             notify("Push mislukt: " + e.message, "error");
           }
         }} />
+      <TrialBanner
+        userProfile={userProfile}
+        onUpgrade={() => setActiveView("settings")}
+      />
       <div className="dashboard-content">
         {shopsLoading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", flexDirection: "column", gap: 16 }}>
@@ -6774,10 +7117,24 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
                   onPromptSettings={() => setPromptModalOpen(true)}
                   liveCategories={liveCategories}
                   shopCategories={liveCategories}
-                  onCategoryChange={handleCategoryChange} />
+                  onCategoryChange={handleCategoryChange}
+                  onStockSync={async (product) => {
+                    if (!product.sku) return alert("Product heeft geen SKU — sync niet mogelijk.");
+                    if (!confirm(`Voorraad van "${product.name}" (${product.stock_quantity ?? 0} stuks) synchroniseren naar alle andere shops?`)) return;
+                    const token = await getToken();
+                    const res = await fetch("/api/stock-sync", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                      body: JSON.stringify({ source_shop_id: activeSite.id, products: [{ sku: product.sku, stock_quantity: product.stock_quantity, manage_stock: product.manage_stock }] }),
+                    });
+                    const data = await res.json();
+                    if (data.synced > 0) notify(`✓ Voorraad gesynchroniseerd naar ${data.shops_updated?.map(s => s.name).join(", ")}`);
+                    else notify("Geen shops gevonden met dit SKU", "error");
+                  }} />
               )
             )}
             {activeView === "connected" && <ConnectedSitesView products={products} sites={shops} activeSite={activeSite} wooCall={wooCall} />}
+            {activeView === "voorraad" && <StockSyncView shops={shops} user={user} activeSite={activeSite} wooCall={wooCall} />}
             {activeView === "hreflang" && <HreflangView sites={shops} />}
             {activeView === "marketing" && <MarketingView activeSite={activeSite} shops={shops} user={user} couponCache={couponCache} onCouponCacheUpdate={setCouponCache} />}
             {activeView === "analytics" && <AnalyticsView shops={shops} user={user} analyticsCache={analyticsCache} onAnalyticsCacheUpdate={setAnalyticsCache} />}
@@ -7044,7 +7401,7 @@ const Dashboard = ({ user, onLogout, onPaymentWall, onHowItWorks, profileRefresh
 };
 
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
-const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod, initialCountry, initialVatValidated }) => {
+const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod, initialCountry, initialVatValidated, initialTrial = false }) => {
   const [step, setStep] = useState(
     mode === "signup" ? (initialPlan ? "form" : "plan") :
     mode === "reset" ? "reset" :
@@ -7112,6 +7469,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
     }).catch(() => { useFallback(); setMethodsLoading(false); });
   }, [step]);
   const isFree = form.code.toLowerCase() === "freeforever";
+  const isTrial = initialTrial || form.code.toLowerCase() === "trial";
   const planPrice = getPlanPrice(form.plan, form.billingPeriod);
   const vatInfo = getVatInfo(form.country, form.vat_validated, planPrice);
   const isEUNonNL = EU_COUNTRIES.some(c => c.code === form.country) && form.country !== "NL";
@@ -7213,7 +7571,21 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
         } catch {}
       }
 
-      if (isFree) { setStep("success"); } else { setStep("payment"); }
+      if (isFree) {
+        setStep("success");
+      } else if (isTrial) {
+        // Activate trial — no payment required
+        const tok = await getToken();
+        const trialRes = await fetch("/api/trial-start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tok}` },
+        });
+        const trialData = await trialRes.json();
+        if (!trialRes.ok) { setError(trialData.error || "Proefperiode starten mislukt."); return; }
+        setStep("trial_success");
+      } else {
+        setStep("payment");
+      }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
@@ -7364,13 +7736,22 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
         </>}
 
         {step === "form" && <>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 800 }}>Account aanmaken</h2>
-            <div onClick={() => setStep("plan")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--pr-l)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--rd)", cursor: "pointer", fontSize: 12, color: "var(--pr-h)", fontWeight: 600 }}>
-              {PLANS[form.plan]?.name} · €{getPlanPrice(form.plan, form.billingPeriod).toFixed(2).replace(".", ",")} <span style={{ fontSize: 10, opacity: 0.7 }}>✎</span>
+          {isTrial ? (
+            <div style={{ background: "linear-gradient(135deg,rgba(99,102,241,0.12),var(--s2))", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--rd)", padding: "12px 16px", marginBottom: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>🚀 7 dagen gratis proberen</div>
+              <div style={{ fontSize: 12, color: "var(--mx)" }}>Starter plan. Geen betaalgegevens vereist. Na 7 dagen kies jij of je wilt doorgaan voor €7,99/m.</div>
             </div>
-          </div>
-          <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Start met het beheren van al jouw webshops</p>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <h2 style={{ fontSize: 22, fontWeight: 800 }}>Account aanmaken</h2>
+                <div onClick={() => setStep("plan")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--pr-l)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--rd)", cursor: "pointer", fontSize: 12, color: "var(--pr-h)", fontWeight: 600 }}>
+                  {PLANS[form.plan]?.name} · €{getPlanPrice(form.plan, form.billingPeriod).toFixed(2).replace(".", ",")} <span style={{ fontSize: 10, opacity: 0.7 }}>✎</span>
+                </div>
+              </div>
+              <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 20 }}>Start met het beheren van al jouw webshops</p>
+            </>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
             <div className="settings-2col">
               <Field label="Naam *"><Inp value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jouw naam" /></Field>
@@ -7450,7 +7831,7 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
                 </div>
               )}
             </div>
-            <Btn variant="primary" size="lg" onClick={handleSignup} disabled={loading} style={{ width: "100%", marginTop: 4 }}>{loading ? "Bezig..." : isFree ? "Account aanmaken →" : "Verder naar betaling →"}</Btn>
+            <Btn variant="primary" size="lg" onClick={handleSignup} disabled={loading} style={{ width: "100%", marginTop: 4 }}>{loading ? "Bezig..." : isTrial ? "Gratis starten →" : isFree ? "Account aanmaken →" : "Verder naar betaling →"}</Btn>
             <div style={{ textAlign: "center", fontSize: 12, color: "var(--dm)" }}>
               Al een account? <span onClick={() => { setStep("login"); setError(null); }} style={{ color: "var(--pr-h)", cursor: "pointer" }}>Inloggen</span>
             </div>
@@ -7534,6 +7915,26 @@ const AuthModal = ({ mode, onClose, onSuccess, initialPlan, initialBillingPeriod
               Bevestigingsmail gestuurd naar <strong style={{ color: "var(--tx)" }}>{form.email}</strong>.
             </p>
             <Btn variant="primary" size="lg" onClick={() => onSuccess({ name: form.name, email: form.email })} style={{ width: "100%" }}>Naar het dashboard →</Btn>
+          </div>
+        </>}
+
+        {step === "trial_success" && <>
+          <div style={{ textAlign: "center", padding: "10px 0 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 12 }}>🚀</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Proefperiode gestart!</h2>
+            <p style={{ fontSize: 13, color: "var(--mx)", marginBottom: 6 }}>
+              Je hebt <strong style={{ color: "var(--tx)" }}>7 dagen gratis</strong> toegang tot WooSyncShop Starter.
+            </p>
+            <p style={{ fontSize: 12, color: "var(--mx)", marginBottom: 24 }}>
+              Daarna kun je eenvoudig een abonnement kiezen via Instellingen → Abonnement. Geen automatische afschrijving.
+            </p>
+            <div style={{ background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", padding: "14px 16px", marginBottom: 20, fontSize: 12, color: "var(--mx)", textAlign: "left", lineHeight: 1.8 }}>
+              ✓ 2 shops · 500 verbonden producten<br />
+              ✓ Volledig productbeheer + voorraadbeheer<br />
+              ✓ AI Image pipeline + Hreflang manager<br />
+              ✓ Multi-shop voorraad synchronisatie
+            </div>
+            <Btn variant="primary" size="lg" onClick={() => onSuccess({ name: form.name, email: form.email })} style={{ width: "100%" }}>Naar mijn dashboard →</Btn>
           </div>
         </>}
       </div>
@@ -7949,7 +8350,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           <Btn variant="ghost" onClick={onLogin}>Inloggen</Btn>
-          <Btn variant="primary" onClick={() => onSignup("growth", "monthly")}>Start vandaag</Btn>
+          <Btn variant="primary" onClick={() => onSignup("starter", "monthly", true)}>Start gratis</Btn>
         </div>
       </nav>
 
@@ -7964,7 +8365,7 @@ const LandingPage = ({ onLogin, onSignup, onPage = () => {} }) => {
           Stop met inloggen op elk afzonderlijk WooCommerce dashboard. Woo Sync Shop synchroniseert producten, voorraad en prijzen tussen al jouw shops.
         </p>
         <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-          <Btn variant="primary" size="lg" onClick={() => onSignup("growth", "monthly")} style={{ fontSize: 15, padding: "13px 28px" }}>Start gratis →</Btn>
+          <Btn variant="primary" size="lg" onClick={() => onSignup("starter", "monthly", true)} style={{ fontSize: 15, padding: "13px 28px" }}>7 dagen gratis proberen →</Btn>
           <Btn variant="secondary" size="lg" style={{ fontSize: 15, padding: "13px 28px" }}>Bekijk demo</Btn>
         </div>
         <div style={{ marginTop: 60, display: "flex", justifyContent: "center" }}>
@@ -9667,7 +10068,7 @@ export default function App() {
       {view === "landing" && (
         <LandingPage
           onLogin={() => openAuthModal({ mode: "login" })}
-          onSignup={(plan, billingPeriod) => openAuthModal({ mode: "signup", plan: plan || "growth", billingPeriod: billingPeriod || "monthly" })}
+          onSignup={(plan, billingPeriod, trial) => openAuthModal({ mode: "signup", plan: plan || "growth", billingPeriod: billingPeriod || "monthly", trial: !!trial })}
           onPage={goPage}
         />
       )}
@@ -9729,6 +10130,7 @@ export default function App() {
           initialBillingPeriod={authModal?.billingPeriod}
           initialCountry={authModal?.country}
           initialVatValidated={authModal?.vatValidated}
+          initialTrial={authModal?.trial ?? false}
           onClose={() => {
             const wasPayment = authModal?.mode === "payment";
             closeAuthModal();
