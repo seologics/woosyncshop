@@ -130,7 +130,8 @@ export default async (req) => {
     target_shop_id,
     products: sourceProducts,     // Array of source products (with all fields)
     fields = ['stock_quantity'],   // Which fields to sync
-    match_strategy = 'sku',        // 'sku' | 'identifier' | 'mapping'
+    match_strategy = 'sku',        // 'sku' | 'identifier' | 'mapping' | 'confirmed_mapping'
+    confirmed_mappings = [],        // [{ source_id, target_id }] — used with confirmed_mapping strategy
   } = body
 
   if (!source_shop_id || !target_shop_id || !Array.isArray(sourceProducts) || sourceProducts.length === 0) {
@@ -204,6 +205,19 @@ export default async (req) => {
         if (targetProd) mappingLookup[m.source_sku || m.source_woo_id] = { product: targetProd, variation_id: null }
       }
       lookupFn = (src) => mappingLookup[src.sku] || mappingLookup[src.id] || null
+
+    } else if (match_strategy === 'confirmed_mapping') {
+      // Pre-confirmed matches from AI matching or manual selection
+      // Shape: confirmed_mappings: [{ source_id, target_id }]
+      const targetIdMap = {}
+      for (const tp of targetProducts) targetIdMap[tp.id] = tp
+
+      const confirmedLookup = {}
+      for (const m of (confirmed_mappings || [])) {
+        const tp = targetIdMap[m.target_id]
+        if (tp) confirmedLookup[m.source_id] = { product: tp, variation_id: null }
+      }
+      lookupFn = (src) => confirmedLookup[src.id] || null
 
     } else {
       lookupFn = () => null

@@ -6602,7 +6602,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   const [selectedFields, setSelectedFields] = useState(["stock_quantity"]);
 
   // Step 3 — match strategy
-  const [matchStrategy, setMatchStrategy] = useState("sku"); // sku | identifier | mapping
+  const [matchStrategy, setMatchStrategy] = useState("sku"); // sku | identifier | mapping | ai_name
 
   // Step 4 — sync run
   const [sourceProducts, setSourceProducts] = useState([]);
@@ -6612,6 +6612,12 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null); // { synced, failed, unmatched }
+  // AI pre-match state
+  const [aiMatchLoading, setAiMatchLoading] = useState(false);
+  const [aiMatchResult, setAiMatchResult] = useState(null); // { matches: [...] } from ai-match-products
+  const [userOverrides, setUserOverrides] = useState({}); // source_id → target_id (user-corrected)
+  // Stored mapping preload
+  const [storedMappings, setStoredMappings] = useState([]); // [{ source_woo_id, target_woo_id, source_sku, target_sku }]
 
   // Step 5 — create unmatched
   const [createConfig, setCreateConfig] = useState({
@@ -6654,10 +6660,10 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   const loadSourceProducts = async () => {
     if (!sourceShopId) return;
     setLoadingProducts(true); setSourceProducts([]); setTargetProducts([]); setSyncResult(null);
+    setAiMatchResult(null); setUserOverrides({}); setStoredMappings([]);
     try {
       const token = await getToken();
       const FIELDS = "products?per_page=100&orderby=title&order=asc&_fields=id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,description,short_description,categories,images,attributes,meta_data";
-      // Load source and target products in parallel
       const [srcRes, tgtRes] = await Promise.all([
         fetch("/api/woo", {
           method: "POST",
@@ -6677,8 +6683,36 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
         setSelectedProducts(new Set(srcData.map(p => p.id)));
       }
       if (Array.isArray(tgtData)) setTargetProducts(tgtData);
+
+      // Preload stored mappings for "mapping" strategy
+      if (matchStrategy === "mapping" && sourceShopId && targetShopId) {
+        const { data: maps } = await supabase
+          .from("shop_product_mappings")
+          .select("source_woo_id, target_woo_id, source_sku, target_sku")
+          .eq("source_shop_id", sourceShopId)
+          .eq("target_shop_id", targetShopId);
+        setStoredMappings(maps || []);
+      }
     } catch (e) { alert("Laden mislukt: " + e.message); }
     finally { setLoadingProducts(false); }
+  };
+
+  // Run AI product matching (ai_name strategy)
+  const runAiMatch = async () => {
+    if (!sourceShopId || !targetShopId) return;
+    setAiMatchLoading(true); setAiMatchResult(null); setUserOverrides({});
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/ai-match-products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ source_shop_id: sourceShopId, target_shop_id: targetShopId }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setAiMatchResult(data);
+    } catch (e) { alert("AI matching mislukt: " + e.message); }
+    finally { setAiMatchLoading(false); }
   };
 
   // ── Step 4: Run sync ───────────────────────────────────────────────────────
@@ -6691,6 +6725,22 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     try {
       const toSync = sourceProducts.filter(p => selectedProducts.has(p.id));
       const token = await getToken();
+
+      // For AI name strategy, build a confirmed mapping from aiMatchResult + userOverrides
+      // Shape: [{ source_id, target_id }] — stock-sync uses this as a pre-built lookup
+      let confirmedMappings = null;
+      if (matchStrategy === "ai_name") {
+        const tgtIdMapLocal = {};
+        targetProducts.forEach(tp => { tgtIdMapLocal[tp.id] = tp; });
+        confirmedMappings = toSync.map(src => {
+          const override = userOverrides[src.id];
+          if (override) return { source_id: src.id, target_id: override };
+          const m = (aiMatchResult?.matches || []).find(x => x.source_product.id === src.id);
+          if (m) return { source_id: src.id, target_id: m.target_product.id };
+          return null;
+        }).filter(Boolean);
+      }
+
       const res = await fetch("/api/stock-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -6699,7 +6749,8 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
           target_shop_id: targetShopId,
           products: toSync,
           fields: selectedFields,
-          match_strategy: matchStrategy,
+          match_strategy: matchStrategy === "ai_name" ? "confirmed_mapping" : matchStrategy,
+          confirmed_mappings: confirmedMappings,
         }),
       });
       const data = await res.json();
@@ -7035,7 +7086,8 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
             {[
               { val: "sku", icon: "🔑", title: "SKU exact", desc: "Koppelt producten met identieke SKU-codes. Snel, geen AI nodig. Werkt wanneer beide shops consistente SKUs hebben." },
               { val: "identifier", icon: "🏷️", title: "Identifier attribuut", desc: "Koppelt via het _wss_identifier meta-veld dat door WooSyncShop wordt toegevoegd. Betrouwbaarder bij verschillende SKUs maar zelfde product." },
-              { val: "mapping", icon: "🤖", title: "Opgeslagen koppeling", desc: "Gebruikt eerder opgeslagen koppelingen (bijv. na AI-matching of handmatig aangemaakt). Snelste optie na eerste setup." },
+              { val: "mapping", icon: "💾", title: "Opgeslagen koppeling", desc: "Gebruikt eerder opgeslagen koppelingen uit eerdere AI-matching of handmatige koppeling. Snelste optie na eerste setup." },
+              { val: "ai_name", icon: "🤖", title: "AI — op naam & SKU", desc: "AI analyseert productnamen en SKUs van beide shops en stelt koppelingen voor. Ideaal als SKUs niet overeenkomen. Je bevestigt elke koppeling vóór de sync." },
             ].map(opt => (
               <label key={opt.val} style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px", borderRadius: "var(--rd)", border: `2px solid ${matchStrategy === opt.val ? "var(--pr)" : "var(--b1)"}`, background: matchStrategy === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer" }}>
                 <input type="radio" name="strategy" value={opt.val} checked={matchStrategy === opt.val} onChange={() => setMatchStrategy(opt.val)} style={{ marginTop: 2, accentColor: "var(--pr)" }} />
@@ -7047,8 +7099,13 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
             ))}
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
               <Btn variant="secondary" onClick={() => setStep(2)}>← Terug</Btn>
-              <Btn variant="primary" onClick={() => { setStep(4); loadSourceProducts(); }}>
-                Volgende: Producten laden →
+              <Btn variant="primary" onClick={() => {
+                setStep(4);
+                loadSourceProducts().then(() => {
+                  if (matchStrategy === "ai_name") runAiMatch();
+                });
+              }}>
+                {matchStrategy === "ai_name" ? "Volgende: AI matching starten →" : "Volgende: Producten laden →"}
               </Btn>
             </div>
           </div>
@@ -7057,13 +7114,53 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
 
       {/* ── STEP 4: Product selection + sync run + result ─────────────────────── */}
       {step === 4 && (() => {
-        // Build preview match map client-side (SKU strategy only — AI/identifier resolved server-side)
-        const tgtSkuMap = {};
-        targetProducts.forEach(tp => { if (tp.sku) tgtSkuMap[tp.sku] = tp; });
+        // Build lookup maps for all strategies
+        const tgtSkuMap   = {};
+        const tgtIdMap    = {};
+        targetProducts.forEach(tp => {
+          if (tp.sku) tgtSkuMap[tp.sku] = tp;
+          tgtIdMap[tp.id] = tp;
+        });
+
+        // Stored mapping lookup: source_woo_id → target product
+        const storedMap = {};
+        storedMappings.forEach(m => {
+          const tp = tgtIdMap[m.target_woo_id];
+          if (tp) storedMap[m.source_woo_id] = tp;
+        });
+
+        // AI match lookup: source_id → { target_product, confidence, reasoning, match_basis }
+        const aiMap = {};
+        (aiMatchResult?.matches || []).forEach(m => {
+          const override = userOverrides[m.source_product.id];
+          const tp = override ? tgtIdMap[override] : tgtIdMap[m.target_product.id];
+          if (tp) aiMap[m.source_product.id] = {
+            product: tp,
+            confidence: override ? 1.0 : m.confidence,
+            reasoning: override ? "Handmatig gecorrigeerd" : m.reasoning,
+            match_basis: override ? "manual" : m.match_basis,
+            overridden: !!override,
+          };
+        });
+        // Also apply manual overrides for products with no AI match
+        Object.entries(userOverrides).forEach(([srcId, tgtId]) => {
+          if (!aiMap[parseInt(srcId)]) {
+            const tp = tgtIdMap[tgtId];
+            if (tp) aiMap[parseInt(srcId)] = { product: tp, confidence: 1.0, reasoning: "Handmatig geselecteerd", match_basis: "manual", overridden: true };
+          }
+        });
+
         const previewMatch = (src) => {
-          if (matchStrategy === "sku") return tgtSkuMap[src.sku] || null;
-          return undefined; // undefined = "will be determined during sync"
+          if (matchStrategy === "sku")     return tgtSkuMap[src.sku] || null;
+          if (matchStrategy === "mapping") return storedMap[src.id] || null;
+          if (matchStrategy === "ai_name") {
+            const m = aiMap[src.id];
+            return m ? m.product : (aiMatchResult ? null : undefined);
+          }
+          return undefined; // identifier: resolved server-side
         };
+        const getAiMeta = (src) => matchStrategy === "ai_name" ? aiMap[src.id] : null;
+
         // Build post-sync result maps
         const syncedMap   = {};
         const failedMap   = {};
@@ -7085,7 +7182,42 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
 
             {/* Product table */}
             <div style={{ border: "1px solid var(--b1)", borderRadius: "var(--rd-lg)", overflow: "hidden" }}>
-              {/* Toolbar */}
+              {/* AI matching status banner */}
+              {matchStrategy === "ai_name" && !hasSyncResult && (
+                <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--b1)", background: aiMatchLoading ? "rgba(99,102,241,0.06)" : aiMatchResult ? "rgba(34,197,94,0.05)" : "rgba(245,158,11,0.05)", display: "flex", alignItems: "center", gap: 10 }}>
+                  {aiMatchLoading ? (
+                    <>
+                      <div style={{ width: 14, height: 14, border: "2px solid var(--b2)", borderTopColor: "var(--pr)", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: "var(--mx)" }}>AI analyseert productnamen en SKUs van beide shops...</span>
+                    </>
+                  ) : aiMatchResult ? (
+                    <>
+                      <span style={{ fontSize: 13 }}>🤖</span>
+                      <span style={{ fontSize: 12, color: "var(--gr)", fontWeight: 600 }}>
+                        {Object.values(aiMap).length} van {sourceProducts.length} producten gematcht
+                      </span>
+                      <span style={{ fontSize: 11, color: "var(--mx)" }}>
+                        — {sourceProducts.length - Object.values(aiMap).length} zonder match (worden niet gesynchroniseerd, tenzij je handmatig koppelt)
+                      </span>
+                      <Btn variant="secondary" size="sm" onClick={runAiMatch} style={{ marginLeft: "auto" }}>↻ Opnieuw</Btn>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 11, color: "var(--ac)" }}>AI matching nog niet gestart.</span>
+                      <Btn variant="secondary" size="sm" onClick={runAiMatch} style={{ marginLeft: "auto" }}>🤖 Start AI matching</Btn>
+                    </>
+                  )}
+                </div>
+              )}
+              {/* Stored mapping banner */}
+              {matchStrategy === "mapping" && !hasSyncResult && (
+                <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--b1)", background: storedMappings.length > 0 ? "rgba(34,197,94,0.05)" : "rgba(245,158,11,0.05)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: storedMappings.length > 0 ? "var(--gr)" : "var(--ac)" }}>
+                    {storedMappings.length > 0 ? `💾 ${storedMappings.length} opgeslagen koppelingen gevonden` : "⚠️ Geen opgeslagen koppelingen gevonden — gebruik eerst AI matching."}
+                  </span>
+                </div>
+              )}
+            {/* Toolbar */}
               <div style={{ padding: "10px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 600, fontSize: 13 }}>Producten selecteren</span>
                 <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoeken..." style={{ fontSize: 12, maxWidth: 180 }} />
@@ -7094,7 +7226,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                 <button onClick={() => setSelectedProducts(new Set())} style={{ padding: "5px 10px", background: "var(--s3)", border: "1px solid var(--b1)", borderRadius: "var(--rd)", fontSize: 11, cursor: "pointer" }}>Alles ✗</button>
                 <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                   {loadingProducts && <span style={{ fontSize: 11, color: "var(--mx)" }}>Doelshop laden...</span>}
-                  <Btn variant="primary" onClick={handleSync} disabled={syncing || loadingProducts || selectedProducts.size === 0}>
+                  <Btn variant="primary" onClick={handleSync} disabled={syncing || loadingProducts || selectedProducts.size === 0 || (matchStrategy === "ai_name" && aiMatchLoading)}>
                     {syncing ? "Bezig..." : `🔄 Sync ${selectedProducts.size} product${selectedProducts.size !== 1 ? "en" : ""}`}
                   </Btn>
                 </div>
@@ -7147,58 +7279,95 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                   : isUnmatched ? "rgba(245,158,11,0.04)"
                   : isSelected ? "rgba(99,102,241,0.03)" : "transparent";
 
+                const aiMeta = getAiMeta(p);
+                const confidencePct = aiMeta ? Math.round(aiMeta.confidence * 100) : null;
+                const confidenceColor = confidencePct >= 90 ? "var(--gr)" : confidencePct >= 70 ? "var(--ac)" : "rgba(239,68,68,1)";
+                const showOverrideDropdown = matchStrategy === "ai_name" && !hasSyncResult && (!targetToShow || (aiMeta && aiMeta.confidence < 0.85 && !aiMeta.overridden));
+
                 return (
-                  <div key={p.id} onClick={() => toggleProduct(p.id)}
-                    style={{ display: "grid", gridTemplateColumns: "32px 1fr 110px 18px 1fr 110px 72px", padding: "9px 14px", borderBottom: i < filteredProducts.length - 1 ? "1px solid var(--b1)" : "none", background: rowBg, cursor: "pointer", alignItems: "center", gap: 6 }}>
-                    {/* Checkbox */}
-                    <div>
-                      <div style={{ width: 15, height: 15, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {isSelected && <span style={{ color: "#fff", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                  <div key={p.id} style={{ borderBottom: i < filteredProducts.length - 1 ? "1px solid var(--b1)" : "none", background: rowBg }}>
+                    <div onClick={() => toggleProduct(p.id)}
+                      style={{ display: "grid", gridTemplateColumns: "32px 1fr 110px 18px 1fr 110px 72px", padding: "9px 14px", cursor: "pointer", alignItems: "center", gap: 6 }}>
+                      {/* Checkbox */}
+                      <div>
+                        <div style={{ width: 15, height: 15, border: `2px solid ${isSelected ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: isSelected ? "var(--pr)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {isSelected && <span style={{ color: "#fff", fontSize: 9, fontWeight: 700 }}>✓</span>}
+                        </div>
+                      </div>
+                      {/* Source product */}
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3 }}>{p.name}</div>
+                        {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel</div>}
+                      </div>
+                      {/* Source SKU + price */}
+                      <div>
+                        <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku || "—"}</div>
+                        <div style={{ fontSize: 10, color: "var(--mx)" }}>€{p.regular_price || p.price || "—"}</div>
+                      </div>
+                      {/* Arrow */}
+                      <div style={{ fontSize: 12, color: "var(--mx)", textAlign: "center" }}>→</div>
+                      {/* Target product */}
+                      <div>
+                        {targetToShow ? (
+                          <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3, color: syncedItem ? "var(--gr)" : "var(--tx)" }}>{targetToShow.name}</div>
+                        ) : targetToShow === undefined ? (
+                          <div style={{ fontSize: 11, color: "var(--mx)", fontStyle: "italic" }}>Identifier — bepaald tijdens sync</div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: "var(--ac)", fontStyle: "italic" }}>Geen match gevonden</div>
+                        )}
+                        {/* AI reasoning tooltip */}
+                        {aiMeta && !hasSyncResult && (
+                          <div style={{ fontSize: 10, color: "var(--mx)", marginTop: 2 }}>{aiMeta.reasoning}</div>
+                        )}
+                      </div>
+                      {/* Target SKU + confidence */}
+                      <div>
+                        {targetToShow ? (
+                          <>
+                            <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--dm)" }}>{targetToShow.sku || "—"}</div>
+                            {confidencePct !== null && !hasSyncResult && (
+                              <div style={{ fontSize: 10, fontWeight: 700, color: confidenceColor }}>{confidencePct}% match</div>
+                            )}
+                            {syncedItem && <div style={{ fontSize: 10, color: "var(--gr)" }}>✓ gesync</div>}
+                          </>
+                        ) : null}
+                      </div>
+                      {/* Row status badge */}
+                      <div style={{ textAlign: "right" }}>
+                        {rowStatus && (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, color: rowStatus.color, background: `${rowStatus.color}18`, whiteSpace: "nowrap" }}>
+                            {rowStatus.icon} {rowStatus.label}
+                          </span>
+                        )}
+                        {!hasSyncResult && aiMeta?.overridden && (
+                          <span style={{ fontSize: 10, color: "var(--pr)", display: "block", marginTop: 2 }}>✏ Handmatig</span>
+                        )}
                       </div>
                     </div>
-                    {/* Source product */}
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3 }}>{p.name}</div>
-                      {p.type === "variable" && <div style={{ fontSize: 10, color: "var(--mx)" }}>Variabel</div>}
-                    </div>
-                    {/* Source SKU + price */}
-                    <div>
-                      <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--dm)" }}>{p.sku || "—"}</div>
-                      <div style={{ fontSize: 10, color: "var(--mx)" }}>€{p.regular_price || p.price || "—"}</div>
-                    </div>
-                    {/* Arrow */}
-                    <div style={{ fontSize: 12, color: "var(--mx)", textAlign: "center" }}>→</div>
-                    {/* Target product */}
-                    <div>
-                      {targetToShow ? (
-                        <>
-                          <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3, color: syncedItem ? "var(--gr)" : "var(--tx)" }}>{targetToShow.name}</div>
-                        </>
-                      ) : targetToShow === undefined ? (
-                        <div style={{ fontSize: 11, color: "var(--mx)", fontStyle: "italic" }}>
-                          {matchStrategy === "sku" ? "Geen SKU" : "Bepaald tijdens sync"}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 11, color: "var(--ac)", fontStyle: "italic" }}>Niet gevonden in doelshop</div>
-                      )}
-                    </div>
-                    {/* Target SKU + stock */}
-                    <div>
-                      {targetToShow ? (
-                        <>
-                          <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--dm)" }}>{targetToShow.sku || "—"}</div>
-                          {syncedItem && <div style={{ fontSize: 10, color: "var(--gr)" }}>✓ gesync</div>}
-                        </>
-                      ) : null}
-                    </div>
-                    {/* Row status badge */}
-                    <div style={{ textAlign: "right" }}>
-                      {rowStatus && (
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, color: rowStatus.color, background: `${rowStatus.color}18`, whiteSpace: "nowrap" }}>
-                          {rowStatus.icon} {rowStatus.label}
+                    {/* Override dropdown for low-confidence or no AI match */}
+                    {showOverrideDropdown && (
+                      <div onClick={e => e.stopPropagation()} style={{ padding: "6px 14px 10px 56px", display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 11, color: confidencePct !== null && confidencePct < 85 ? "var(--ac)" : "var(--mx)", flexShrink: 0 }}>
+                          {confidencePct !== null && confidencePct < 85 ? "⚠️ Lage zekerheid — corrigeer:" : "➕ Handmatig koppelen:"}
                         </span>
-                      )}
-                    </div>
+                        <select
+                          value={userOverrides[p.id] || ""}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setUserOverrides(o => v ? { ...o, [p.id]: parseInt(v) } : (({ [p.id]: _, ...rest }) => rest)(o));
+                          }}
+                          style={{ fontSize: 11, padding: "3px 6px", borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s3)", color: "var(--tx)", flex: 1, maxWidth: 320 }}>
+                          <option value="">{targetToShow ? `Huidig: ${targetToShow.name}` : "— Selecteer doelproduct —"}</option>
+                          {targetProducts.map(tp => (
+                            <option key={tp.id} value={tp.id}>{tp.name} {tp.sku ? `[${tp.sku}]` : ""}</option>
+                          ))}
+                        </select>
+                        {userOverrides[p.id] && (
+                          <button onClick={() => setUserOverrides(o => (({ [p.id]: _, ...rest }) => rest)(o))}
+                            style={{ fontSize: 11, background: "none", border: "none", color: "var(--mx)", cursor: "pointer", padding: "2px 4px" }}>✕</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
