@@ -7745,16 +7745,33 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
           )}
 
           {/* Progress bar shown while creating */}
-          {creating && createProgress.total > 0 && (
-            <div style={{ padding: "12px 16px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
-                <span style={{ color: "var(--tx)", fontWeight: 600 }}>
-                  {createProgress.current ? `Bezig: ${createProgress.current}` : "Producten aanmaken..."}
+          {creating && (
+            <div style={{ padding: "14px 16px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>
+                    {createProgress.total === 0 ? "🚀 Job starten..." :
+                     createProgress.done === 0 ? "⏳ Voorbereiden (attributen, SEO plugin detectie)..." :
+                     createProgress.current ? `🔄 Bezig: ${createProgress.current}` :
+                     "✅ Afronden..."}
+                  </div>
+                  {createProgress.done > 0 && createProgress.total > 0 && (
+                    <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>
+                      {createProgress.done} van {createProgress.total} producten aangemaakt
+                    </div>
+                  )}
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--pr)", flexShrink: 0 }}>
+                  {createProgress.total > 0 ? `${createProgress.done}/${createProgress.total}` : "..."}
                 </span>
-                <span style={{ color: "var(--mx)" }}>{createProgress.done} / {createProgress.total}</span>
               </div>
-              <div style={{ height: 6, background: "var(--b2)", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", background: "var(--pr)", borderRadius: 3, transition: "width 0.3s", width: `${Math.round(createProgress.done / createProgress.total * 100)}%` }} />
+              {createProgress.total > 0 && (
+                <div style={{ height: 8, background: "var(--b2)", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", background: `linear-gradient(90deg, var(--pr), var(--pr-h))`, borderRadius: 4, transition: "width 0.5s ease", width: `${Math.round((createProgress.done / createProgress.total) * 100)}%` }} />
+                </div>
+              )}
+              <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 6 }}>
+                Verwerking verloopt op de server — dit venster open houden tot voltooiing.
               </div>
             </div>
           )}
@@ -10276,6 +10293,7 @@ const AI_USE_CASES = [
   { id: "translation", label: "🌐 Taxonomy vertaling",       hint: "Categories & attributes vertalen bij sync" },
   { id: "image",       label: "🖼 Afbeelding optimalisatie", hint: "Gemini resize voor TinyPNG compressie", geminiOnly: true },
 ];
+// Note: Content generatie uses content_provider (claude/gemini/openai) separately below
 
 const CLAUDE_MODELS = [
   { value: "claude-sonnet-4-6",         label: "claude-sonnet-4-6 (aanbevolen)" },
@@ -10301,18 +10319,23 @@ const OPENAI_MODELS = [
   { value: "gpt-4o",               label: "gpt-4o",                      group: "Legacy" },
 ];
 
-const ProviderToggle = ({ value, onChange, geminiOnly = false }) => (
-  <div style={{ display: "flex", borderRadius: "var(--rd)", overflow: "hidden", border: "1px solid var(--b2)", width: "fit-content" }}>
-    {["gemini", "openai"].map(opt => {
-      const disabled = geminiOnly && opt === "openai";
-      return (
-        <button key={opt} onClick={() => !disabled && onChange(opt)} style={{ padding: "5px 14px", fontSize: 12, fontWeight: value === opt ? 700 : 400, background: value === opt ? "var(--pr)" : "transparent", color: value === opt ? "#fff" : disabled ? "var(--b3)" : "var(--mx)", border: "none", cursor: disabled ? "not-allowed" : "pointer", transition: "all 0.15s" }} title={disabled ? "Image pipeline gebruikt altijd Gemini" : undefined}>
-          {opt === "gemini" ? "✦ Gemini" : "⬡ OpenAI"}
+const ProviderToggle = ({ value, onChange, geminiOnly = false, providers = null }) => {
+  // Default providers: gemini + openai. Pass providers=[] to add claude etc.
+  const opts = providers || (geminiOnly
+    ? [{ id: "gemini", label: "✦ Gemini" }]
+    : [{ id: "gemini", label: "✦ Gemini" }, { id: "openai", label: "⬡ OpenAI" }]
+  );
+  return (
+    <div style={{ display: "flex", borderRadius: "var(--rd)", overflow: "hidden", border: "1px solid var(--b2)", width: "fit-content" }}>
+      {opts.map(opt => (
+        <button key={opt.id} onClick={() => onChange(opt.id)}
+          style={{ padding: "5px 14px", fontSize: 12, fontWeight: value === opt.id ? 700 : 400, background: value === opt.id ? "var(--pr)" : "transparent", color: value === opt.id ? "#fff" : "var(--mx)", border: "none", cursor: "pointer", transition: "all 0.15s" }}>
+          {opt.label}
         </button>
-      );
-    })}
-  </div>
-);
+      ))}
+    </div>
+  );
+};
 
 const ModelSelect = ({ provider, value, onChange, compact = false }) => {
   const models = provider === "openai" ? OPENAI_MODELS : GEMINI_MODELS;
@@ -10605,42 +10628,54 @@ const PlatformSettings = () => {
           })}
         </div>
 
-        {/* ── Content generatie (Claude / OpenAI) ── */}
-        <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>✨ Content generatie</div>
-              <div style={{ fontSize: 11, color: "var(--dm)" }}>Productbeschrijvingen, SEO meta & attribuut suggesties bij dupliceren</div>
+        {/* ── Content generatie (Claude / Gemini / OpenAI) ── */}
+        {(() => {
+          const contentProv = ps.content_provider || "claude";
+          const modelKey = contentProv === "claude" ? "claude_model_content"
+                         : contentProv === "openai"  ? "openai_model_content"
+                         : "ai_model_normalization"; // gemini uses normalization model slot
+          const currentModel = ps[modelKey] || "";
+          const modelOptions = contentProv === "claude"  ? CLAUDE_MODELS
+                             : contentProv === "openai"  ? OPENAI_MODELS
+                             : GEMINI_MODELS;
+          const defaultLabel = contentProv === "claude"  ? "claude-sonnet-4-6 (standaard)"
+                             : contentProv === "openai"  ? "gpt-4o-mini (standaard)"
+                             : "gemini-2.5-flash (standaard)";
+          return (
+            <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>✨ Content generatie</div>
+                  <div style={{ fontSize: 11, color: "var(--dm)" }}>Productbeschrijvingen, SEO meta & attribuut suggesties bij dupliceren & sync aanmaken</div>
+                </div>
+                <ProviderToggle
+                  value={contentProv}
+                  onChange={v => setPs(p => ({ ...p, content_provider: v, claude_model_content: "", openai_model_content: "" }))}
+                  providers={[
+                    { id: "claude",  label: "◆ Claude"  },
+                    { id: "gemini",  label: "✦ Gemini"  },
+                    { id: "openai",  label: "⬡ OpenAI"  },
+                  ]}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, color: "var(--dm)", flexShrink: 0 }}>Model:</span>
+                <select
+                  value={currentModel}
+                  onChange={e => setPs(p => ({ ...p, [modelKey]: e.target.value }))}
+                  style={{ flex: 1, fontSize: 12, padding: "4px 8px", borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s2)", color: "var(--tx)" }}>
+                  <option value="">{defaultLabel}</option>
+                  {modelOptions.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+                {currentModel && (
+                  <button onClick={() => setPs(p => ({ ...p, [modelKey]: "" }))} style={{ fontSize: 10, color: "var(--dm)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px" }}>✕ reset</button>
+                )}
+              </div>
             </div>
-            <ProviderToggle
-              value={ps.content_provider || "claude"}
-              onChange={v => setPs(p => ({ ...p, content_provider: v, claude_model_content: "", openai_model_content: "" }))}
-              extraProviders={[{ value: "claude", label: "◆ Claude" }]}
-              claudeOnly={false}
-            />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "var(--dm)", flexShrink: 0 }}>Model:</span>
-            {(ps.content_provider || "claude") === "claude" ? (
-              <Sel
-                value={ps.claude_model_content || "claude-sonnet-4-6"}
-                onChange={e => setPs(p => ({ ...p, claude_model_content: e.target.value }))}
-                options={CLAUDE_MODELS.map(m => ({ value: m.value, label: m.label }))}
-                style={{ flex: 1, fontSize: 12 }}
-              />
-            ) : (
-              <Sel
-                value={ps.openai_model_content || "gpt-5.4"}
-                onChange={e => setPs(p => ({ ...p, openai_model_content: e.target.value }))}
-                options={[
-                  { value: "gpt-5.4",             label: "gpt-5.4 (flagship, snel)" },
-                  { value: "gpt-5.3-chat-latest",  label: "gpt-5.3 Instant (snel)" },
-                ]}
-                style={{ flex: 1, fontSize: 12 }}
-              />
-            )}
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
 

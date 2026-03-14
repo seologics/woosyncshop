@@ -385,10 +385,9 @@ export default async (req) => {
     image_mode = 'translate', // 'translate' | 'ai_vision'
   } = cfg || {}
 
-  // ── Return 202 immediately, background work follows ──────────────────────
-  // Netlify background functions must return before doing async work.
-  // We kick off the work in a detached promise and return straight away.
-  const doWork = async () => {
+  // ── Background function: runs to completion (up to 15 min), returns 202 ──
+  // Netlify background functions execute the full async body synchronously.
+  // No fire-and-forget needed — just write progress to sync_jobs as we go.
   try {
     const [{ data: sourceShop }, { data: targetShop }] = await Promise.all([
       supabase.from('shops').select('*').eq('id', source_shop_id).eq('user_id', user.id).single(),
@@ -642,7 +641,13 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
         current_product: prod.name,
         updated_at: new Date().toISOString(),
       }).eq('id', job_id)
+      await log(supabase, 'info', `Sync create product ${i+1}/${sourceProducts.length}: ${prod.name}`, { user_id: user.id, job_id })
       await processOne(prod)
+      // Update progress after each product completes
+      await supabase.from('sync_jobs').update({
+        done: i + 1,
+        updated_at: new Date().toISOString(),
+      }).eq('id', job_id)
     }
 
     await log(supabase, 'info', `Sync create complete: ${results.created.length} created, ${results.failed.length} failed`, {
@@ -667,11 +672,9 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
       }).eq('id', job_id)
     } catch {}
   }
-  } // end doWork
-
-  // Fire work in background, return 202 immediately
-  doWork()
+  // Background function returns 202 after all work is done
   return new Response(JSON.stringify({ ok: true, job_id }), { status: 202, headers: CORS })
 }
 
 export const config = { path: '/api/sync-create' }
+// NOTE: Deploy this file as sync-create-background.mjs for Netlify background function runtime
