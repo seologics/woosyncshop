@@ -101,99 +101,224 @@ async function detectSeoPlugin(shop) {
   return null
 }
 
-// ── Attribute preflight: detect/create/translate attributes on target ─────────
-async function attributePreflight(sourceAttrs, targetShop, settings, targetLanguage, tone, supabase, userId, sourceLocale, targetLocale) {
+// ── Smart attribute + category mapping ────────────────────────────────────────
+// Replaces simple slug-match with full AI reasoning:
+//   1. Fetch all target attributes WITH their existing terms
+//   2. Fetch all target categories  
+//   3. Fetch 3 similar products from target shop for context
+//   4. One AI call: match source attrs→target attrs, reuse/add values, assign categories
+//   5. Execute: reuse existing IDs, add missing terms, create new attrs only if needed
+//
+// Returns: { attrResults: [{source_name, target_id, target_name, options}], categoryIds: [] }
+async function smartMapping(sourceProd, targetShop, settings, targetLanguage, tone, supabase, userId, sourceLocale, targetLocale) {
+  // ── 1. Fetch full target attribute catalog with terms ───────────────────────
   let targetAttrs = []
   try { targetAttrs = await wooFetch(targetShop, 'products/attributes?per_page=100') } catch {}
 
-  const targetAttrMap = {}
-  for (const a of (Array.isArray(targetAttrs) ? targetAttrs : [])) {
-    targetAttrMap[a.slug] = { id: a.id, name: a.name }
-  }
+  // Fetch terms for each attribute in parallel (cap at 20 to avoid overload)
+  const targetAttrsWithTerms = await Promise.all(
+    (Array.isArray(targetAttrs) ? targetAttrs.slice(0, 40) : []).map(async (a) => {
+      try {
+        const terms = await wooFetch(targetShop, `products/attributes/${a.id}/terms?per_page=100`)
+        return { id: a.id, name: a.name, slug: a.slug, terms: Array.isArray(terms) ? terms.map(t => ({ id: t.id, name: t.name })) : [] }
+      } catch { return { id: a.id, name: a.name, slug: a.slug, terms: [] } }
+    })
+  )
 
-  const attrIdMap = {}
-  const toTranslate = [] // attrs not already on target
+  // ── 2. Fetch target categories ─────────────────────────────────────────────
+  let targetCats = []
+  try {
+    const cats = await wooFetch(targetShop, 'products/categories?per_page=100&hide_empty=false')
+    targetCats = Array.isArray(cats) ? cats.map(c => ({ id: c.id, name: c.name, slug: c.slug, parent: c.parent })) : []
+  } catch {}
 
-  for (const attr of sourceAttrs) {
-    const slug = attr.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    if (targetAttrMap[slug]) {
-      attrIdMap[attr.name] = targetAttrMap[slug].id
-    } else {
-      toTranslate.push({ ...attr, slug })
+  // ── 3. Find similar products on target for attribute value context ──────────
+  // Search by first keyword of the source product name
+  let similarProducts = []
+  try {
+    const keyword = sourceProd.name.split(/\s+/).slice(0, 3).join(' ')
+    const found = await wooFetch(targetShop, `products?search=${encodeURIComponent(keyword)}&per_page=3&_fields=id,name,attributes,categories`)
+    if (Array.isArray(found) && found.length > 0) {
+      similarProducts = found.map(p => ({
+        name: p.name,
+        attributes: (p.attributes || []).map(a => ({ name: a.name, values: a.options || [] })),
+        categories: (p.categories || []).map(c => c.name),
+      }))
     }
-  }
+  } catch {}
 
-  if (toTranslate.length === 0) return attrIdMap
-
-  // ── Check translation cache ───────────────────────────────────────────────
-  const cacheMap = {} // source term → translated term
+  // ── 4. Check cache for known translations ──────────────────────────────────
+  const cacheMap = {}
   if (supabase && userId) {
     try {
-      const allTerms = toTranslate.flatMap(a => [a.name, ...(a.options || [])])
+      const allTerms = (sourceProd.attributes || []).flatMap(a => [a.name, ...(a.options || [])])
       const { data: cached } = await supabase
-        .from('ai_taxonomy_cache')
-        .select('source_term, target_term')
-        .eq('user_id', userId)
-        .eq('source_locale', sourceLocale || 'nl_NL')
-        .eq('target_locale', targetLocale || 'de_DE')
+        .from('ai_taxonomy_cache').select('source_term, target_term')
+        .eq('user_id', userId).eq('source_locale', sourceLocale || 'nl_NL').eq('target_locale', targetLocale || 'de_DE')
         .in('source_term', allTerms)
       for (const row of (cached || [])) cacheMap[row.source_term] = row.target_term
     } catch {}
   }
 
-  // ── ONE batch AI call for everything not in cache ─────────────────────────
-  const batchInput = toTranslate
-    .filter(a => !cacheMap[a.name] || (a.options || []).some(t => !cacheMap[t]))
-    .map(a => ({ attribute: a.name, terms: (a.options || []).filter(t => !cacheMap[t]) }))
-
-  if (batchInput.length > 0) {
-    try {
-      const raw = await callAI(settings,
-        `You are a WooCommerce product taxonomy translator. Return ONLY valid JSON matching the exact structure.`,
-        `Translate each attribute name and its terms to ${targetLanguage} (tone: ${tone}).
-Input: ${JSON.stringify(batchInput)}
-Return this exact JSON structure:
-{"translations":[{"attribute":"translated name","terms":["translated term 1"]}]}`)
-      const parsed = safeJSON(raw)
-      const cacheInserts = []
-      for (let i = 0; i < batchInput.length; i++) {
-        const src = batchInput[i]
-        const trl = (parsed?.translations || [])[i] || {}
-        if (trl.attribute) {
-          cacheMap[src.attribute] = trl.attribute
-          cacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute', source_term: src.attribute, target_term: trl.attribute, confidence: 0.9, model: 'batch', use_count: 1 })
-        }
-        for (let j = 0; j < src.terms.length; j++) {
-          const translated = (trl.terms || [])[j]
-          if (translated) {
-            cacheMap[src.terms[j]] = translated
-            cacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute_term', source_term: src.terms[j], target_term: translated, confidence: 0.9, model: 'batch', use_count: 1 })
-          }
-        }
-      }
-      if (supabase && cacheInserts.length) {
-        supabase.from('ai_taxonomy_cache').upsert(cacheInserts, { onConflict: 'user_id,source_locale,target_locale,field_type,source_term' }).catch(() => {})
-      }
-    } catch {} // If AI fails, fall through using source names
-  }
-
-  // ── Create attributes + terms on target (parallel term writes) ────────────
-  await Promise.all(toTranslate.map(async (attr) => {
-    const translatedName = cacheMap[attr.name] || attr.name
-    try {
-      const created = await wooFetch(targetShop, 'products/attributes', 'POST', {
-        name: translatedName, slug: attr.slug, type: 'select', order_by: 'menu_order', has_archives: false,
-      })
-      if (created?.id) {
-        attrIdMap[attr.name] = created.id
-        await Promise.all((attr.options || []).map(term =>
-          wooFetch(targetShop, `products/attributes/${created.id}/terms`, 'POST', { name: cacheMap[term] || term }).catch(() => {})
-        ))
-      }
-    } catch {}
+  // ── 5. Build AI prompt ─────────────────────────────────────────────────────
+  const sourceAttrsSummary = (sourceProd.attributes || []).map(a => ({
+    name: a.name,
+    values: a.options || [],
   }))
 
-  return attrIdMap
+  const targetAttrsSummary = targetAttrsWithTerms.map(a => ({
+    id: a.id,
+    name: a.name,
+    existing_values: a.terms.map(t => ({ id: t.id, name: t.name })),
+  }))
+
+  const systemPrompt = `You are an expert WooCommerce product catalog manager specializing in cross-language product attribute mapping.
+You match source product attributes to the correct existing attributes on a target shop, reuse existing values where possible, and only create new ones when truly needed.
+You also assign the product to the most appropriate categories on the target shop.
+Be precise and conservative: prefer reusing existing attributes/values over creating new ones.
+Return ONLY valid JSON, no markdown, no explanation.`
+
+  const userPrompt = `Source product: "${sourceProd.name}" (${sourceLocale} → ${targetLocale}, translate to ${targetLanguage})
+Source categories: ${(sourceProd.categories || []).map(c => c.name).join(', ') || 'none'}
+
+SOURCE ATTRIBUTES (need to be mapped to target):
+${JSON.stringify(sourceAttrsSummary)}
+
+TARGET SHOP EXISTING ATTRIBUTES (with their current values):
+${JSON.stringify(targetAttrsSummary)}
+
+TARGET SHOP CATEGORIES:
+${JSON.stringify(targetCats.map(c => ({ id: c.id, name: c.name })))}
+
+SIMILAR PRODUCTS ON TARGET SHOP (for attribute value reference):
+${JSON.stringify(similarProducts)}
+
+TASK:
+1. For each source attribute, decide:
+   a) Match to existing target attribute (by semantic meaning, even if different language/name)
+   b) OR create a new attribute if no match exists
+2. For each attribute's values:
+   a) Reuse existing term IDs where the meaning matches
+   b) Create new terms only for values that don't exist yet (translate to ${targetLanguage})
+3. Assign this product to the most appropriate target categories (1-3 categories)
+
+Return this exact JSON:
+{
+  "attributes": [
+    {
+      "source_name": "original source attribute name",
+      "target_id": 123,
+      "target_name": "matched/translated target attribute name",
+      "target_slug": "slug",
+      "is_new_attribute": false,
+      "values": [
+        { "term_id": 456, "name": "existing value name", "is_new": false },
+        { "term_id": null, "name": "new value to create in ${targetLanguage}", "is_new": true }
+      ]
+    }
+  ],
+  "category_ids": [1, 2],
+  "reasoning": "brief explanation of key decisions"
+}`
+
+  let aiResult = null
+  try {
+    const raw = await callAI(settings, systemPrompt, userPrompt, 20000)
+    aiResult = safeJSON(raw)
+    if (aiResult?.reasoning) {
+      await log(supabase, 'info', `Smart mapping reasoning: ${aiResult.reasoning}`, { user_id: userId, product: sourceProd.name })
+    }
+  } catch (aiErr) {
+    await log(supabase, 'warn', `Smart mapping AI failed for ${sourceProd.name}: ${aiErr.message}`, { user_id: userId })
+  }
+
+  // ── 6. Execute the mapping ──────────────────────────────────────────────────
+  // Build lookup maps
+  const attrById = {}
+  for (const a of targetAttrsWithTerms) attrById[a.id] = a
+
+  const attrResults = []
+  const cacheInserts = []
+  const categoryIds = Array.isArray(aiResult?.category_ids) ? aiResult.category_ids.filter(id => targetCats.some(c => c.id === id)) : []
+
+  for (const mapping of (aiResult?.attributes || [])) {
+    let targetAttrId = mapping.is_new_attribute ? null : (mapping.target_id || null)
+    const targetAttrName = mapping.target_name || mapping.source_name
+
+    // Create attribute if new
+    if (!targetAttrId) {
+      try {
+        const slug = (mapping.target_slug || targetAttrName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        const created = await wooFetch(targetShop, 'products/attributes', 'POST', {
+          name: targetAttrName, slug, type: 'select', order_by: 'menu_order', has_archives: false,
+        })
+        if (created?.id) {
+          targetAttrId = created.id
+          // Add to our local index so term creation works
+          attrById[created.id] = { id: created.id, name: targetAttrName, slug, terms: [] }
+        }
+      } catch {}
+    }
+
+    if (!targetAttrId) continue
+
+    // Process values: create missing terms, collect all term IDs
+    const finalOptions = []
+    for (const v of (mapping.values || [])) {
+      if (!v.name) continue
+      if (!v.is_new && v.term_id) {
+        // Existing term — just use the name we already know
+        finalOptions.push(v.name)
+      } else {
+        // New term — create it
+        try {
+          const created = await wooFetch(targetShop, `products/attributes/${targetAttrId}/terms`, 'POST', { name: v.name })
+          if (created?.id) finalOptions.push(v.name)
+        } catch {
+          finalOptions.push(v.name) // Push anyway, WC may accept it
+        }
+        // Cache the translation
+        const srcAttr = (sourceProd.attributes || []).find(a => a.name === mapping.source_name)
+        if (srcAttr && mapping.source_name !== v.name) {
+          cacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute_term', source_term: mapping.source_name, target_term: v.name, confidence: 0.85, model: 'smart_mapping', use_count: 1 })
+        }
+      }
+    }
+
+    // Cache attribute name mapping
+    if (mapping.source_name && targetAttrName && mapping.source_name !== targetAttrName) {
+      cacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute', source_term: mapping.source_name, target_term: targetAttrName, confidence: 0.9, model: 'smart_mapping', use_count: 1 })
+    }
+
+    attrResults.push({
+      source_name: mapping.source_name,
+      target_id: targetAttrId,
+      target_name: targetAttrName,
+      options: finalOptions,
+    })
+  }
+
+  // Fallback: any source attributes not covered by AI mapping
+  const mappedSourceNames = new Set(attrResults.map(r => r.source_name))
+  for (const attr of (sourceProd.attributes || [])) {
+    if (mappedSourceNames.has(attr.name)) continue
+    // Try slug match as fallback
+    const slug = attr.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const existingBySlug = targetAttrsWithTerms.find(a => a.slug === slug)
+    attrResults.push({
+      source_name: attr.name,
+      target_id: existingBySlug?.id || null,
+      target_name: cacheMap[attr.name] || attr.name,
+      options: (attr.options || []).map(v => cacheMap[v] || v),
+    })
+  }
+
+  // Write cache in background
+  if (supabase && cacheInserts.length) {
+    supabase.from('ai_taxonomy_cache').upsert(cacheInserts, { onConflict: 'user_id,source_locale,target_locale,field_type,source_term' }).catch(() => {})
+  }
+
+  return { attrResults, categoryIds }
 }
 
 // ── SKU generation ────────────────────────────────────────────────────────────
@@ -254,22 +379,9 @@ async function generateSku(mode, product, langCode, supabase, targetShopId) {
 // ── Image processing: download, generate SEO metadata, upload to target ─────
 // mode: 'ai_vision' — Gemini scans image → SEO filename + alt + title in target language
 // mode: 'translate' — uses translated product name, no vision call needed
-// ── Image processing ─────────────────────────────────────────────────────────
-// Pass source URLs for WooCommerce to sideload (instant — no download/upload in critical path).
-// SEO rename + alt text runs AFTER product creation as a background task.
-function buildImagePayload(sourceImages, productName) {
+async function processImages(sourceImages, targetShop, productName, language, imageMode, geminiKey, geminiModel) {
   if (!Array.isArray(sourceImages) || sourceImages.length === 0) return []
-  return sourceImages.map((img, i) => ({
-    src: img.src,
-    alt: img.alt || productName,
-    name: i === 0 ? productName : `${productName} ${i + 1}`,
-  }))
-}
 
-// Async post-create: rename images in WP media library + set SEO alt/title
-// Runs as fire-and-forget after product is created. Won't block creation.
-async function updateImageSeo(createdProduct, targetShop, productName, language, imageMode, geminiKey, geminiModel) {
-  if (!createdProduct?.images?.length) return
   const base = targetShop.site_url.replace(/\/$/, '')
   const wpAuth = `Basic ${Buffer.from(`${targetShop.consumer_key}:${targetShop.consumer_secret}`).toString('base64')}`
 
@@ -278,20 +390,25 @@ async function updateImageSeo(createdProduct, targetShop, productName, language,
     .replace(/[öòóô]/g, 'o').replace(/[üùúû]/g, 'u').replace(/ß/g, 'ss')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
 
-  for (let i = 0; i < createdProduct.images.length; i++) {
-    const img = createdProduct.images[i]
-    if (!img?.id) continue
+  const results = []
 
-    let altText = i === 0 ? productName : `${productName} ${i + 1}`
-    let titleText = productName
-    let seoFilename = i === 0 ? nameSlug : `${nameSlug}-${i + 1}`
+  for (let i = 0; i < sourceImages.length; i++) {
+    const img = sourceImages[i]
+    if (!img?.src) continue
+    try {
+      // 1. Download source image
+      const fetchRes = await fetch(img.src, { signal: AbortSignal.timeout(10000) })
+      if (!fetchRes.ok) throw new Error(`Fetch failed: ${fetchRes.status}`)
+      const contentType = fetchRes.headers.get('content-type') || 'image/jpeg'
+      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+      const imageBuffer = await fetchRes.arrayBuffer()
 
-    if (imageMode === 'ai_vision' && geminiKey && img.src) {
-      try {
-        const imgRes = await fetch(img.src, { signal: AbortSignal.timeout(8000) })
-        if (imgRes.ok) {
-          const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
-          const b64 = Buffer.from(await imgRes.arrayBuffer()).toString('base64')
+      let seoFilename, altText, titleText
+
+      // 2a. AI Vision mode: Gemini scans image → SEO metadata in target language
+      if (imageMode === 'ai_vision' && geminiKey) {
+        try {
+          const b64 = Buffer.from(imageBuffer).toString('base64')
           const vRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel || 'gemini-2.5-flash'}:generateContent?key=${geminiKey}`,
             {
@@ -299,7 +416,8 @@ async function updateImageSeo(createdProduct, targetShop, productName, language,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 contents: [{ parts: [
-                  { text: `SEO expert for a plant nursery. Analyze image. Return ONLY valid JSON in ${language}:\n{"filename":"slug-max-50-chars","alt":"max 12 word alt text","title":"max 8 word title"}` },
+                  { text: `SEO expert for a plant nursery webshop. Analyze this product image. Return ONLY valid JSON in ${language}:
+{"filename":"seo-slug-max-60-chars-lowercase-hyphens-describe-species-pot-size-height","alt":"max 12 word descriptive alt text","title":"max 8 word image title"}` },
                   { inline_data: { mime_type: contentType, data: b64 } }
                 ]}],
                 generationConfig: { temperature: 0.2 }
@@ -307,22 +425,54 @@ async function updateImageSeo(createdProduct, targetShop, productName, language,
             }
           )
           if (vRes.ok) {
-            const parsed = JSON.parse(((await vRes.json()).candidates?.[0]?.content?.parts?.[0]?.text || '{}').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim())
-            if (parsed.alt)      altText     = parsed.alt
-            if (parsed.title)    titleText   = parsed.title
-            if (parsed.filename) seoFilename = parsed.filename.replace(/[^a-z0-9-]/g, '-').replace(/^-|-$/g, '').slice(0, 50)
+            const vData = await vRes.json()
+            const raw = vData.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+            const parsed = JSON.parse(raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim())
+            if (parsed.filename) seoFilename = parsed.filename.replace(/[^a-z0-9-]/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+            if (parsed.alt)   altText   = parsed.alt
+            if (parsed.title) titleText = parsed.title
           }
-        }
-      } catch {} // Non-critical
-    }
+        } catch {} // Fall through to translate mode
+      }
 
-    // Update WP media item with SEO alt + title + slug
-    await fetch(`${base}/wp-json/wp/v2/media/${img.id}`, {
-      method: 'POST', signal: AbortSignal.timeout(8000),
-      headers: { 'Authorization': wpAuth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alt_text: altText, title: titleText, slug: seoFilename }),
-    }).catch(() => {})
+      // 2b. Translate mode (or fallback)
+      if (!seoFilename) {
+        seoFilename = i === 0 ? nameSlug : `${nameSlug}-${i + 1}`
+        altText     = altText || (i === 0 ? productName : `${productName} ${i + 1}`)
+        titleText   = titleText || productName
+      }
+
+      const uid = Math.random().toString(36).slice(2, 6)
+      const filename = `${seoFilename}-${uid}.${ext}`
+
+      // 3. Upload to WordPress media library
+      const uploadRes = await fetch(`${base}/wp-json/wp/v2/media`, {
+        method: 'POST',
+        headers: {
+          'Authorization': wpAuth,
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Type': contentType,
+        },
+        body: imageBuffer,
+      })
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`)
+      const media = await uploadRes.json()
+
+      // 4. Set alt text + title on the media item
+      fetch(`${base}/wp-json/wp/v2/media/${media.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': wpAuth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alt_text: altText, title: titleText, caption: '' }),
+      }).catch(() => {})
+
+      results.push({ id: media.id, src: media.source_url, alt: altText, name: titleText })
+    } catch (imgErr) {
+      // Fallback: pass src URL for WC to sideload (no SEO metadata)
+      results.push({ src: img.src, alt: img.alt || productName, name: productName, fallback: true })
+    }
   }
+
+  return results
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
@@ -382,40 +532,28 @@ export default async (req) => {
 
     const results = { created: [], failed: [], skipped: [] }
 
-    // ── Collect all unique attributes for preflight ───────────────────────────
-    const allSourceAttrs = []
-    const seenAttrNames = new Set()
-    for (const p of sourceProducts) {
-      for (const attr of (p.attributes || [])) {
-        if (!seenAttrNames.has(attr.name)) {
-          seenAttrNames.add(attr.name)
-          allSourceAttrs.push(attr)
-        }
-      }
-    }
-
-    // Run attribute preflight once for all products
-    const attrIdMap = await attributePreflight(allSourceAttrs, targetShop, platformSettings, language, tone, supabase, user.id, sourceShop.locale, targetShop.locale)
+    // Smart mapping runs per-product (needs product context for category + similar product matching)
+    // Cached translations prevent redundant AI calls for repeated attribute names
 
     // ── Process each product ─────────────────────────────────────────────────
     // Frontend sends one product at a time to avoid 26s timeout.
     // Function handles 1-N but is optimised for 1.
     async function processOne(sourceProd) {
       try {
-        // ── 1. AI translate (keep prompt small: name + short desc only, max 400 chars description)
-        // SEO meta is generated in a separate lightweight call after product creation.
+        // ── 0. Smart attribute + category mapping (per-product AI reasoning) ───────
+        const { attrResults, categoryIds } = await smartMapping(
+          sourceProd, targetShop, platformSettings, language, tone,
+          supabase, user.id, sourceShop.locale, targetShop.locale
+        )
+
+        // ── 1. AI translate (name + descriptions only — attrs handled by smartMapping) ──
         const fieldsToTranslate = {}
         if (translate_fields.includes('name')) fieldsToTranslate.name = sourceProd.name
         if (translate_fields.includes('description') && sourceProd.description)
           fieldsToTranslate.description = sourceProd.description.replace(/<[^>]+>/g, '').slice(0, 400)
         if (translate_fields.includes('short_description') && sourceProd.short_description)
           fieldsToTranslate.short_description = sourceProd.short_description.replace(/<[^>]+>/g, '').slice(0, 200)
-        if (translate_fields.includes('attributes')) {
-          fieldsToTranslate.attribute_values = {}
-          for (const attr of (sourceProd.attributes || [])) {
-            fieldsToTranslate.attribute_values[attr.name] = attr.options || []
-          }
-        }
+        // Note: attribute translation is handled by smartMapping above
 
         const systemPrompt = `Translate WooCommerce product content to ${language}. Tone: ${tone}. Return ONLY valid JSON, no markdown, no explanation.`
         const userPrompt = `Translate: ${JSON.stringify(fieldsToTranslate)}
@@ -430,28 +568,33 @@ Return JSON with same keys and translated values. For description/short_descript
           translated = { name: sourceProd.name }
         }
 
-        // ── 2. Image payload: pass source URLs for WooCommerce sideloading ────────
-        // WC downloads images itself — no blocking download/upload in critical path.
-        // SEO alt/title/filename updated async after product creation.
+        // ── 2. Image processing: download + SEO metadata + upload to target ───────
         const translatedProductName = translated.name || sourceProd.name
-        const processedImages = buildImagePayload(sourceProd.images || [], translatedProductName)
+        const processedImages = await processImages(
+          sourceProd.images || [],
+          targetShop,
+          translatedProductName,
+          language,
+          image_mode,
+          geminiKey,
+          geminiModel
+        )
 
         // ── 3. SKU generation ───────────────────────────────────────────────
         const newSku = await generateSku(sku_mode, sourceProd, lang_code, supabase, target_shop_id)
 
-        // ── 4. Build attributes for target ──────────────────────────────────
+        // ── 4. Build attributes for target (from smartMapping results) ─────────
         const targetAttributes = []
-        for (const attr of (sourceProd.attributes || [])) {
-          const targetAttrId = attrIdMap[attr.name]
-          const translatedValues = translated.attribute_values?.[attr.name] || attr.options || []
-
+        for (const result of attrResults) {
+          if (!result.options.length && !result.target_id) continue
+          const srcAttr = (sourceProd.attributes || []).find(a => a.name === result.source_name) || {}
           const attrPayload = {
-            name: attr.name,
-            visible: attr.visible !== false,
-            variation: attr.variation || false,
-            options: translatedValues,
+            name: result.target_name,
+            visible: srcAttr.visible !== false,
+            variation: srcAttr.variation || false,
+            options: result.options,
           }
-          if (targetAttrId) attrPayload.id = targetAttrId
+          if (result.target_id) attrPayload.id = result.target_id
           targetAttributes.push(attrPayload)
         }
 
@@ -483,8 +626,10 @@ Return JSON with same keys and translated values. For description/short_descript
           if (wqmMeta) meta_data.push({ key: wqmKey, value: wqmMeta.value })
         }
 
-        // Translate categories (use source slugs, WooCommerce will create if needed)
-        const categories = (sourceProd.categories || []).map(c => ({ id: c.id, name: c.name, slug: c.slug }))
+        // Categories: use AI-determined target category IDs, fallback to source slugs
+        const categories = categoryIds.length > 0
+          ? categoryIds.map(id => ({ id }))
+          : (sourceProd.categories || []).map(c => ({ slug: c.slug }))
 
         const productPayload = {
           name: translate_fields.includes('name') ? (translated.name || sourceProd.name) : sourceProd.name,
@@ -516,14 +661,16 @@ Return JSON with same keys and translated values. For description/short_descript
           return
         }
 
-        // ── 7. Post-create async tasks (fire-and-forget) ───────────────────────
-        ;(async () => {
-          try {
-            // 7a. SEO meta title + description
-            if (translate_meta && rewrite_seo) {
+        // ── 7. SEO meta (fire-and-forget — doesn't block product creation) ──────
+        if (translate_meta && rewrite_seo) {
+          ;(async () => {
+            try {
               const seoRaw = await callAI(platformSettings,
                 `Generate SEO meta for a WooCommerce product. Return ONLY valid JSON.`,
-                `Name: "${translated.name || sourceProd.name}"\nDesc: "${(translated.short_description || sourceProd.short_description || '').slice(0, 120)}"\nLang: ${language}. Tone: ${tone}.\nReturn: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
+                `Product name: "${translated.name || sourceProd.name}"
+Short description: "${(translated.short_description || sourceProd.short_description || '').slice(0, 120)}"
+Language: ${language}. Tone: ${tone}.
+Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
                 10000
               )
               const seoData = safeJSON(seoRaw)
@@ -532,20 +679,18 @@ Return JSON with same keys and translated values. For description/short_descript
                   { key: '_wss_meta_title', value: seoData.meta_title },
                   { key: '_wss_meta_description', value: seoData.meta_description || '' },
                 ]
-                if (seoPlugin === 'rankmath') { seoMeta.push({ key: 'rank_math_title', value: seoData.meta_title }); seoMeta.push({ key: 'rank_math_description', value: seoData.meta_description || '' }) }
-                else if (seoPlugin === 'yoast') { seoMeta.push({ key: '_yoast_wpseo_title', value: seoData.meta_title }); seoMeta.push({ key: '_yoast_wpseo_metadesc', value: seoData.meta_description || '' }) }
+                if (seoPlugin === 'rankmath') {
+                  seoMeta.push({ key: 'rank_math_title', value: seoData.meta_title })
+                  seoMeta.push({ key: 'rank_math_description', value: seoData.meta_description || '' })
+                } else if (seoPlugin === 'yoast') {
+                  seoMeta.push({ key: '_yoast_wpseo_title', value: seoData.meta_title })
+                  seoMeta.push({ key: '_yoast_wpseo_metadesc', value: seoData.meta_description || '' })
+                }
                 await wooFetch(targetShop, `products/${created.id}`, 'PUT', { meta_data: seoMeta })
               }
-            }
-            // 7b. Image SEO: rename + alt text on WP media items (after WC sideloaded them)
-            // Wait 5s for WC to finish sideloading before we update media items
-            const createdFull = await wooFetch(targetShop, `products/${created.id}?_fields=id,images`)
-            if (createdFull?.images?.length) {
-              await new Promise(r => setTimeout(r, 5000))
-              await updateImageSeo(createdFull, targetShop, translatedProductName, language, image_mode, geminiKey, geminiModel)
-            }
-          } catch {} // Non-critical
-        })()
+            } catch {} // Non-critical — product already created
+          })()
+        }
 
         // ── 8. EAN assignment ───────────────────────────────────────────────
         let assignedEan = null
