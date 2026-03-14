@@ -299,18 +299,57 @@ Return this exact JSON:
   }
 
   // Fallback: any source attributes not covered by AI mapping
+  // Translate names+values not in cache via a single batch AI call
   const mappedSourceNames = new Set(attrResults.map(r => r.source_name))
-  for (const attr of (sourceProd.attributes || [])) {
-    if (mappedSourceNames.has(attr.name)) continue
-    // Try slug match as fallback
-    const slug = attr.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    const existingBySlug = targetAttrsWithTerms.find(a => a.slug === slug)
-    attrResults.push({
-      source_name: attr.name,
-      target_id: existingBySlug?.id || null,
-      target_name: cacheMap[attr.name] || attr.name,
-      options: (attr.options || []).map(v => cacheMap[v] || v),
-    })
+  const uncoveredAttrs = (sourceProd.attributes || []).filter(a => !mappedSourceNames.has(a.name))
+
+  if (uncoveredAttrs.length > 0) {
+    // Collect what still needs translating (not in cache)
+    const needsTranslation = uncoveredAttrs
+      .filter(a => !cacheMap[a.name] || (a.options || []).some(v => !cacheMap[v]))
+      .map(a => ({ attribute: a.name, terms: (a.options || []).filter(v => !cacheMap[v]) }))
+
+    if (needsTranslation.length > 0) {
+      try {
+        const raw = await callAI(settings,
+          `Translate WooCommerce attribute names and values to ${targetLanguage}. Return ONLY valid JSON.`,
+          `Input: ${JSON.stringify(needsTranslation)}
+Return: {"translations":[{"attribute":"translated name","terms":["translated value"]}]}`,
+          12000
+        )
+        const parsed = safeJSON(raw)
+        const newCacheInserts = []
+        for (let i = 0; i < needsTranslation.length; i++) {
+          const src = needsTranslation[i]
+          const trl = (parsed?.translations || [])[i] || {}
+          if (trl.attribute && trl.attribute !== src.attribute) {
+            cacheMap[src.attribute] = trl.attribute
+            newCacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute', source_term: src.attribute, target_term: trl.attribute, confidence: 0.85, model: 'fallback_translate', use_count: 1 })
+          }
+          for (let j = 0; j < src.terms.length; j++) {
+            const t = (trl.terms || [])[j]
+            if (t) {
+              cacheMap[src.terms[j]] = t
+              newCacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute_term', source_term: src.terms[j], target_term: t, confidence: 0.85, model: 'fallback_translate', use_count: 1 })
+            }
+          }
+        }
+        if (supabase && newCacheInserts.length) {
+          supabase.from('ai_taxonomy_cache').upsert(newCacheInserts, { onConflict: 'user_id,source_locale,target_locale,field_type,source_term' }).catch(() => {})
+        }
+      } catch {} // If this fails, we still use source names as last resort
+    }
+
+    for (const attr of uncoveredAttrs) {
+      const slug = attr.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      const existingBySlug = targetAttrsWithTerms.find(a => a.slug === slug)
+      attrResults.push({
+        source_name: attr.name,
+        target_id: existingBySlug?.id || null,
+        target_name: cacheMap[attr.name] || attr.name, // now translated if AI ran
+        options: (attr.options || []).map(v => cacheMap[v] || v),
+      })
+    }
   }
 
   // Write cache in background
