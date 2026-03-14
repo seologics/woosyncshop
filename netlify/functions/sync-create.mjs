@@ -30,61 +30,54 @@ async function wooFetch(shop, endpoint, method = 'GET', body = null) {
 }
 
 // ── AI helper (Gemini + OpenAI support) ──────────────────────────────────────
-async function callAI(settings, systemPrompt, userPrompt) {
-  const provider = settings?.content_provider || 'claude'
-  
-  // Claude (Anthropic)
-  if (provider === 'claude') {
-    const apiKey = Netlify.env.get('ANTHROPIC_API_KEY')
-    if (!apiKey) throw new Error('No Anthropic API key configured')
-    const model = settings?.claude_model_content || 'claude-haiku-4-5-20251001'
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
-    if (!res.ok) { const e = await res.text(); throw new Error(`Claude error ${res.status}: ${e.slice(0, 200)}`) }
-    const data = await res.json()
-    return data.content?.[0]?.text || '{}'
-  }
+async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000) {
+  const controller = new AbortController()
+  const _timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const provider = settings?.content_provider || 'claude'
 
-  // OpenAI
-  if (provider === 'openai') {
-    const apiKey = settings?.openai_api_key || Netlify.env.get('OPENAI_API_KEY')
-    if (!apiKey) throw new Error('No OpenAI API key configured')
-    const model = settings?.openai_model_content || 'gpt-4o-mini'
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-        temperature: 0.4,
-        response_format: { type: 'json_object' },
-      }),
-    })
-    if (!res.ok) { const e = await res.text(); throw new Error(`OpenAI error ${res.status}: ${e.slice(0, 200)}`) }
-    const data = await res.json()
-    return data.choices[0].message.content
-  }
+    // Claude (Anthropic)
+    if (provider === 'claude') {
+      const apiKey = Netlify.env.get('ANTHROPIC_API_KEY')
+      if (!apiKey) throw new Error('No Anthropic API key configured')
+      const model = settings?.claude_model_content || 'claude-haiku-4-5-20251001'
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model, max_tokens: 2000, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
+      })
+      if (!res.ok) { const e = await res.text(); throw new Error(`Claude error ${res.status}: ${e.slice(0, 200)}`) }
+      return (await res.json()).content?.[0]?.text || '{}'
+    }
 
-  // Gemini
-  const geminiKey = settings?.gemini_api_key
-  if (!geminiKey) throw new Error('No Gemini API key configured')
-  const model = settings?.ai_model_translation || 'gemini-2.5-flash'
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }], generationConfig: { temperature: 0.4 } }),
-  })
-  if (!res.ok) { const e = await res.text(); throw new Error(`Gemini error ${res.status}: ${e.slice(0, 200)}`) }
-  const data = await res.json()
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    // OpenAI
+    if (provider === 'openai') {
+      const apiKey = settings?.openai_api_key || Netlify.env.get('OPENAI_API_KEY')
+      if (!apiKey) throw new Error('No OpenAI API key configured')
+      const model = settings?.openai_model_content || 'gpt-4o-mini'
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST', signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0.4, response_format: { type: 'json_object' } }),
+      })
+      if (!res.ok) { const e = await res.text(); throw new Error(`OpenAI error ${res.status}: ${e.slice(0, 200)}`) }
+      return (await res.json()).choices[0].message.content
+    }
+
+    // Gemini
+    const geminiKey = settings?.gemini_api_key
+    if (!geminiKey) throw new Error('No Gemini API key configured')
+    const model = settings?.ai_model_translation || 'gemini-2.5-flash'
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+      method: 'POST', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }], generationConfig: { temperature: 0.4 } }),
+    })
+    if (!res.ok) { const e = await res.text(); throw new Error(`Gemini error ${res.status}: ${e.slice(0, 200)}`) }
+    return (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+  } finally {
+    clearTimeout(_timer)
+  }
 }
 
 function safeJSON(text) {
@@ -289,8 +282,19 @@ export default async (req) => {
     // Run attribute preflight once for all products
     const attrIdMap = await attributePreflight(allSourceAttrs, targetShop, platformSettings, language, tone)
 
-    // ── Process each product ──────────────────────────────────────────────────
-    for (const sourceProd of sourceProducts) {
+    // ── Process each product (concurrency-limited to 3 parallel AI calls) ──────
+    // Cap at 200 products per call to prevent timeout; caller should batch if needed
+    const PRODUCT_CAP = 200
+    const toProcess = sourceProducts.slice(0, PRODUCT_CAP)
+    if (sourceProducts.length > PRODUCT_CAP) {
+      await log(supabase, 'warn', `sync-create: capped at ${PRODUCT_CAP} (received ${sourceProducts.length})`, { user_id: user.id })
+    }
+
+    // Process 3 products concurrently — each needs 1 AI call + 1 WC write
+    const CONCURRENCY = 3
+    const productQueue = [...toProcess]
+
+    async function processOne(sourceProd) {
       try {
         // ── 1. AI translate + rewrite ───────────────────────────────────────
         const translateFields = translate_fields.filter(f => sourceProd[f] != null || f === 'name')
@@ -480,6 +484,15 @@ Return JSON: {
         await log(supabase, 'error', `Sync create product failed: ${sourceProd.name} — ${productErr.message}`, { user_id: user.id })
       }
     }
+
+    // Drain the queue with limited concurrency
+    async function worker() {
+      while (productQueue.length > 0) {
+        const prod = productQueue.shift()
+        if (prod) await processOne(prod)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, toProcess.length) }, worker))
 
     await log(supabase, 'info', `Sync create complete: ${results.created.length} created, ${results.failed.length} failed`, {
       user_id: user.id, source_shop_id, target_shop_id,

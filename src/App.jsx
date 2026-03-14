@@ -6650,32 +6650,42 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   };
 
   // ── Step 4: Load source products ───────────────────────────────────────────
+  // Paginate all products from a shop via woo-proxy (100/page)
+  const fetchAllProducts = async (shopId, token) => {
+    const FIELD_LIST = "id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,categories,images,attributes,meta_data";
+    let page = 1, all = [];
+    while (true) {
+      const res = await fetch("/api/woo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ shop_id: shopId, endpoint: `products?per_page=100&page=${page}&orderby=title&order=asc&_fields=${FIELD_LIST}`, method: "GET" }),
+      });
+      const batch = await res.json();
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      all = all.concat(batch);
+      if (batch.length < 100) break; // last page
+      page++;
+      if (all.length >= 5000) break; // safety cap
+    }
+    return all;
+  };
+
   const loadSourceProducts = async () => {
     if (!sourceShopId) return;
     setLoadingProducts(true); setSourceProducts([]); setTargetProducts([]); setSyncResult(null);
     setAiMatchResult(null); setUserOverrides({}); setStoredMappings([]);
     try {
       const token = await getToken();
-      const FIELDS = "products?per_page=100&orderby=title&order=asc&_fields=id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,description,short_description,categories,images,attributes,meta_data";
-      const [srcRes, tgtRes] = await Promise.all([
-        fetch("/api/woo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ shop_id: sourceShopId, endpoint: FIELDS, method: "GET" }),
-        }),
-        targetShopId ? fetch("/api/woo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ shop_id: targetShopId, endpoint: FIELDS, method: "GET" }),
-        }) : Promise.resolve(null),
+      // Fetch both shops in parallel, fully paginated
+      const [srcData, tgtData] = await Promise.all([
+        fetchAllProducts(sourceShopId, token),
+        targetShopId ? fetchAllProducts(targetShopId, token) : Promise.resolve([]),
       ]);
-      const srcData = await srcRes.json();
-      const tgtData = tgtRes ? await tgtRes.json() : [];
-      if (Array.isArray(srcData)) {
+      if (srcData.length > 0) {
         setSourceProducts(srcData);
         setSelectedProducts(new Set(srcData.map(p => p.id)));
       }
-      if (Array.isArray(tgtData)) setTargetProducts(tgtData);
+      setTargetProducts(tgtData);
 
       // Preload stored mappings for "mapping" strategy
       if (matchStrategy === "mapping" && sourceShopId && targetShopId) {
@@ -6719,12 +6729,9 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
       const toSync = sourceProducts.filter(p => selectedProducts.has(p.id));
       const token = await getToken();
 
-      // For AI name strategy, build a confirmed mapping from aiMatchResult + userOverrides
-      // Shape: [{ source_id, target_id }] — stock-sync uses this as a pre-built lookup
+      // Build confirmed mappings for AI strategy
       let confirmedMappings = null;
       if (matchStrategy === "ai_name") {
-        const tgtIdMapLocal = {};
-        targetProducts.forEach(tp => { tgtIdMapLocal[tp.id] = tp; });
         confirmedMappings = toSync.map(src => {
           const override = userOverrides[src.id];
           if (override) return { source_id: src.id, target_id: override };
@@ -6734,23 +6741,49 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
         }).filter(Boolean);
       }
 
-      const res = await fetch("/api/stock-sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({
-          source_shop_id: sourceShopId,
-          target_shop_id: targetShopId,
-          products: toSync,
-          fields: selectedFields,
-          match_strategy: matchStrategy === "ai_name" ? "confirmed_mapping" : matchStrategy,
-          confirmed_mappings: confirmedMappings,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setSyncResult(data);
-      // Pre-select all unmatched for create step
-      setSelectedToCreate(new Set((data.unmatched || []).map(p => p.id)));
+      // Chunk large syncs: stock-sync handles matching server-side so we only need
+      // to send product IDs + selected fields per chunk, not full product data.
+      // For now send in one call — stock-sync fetches target products itself.
+      // Strip heavy fields (description, meta_data) from the request body to keep it lean.
+      const leanProducts = toSync.map(p => ({
+        id: p.id, name: p.name, sku: p.sku, type: p.type,
+        regular_price: p.regular_price, sale_price: p.sale_price,
+        stock_quantity: p.stock_quantity, manage_stock: p.manage_stock,
+        stock_status: p.stock_status, categories: p.categories,
+        images: p.images, attributes: p.attributes,
+        // Include meta_data only if WQM fields are selected
+        meta_data: selectedFields.some(f => f.startsWith("wqm")) ? p.meta_data : undefined,
+        description: selectedFields.includes("description") ? p.description : undefined,
+        short_description: selectedFields.includes("short_description") ? p.short_description : undefined,
+      }));
+
+      const CHUNK_SIZE = 200; // products per stock-sync call
+      const chunks = [];
+      for (let i = 0; i < leanProducts.length; i += CHUNK_SIZE) chunks.push(leanProducts.slice(i, i + CHUNK_SIZE));
+
+      let merged = { synced: [], failed: [], unmatched: [] };
+      for (const chunk of chunks) {
+        const res = await fetch("/api/stock-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({
+            source_shop_id: sourceShopId,
+            target_shop_id: targetShopId,
+            products: chunk,
+            fields: selectedFields,
+            match_strategy: matchStrategy === "ai_name" ? "confirmed_mapping" : matchStrategy,
+            confirmed_mappings: confirmedMappings,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        merged.synced.push(...(data.synced || []));
+        merged.failed.push(...(data.failed || []));
+        merged.unmatched.push(...(data.unmatched || []));
+      }
+
+      setSyncResult(merged);
+      setSelectedToCreate(new Set((merged.unmatched || []).map(p => p.id)));
       setStep(4);
     } catch (e) { alert("Sync mislukt: " + e.message); }
     finally { setSyncing(false); }

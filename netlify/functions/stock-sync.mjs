@@ -29,7 +29,7 @@ async function wooFetch(shop, endpoint, method = 'GET', body = null) {
   return res.json()
 }
 
-async function wooGetAll(shop, endpoint, perPage = 100, maxPages = 10) {
+async function wooGetAll(shop, endpoint, perPage = 100, maxPages = 50) {
   let page = 1, all = []
   while (page <= maxPages) {
     const sep = endpoint.includes('?') ? '&' : '?'

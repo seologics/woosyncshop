@@ -5,6 +5,32 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Heavy AI + sync functions need extended timeouts (Netlify Pro max = 26s, Enterprise = 26s)
+# Use background functions for truly long operations via the frontend polling pattern.
+[functions]
+  included_files = ["netlify/functions/**"]
+
+[[functions]]
+  path = "/api/ai-match-products"
+
+[functions."ai-match-products"]
+  timeout = 26
+
+[functions."stock-sync"]
+  timeout = 26
+
+[functions."sync-create"]
+  timeout = 26
+
+[functions."sync-scan"]
+  timeout = 26
+
+[functions."analytics-orders"]
+  timeout = 26
+
+[functions."analytics-insights"]
+  timeout = 26
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
