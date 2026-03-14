@@ -316,54 +316,32 @@ export default async (req) => {
     // Function handles 1-N but is optimised for 1.
     async function processOne(sourceProd) {
       try {
-        // ── 1. AI translate + rewrite ───────────────────────────────────────
-        const translateFields = translate_fields.filter(f => sourceProd[f] != null || f === 'name')
+        // ── 1. AI translate (keep prompt small: name + short desc only, max 400 chars description)
+        // SEO meta is generated in a separate lightweight call after product creation.
         const fieldsToTranslate = {}
-        for (const f of translateFields) {
-          if (f === 'name') fieldsToTranslate.name = sourceProd.name
-          if (f === 'description') fieldsToTranslate.description = sourceProd.description?.replace(/<[^>]+>/g, '').slice(0, 1000) || ''
-          if (f === 'short_description') fieldsToTranslate.short_description = sourceProd.short_description?.replace(/<[^>]+>/g, '').slice(0, 500) || ''
-          if (f === 'attributes') {
-            fieldsToTranslate.attribute_values = {}
-            for (const attr of (sourceProd.attributes || [])) {
-              fieldsToTranslate.attribute_values[attr.name] = attr.options || []
-            }
+        if (translate_fields.includes('name')) fieldsToTranslate.name = sourceProd.name
+        if (translate_fields.includes('description') && sourceProd.description)
+          fieldsToTranslate.description = sourceProd.description.replace(/<[^>]+>/g, '').slice(0, 400)
+        if (translate_fields.includes('short_description') && sourceProd.short_description)
+          fieldsToTranslate.short_description = sourceProd.short_description.replace(/<[^>]+>/g, '').slice(0, 200)
+        if (translate_fields.includes('attributes')) {
+          fieldsToTranslate.attribute_values = {}
+          for (const attr of (sourceProd.attributes || [])) {
+            fieldsToTranslate.attribute_values[attr.name] = attr.options || []
           }
         }
 
-        const systemPrompt = `You are an expert WooCommerce product content writer and translator.
-Translate and ${rewrite_seo ? 'rewrite for optimal SEO in' : 'localize to'} ${language}.
-Tone: ${tone}. Do NOT do a literal word-for-word translation — adapt naturally for the target market.
-Also generate an SEO-optimized meta_title (max 60 chars) and meta_description (max 160 chars) in ${language}.
-Return ONLY valid JSON, no markdown.`
-
-        const userPrompt = `Product to translate/rewrite:
-Name: ${sourceProd.name}
-${fieldsToTranslate.description ? `Description: ${fieldsToTranslate.description}` : ''}
-${fieldsToTranslate.short_description ? `Short description: ${fieldsToTranslate.short_description}` : ''}
-${fieldsToTranslate.attribute_values ? `Attribute values: ${JSON.stringify(fieldsToTranslate.attribute_values)}` : ''}
-
-Return JSON: {
-  "name": "translated name",
-  "description": "translated/rewritten description (can include simple HTML like <p>, <ul>, <li>)",
-  "short_description": "translated short description",
-  "meta_title": "SEO meta title max 60 chars",
-  "meta_description": "SEO meta description max 160 chars",
-  "attribute_values": { "attr_name": ["translated", "values"] }
-}`
+        const systemPrompt = `Translate WooCommerce product content to ${language}. Tone: ${tone}. Return ONLY valid JSON, no markdown, no explanation.`
+        const userPrompt = `Translate: ${JSON.stringify(fieldsToTranslate)}
+Return JSON with same keys and translated values. For description/short_description you may expand the translated text naturally.`
 
         let translated = {}
         try {
-          const raw = await callAI(platformSettings, systemPrompt, userPrompt)
+          const raw = await callAI(platformSettings, systemPrompt, userPrompt, 18000)
           translated = safeJSON(raw) || {}
         } catch (aiErr) {
           await log(supabase, 'warn', `AI translate failed for ${sourceProd.name}: ${aiErr.message}`, { user_id: user.id })
-          // Continue with original values if AI fails
-          translated = {
-            name: sourceProd.name,
-            description: sourceProd.description || '',
-            short_description: sourceProd.short_description || '',
-          }
+          translated = { name: sourceProd.name }
         }
 
         // ── 2. SKU generation ───────────────────────────────────────────────
@@ -399,19 +377,7 @@ Return JSON: {
         // ── 4. Build product payload ─────────────────────────────────────────
         const meta_data = []
 
-        // SEO meta fields
-        if (translate_meta && translated.meta_title) {
-          if (seoPlugin === 'rankmath') {
-            meta_data.push({ key: 'rank_math_title', value: translated.meta_title })
-            meta_data.push({ key: 'rank_math_description', value: translated.meta_description || '' })
-          } else if (seoPlugin === 'yoast') {
-            meta_data.push({ key: '_yoast_wpseo_title', value: translated.meta_title })
-            meta_data.push({ key: '_yoast_wpseo_metadesc', value: translated.meta_description || '' })
-          }
-          // Store regardless so it's available even without SEO plugin detection
-          meta_data.push({ key: '_wss_meta_title', value: translated.meta_title })
-          meta_data.push({ key: '_wss_meta_description', value: translated.meta_description || '' })
-        }
+        // SEO meta written async after product creation (see step 6 above)
 
         // Identifier meta field
         if (sku_mode === 'identifier') {
@@ -452,7 +418,38 @@ Return JSON: {
           return
         }
 
-        // ── 6. EAN assignment ───────────────────────────────────────────────
+        // ── 6. SEO meta (fire-and-forget — doesn't block product creation) ──────
+        if (translate_meta && rewrite_seo) {
+          ;(async () => {
+            try {
+              const seoRaw = await callAI(platformSettings,
+                `Generate SEO meta for a WooCommerce product. Return ONLY valid JSON.`,
+                `Product name: "${translated.name || sourceProd.name}"
+Short description: "${(translated.short_description || sourceProd.short_description || '').slice(0, 120)}"
+Language: ${language}. Tone: ${tone}.
+Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
+                10000
+              )
+              const seoData = safeJSON(seoRaw)
+              if (seoData?.meta_title) {
+                const seoMeta = [
+                  { key: '_wss_meta_title', value: seoData.meta_title },
+                  { key: '_wss_meta_description', value: seoData.meta_description || '' },
+                ]
+                if (seoPlugin === 'rankmath') {
+                  seoMeta.push({ key: 'rank_math_title', value: seoData.meta_title })
+                  seoMeta.push({ key: 'rank_math_description', value: seoData.meta_description || '' })
+                } else if (seoPlugin === 'yoast') {
+                  seoMeta.push({ key: '_yoast_wpseo_title', value: seoData.meta_title })
+                  seoMeta.push({ key: '_yoast_wpseo_metadesc', value: seoData.meta_description || '' })
+                }
+                await wooFetch(targetShop, `products/${created.id}`, 'PUT', { meta_data: seoMeta })
+              }
+            } catch {} // Non-critical — product already created
+          })()
+        }
+
+        // ── 7. EAN assignment ───────────────────────────────────────────────
         let assignedEan = null
         try {
           // Call ean-assign internal (reuse the RPC directly)
@@ -471,7 +468,7 @@ Return JSON: {
           await log(supabase, 'warn', `EAN assign failed for SKU ${newSku}: ${eanErr.message}`, { user_id: user.id })
         }
 
-        // ── 7. Store mapping in shop_product_mappings ───────────────────────
+        // ── 8. Store mapping in shop_product_mappings ───────────────────────
         try {
           await supabase.from('shop_product_mappings').insert({
             user_id: user.id,
