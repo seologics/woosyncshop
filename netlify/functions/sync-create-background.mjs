@@ -416,9 +416,74 @@ async function generateSku(mode, product, langCode, supabase, targetShopId) {
 }
 
 // ── Image processing: download, generate SEO metadata, upload to target ─────
+// ── Detect target shop featured image dimensions ──────────────────────────────
+async function detectTargetImageSize(targetShop) {
+  try {
+    const products = await wooFetch(targetShop, 'products?per_page=3&status=publish&_fields=id,images')
+    if (!Array.isArray(products)) return null
+    for (const p of products) {
+      const img = p.images?.[0]
+      if (!img?.src) continue
+      // WC returns width/height in the image object if media details are attached
+      if (img.width && img.height) return { width: img.width, height: img.height }
+      // Fallback: fetch the media item via WP API
+      try {
+        const base = targetShop.site_url.replace(/\/$/, '')
+        const wpAuth = `Basic ${Buffer.from(`${targetShop.consumer_key}:${targetShop.consumer_secret}`).toString('base64')}`
+        // Try to get image dimensions from a HEAD request + content-length, or fetch small portion
+        // Actually fetch the image and check natural dimensions via response headers
+        const res = await fetch(img.src, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
+        // Can't get dimensions from headers alone without image parsing
+        // Fall back to fetching the media endpoint if we have a media ID
+        if (img.id) {
+          const mediaRes = await fetch(`${base}/wp-json/wp/v2/media/${img.id}`, {
+            headers: { 'Authorization': wpAuth }, signal: AbortSignal.timeout(5000)
+          })
+          if (mediaRes.ok) {
+            const media = await mediaRes.json()
+            const w = media.media_details?.width
+            const h = media.media_details?.height
+            if (w && h) return { width: w, height: h }
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return null // Will fall back to WooSyncShop default
+}
+
+// ── Generate/crop image to target dimensions using Gemini ─────────────────────
+async function generateCroppedImage(imageBuffer, contentType, targetWidth, targetHeight, productName, geminiKey, geminiModel) {
+  const b64 = Buffer.from(imageBuffer).toString('base64')
+  const aspectRatio = `${targetWidth}:${targetHeight}`
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel || 'gemini-2.5-flash'}:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST', signal: AbortSignal.timeout(25000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { text: `You are an e-commerce product image editor. Reframe and crop this product image to exactly ${targetWidth}×${targetHeight} pixels (${aspectRatio} aspect ratio).
+Keep the main subject (plant/product) centered and well-composed. Fill empty space with a clean neutral background matching the existing background.
+Output a high-quality JPEG suitable for an e-commerce product listing.
+Product: "${productName}"` },
+          { inline_data: { mime_type: contentType, data: b64 } }
+        ]}],
+        generationConfig: { response_mime_type: 'image/jpeg' }
+      })
+    }
+  )
+  if (!res.ok) throw new Error(`Gemini generate: ${res.status}`)
+  const data = await res.json()
+  const imgPart = data.candidates?.[0]?.content?.parts?.find(p => p.inline_data?.data)
+  if (!imgPart?.inline_data?.data) throw new Error('Gemini returned no image')
+  return { buffer: Buffer.from(imgPart.inline_data.data, 'base64'), contentType: 'image/jpeg' }
+}
+
 // mode: 'ai_vision' — Gemini scans image → SEO filename + alt + title in target language
 // mode: 'translate' — uses translated product name, no vision call needed
-async function processImages(sourceImages, targetShop, productName, language, imageMode, geminiKey, geminiModel) {
+// mode: 'generate'  — Gemini generates/crops image to target shop dimensions
+async function processImages(sourceImages, targetShop, productName, language, imageMode, geminiKey, geminiModel, targetDimensions = null) {
   if (!Array.isArray(sourceImages) || sourceImages.length === 0) return []
 
   const base = targetShop.site_url.replace(/\/$/, '')
@@ -474,7 +539,20 @@ async function processImages(sourceImages, targetShop, productName, language, im
         } catch {} // Fall through to translate mode
       }
 
-      // 2b. Translate mode (or fallback)
+      // 2b. Generate mode: Gemini crops/generates image to target dimensions
+      let finalBuffer = imageBuffer
+      let finalContentType = contentType
+      let finalExt = ext
+      if (imageMode === 'generate' && geminiKey && targetDimensions?.width && targetDimensions?.height) {
+        try {
+          const generated = await generateCroppedImage(imageBuffer, contentType, targetDimensions.width, targetDimensions.height, productName, geminiKey, geminiModel)
+          finalBuffer   = generated.buffer
+          finalContentType = generated.contentType
+          finalExt      = 'jpg'
+        } catch {} // Fall through with original image if generation fails
+      }
+
+      // 2c. Translate mode (or fallback for filename/alt)
       if (!seoFilename) {
         seoFilename = i === 0 ? nameSlug : `${nameSlug}-${i + 1}`
         altText     = altText || (i === 0 ? productName : `${productName} ${i + 1}`)
@@ -482,7 +560,7 @@ async function processImages(sourceImages, targetShop, productName, language, im
       }
 
       const uid = Math.random().toString(36).slice(2, 6)
-      const filename = `${seoFilename}-${uid}.${ext}`
+      const filename = `${seoFilename}-${uid}.${finalExt}`
 
       // 3. Upload to WordPress media library
       const uploadRes = await fetch(`${base}/wp-json/wp/v2/media`, {
@@ -490,9 +568,9 @@ async function processImages(sourceImages, targetShop, productName, language, im
         headers: {
           'Authorization': wpAuth,
           'Content-Disposition': `attachment; filename="${filename}"`,
-          'Content-Type': contentType,
+          'Content-Type': finalContentType,
         },
-        body: imageBuffer,
+        body: finalBuffer,
       })
       if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`)
       const media = await uploadRes.json()
@@ -546,7 +624,8 @@ export default async (req) => {
     sku_mode = 'lang_prefix',
     lang_code = 'NL',
     translate_meta = true,
-    image_mode = 'translate', // 'translate' | 'ai_vision'
+    image_mode = 'translate', // 'translate' | 'ai_vision' | 'generate'
+    image_generate_size = 'woosyncshop', // 'woosyncshop' | 'target_shop'
   } = cfg || {}
 
   // ── Background function: runs to completion (up to 15 min), returns 202 ──
@@ -567,6 +646,18 @@ export default async (req) => {
     const seoPlugin = await detectSeoPlugin(targetShop)
     const geminiKey   = platformSettings?.gemini_api_key || null
     const geminiModel = platformSettings?.ai_model_image || 'gemini-2.5-flash'
+
+    // Detect target shop image dimensions once for all products (if generate mode)
+    let targetDimensions = null
+    if (image_mode === 'generate') {
+      if (image_generate_size === 'target_shop') {
+        targetDimensions = await detectTargetImageSize(targetShop)
+        await log(supabase, 'info', `Target image dimensions: ${targetDimensions ? `${targetDimensions.width}×${targetDimensions.height}` : 'not detected, using 800×800'}`, { user_id: user.id })
+      }
+      // WooSyncShop default or fallback when target detection fails
+      if (!targetDimensions) targetDimensions = { width: 800, height: 800 }
+    }
+
     await log(supabase, 'info', `Sync create started: ${sourceProducts.length} products → ${targetShop.name} (${language})`, { user_id: user.id, source_shop_id, target_shop_id })
 
     const results = { created: [], failed: [], skipped: [] }
@@ -607,17 +698,19 @@ Return JSON with same keys and translated values. For description/short_descript
           translated = { name: sourceProd.name }
         }
 
-        // ── 2. Image processing: download + SEO metadata + upload to target ───────
+        // ── 2. Image handling ─────────────────────────────────────────────────────
         const translatedProductName = translated.name || sourceProd.name
-        const processedImages = await processImages(
-          sourceProd.images || [],
-          targetShop,
-          translatedProductName,
-          language,
-          image_mode,
-          geminiKey,
-          geminiModel
-        )
+        let processedImages
+        if (image_mode === 'generate' && geminiKey && (sourceProd.images || []).length > 0) {
+          // Generate mode: download + Gemini crop to target dimensions + upload
+          processedImages = await processImages(
+            sourceProd.images || [], targetShop, translatedProductName,
+            language, image_mode, geminiKey, geminiModel, targetDimensions
+          )
+        } else {
+          // Translate / ai_vision: WC sideloads from source URL (no blocking upload)
+          processedImages = buildImagePayload(sourceProd.images || [], translatedProductName)
+        }
 
         // ── 3. SKU generation ───────────────────────────────────────────────
         const newSku = await generateSku(sku_mode, sourceProd, lang_code, supabase, target_shop_id)

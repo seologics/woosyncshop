@@ -6621,7 +6621,8 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     rewrite_seo: true,
     tone: "formal",
     sku_mode: "lang_prefix",
-    image_mode: "translate", // 'translate' | 'ai_vision'
+    image_mode: "translate", // 'translate' | 'ai_vision' | 'generate'
+    image_generate_size: "woosyncshop", // 'woosyncshop' | 'target_shop'
   });
   const [selectedToCreate, setSelectedToCreate] = useState(new Set());
   const [creating, setCreating] = useState(false);
@@ -7634,24 +7635,50 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                   {[
                     {
                       val: "translate",
-                      label: "Vertalen — bestandsnaam op basis van productnaam",
-                      desc: "Afbeeldingen worden gekopieerd met een SEO-bestandsnaam afgeleid van de vertaalde productnaam. Snel, geen AI nodig.",
+                      label: "Kopiëren — SEO-bestandsnaam op basis van productnaam",
+                      desc: "Afbeeldingen worden via WooCommerce sideloaded met een SEO-bestandsnaam. Snel, geen AI nodig.",
                       icon: "🔤",
                     },
                     {
                       val: "ai_vision",
                       label: "AI Vision — bestandsnaam + alt-tekst via beeldanalyse",
-                      desc: "Gemini scant elke afbeelding en genereert een beschrijvende SEO-bestandsnaam, alt-tekst en titel in de doeltaal. Langzamer maar optimaal voor SEO.",
+                      desc: "Gemini scant elke afbeelding en genereert een beschrijvende SEO-bestandsnaam, alt-tekst en titel in de doeltaal.",
                       icon: "👁️",
                     },
+                    {
+                      val: "generate",
+                      label: "AI Genereren — aanpassen aan afmetingen doelshop",
+                      desc: "Gemini hergenereerd de afbeelding in het exacte formaat en de afmetingen van de doelshop. Ideaal wanneer de shops verschillende beeldverhoudingen gebruiken.",
+                      icon: "✨",
+                    },
                   ].map(opt => (
-                    <label key={opt.val} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 14px", borderRadius: "var(--rd)", border: `1px solid ${createConfig.image_mode === opt.val ? "var(--pr)" : "var(--b1)"}`, background: createConfig.image_mode === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer" }}>
-                      <input type="radio" name="image_mode" value={opt.val} checked={createConfig.image_mode === opt.val} onChange={() => setCreateConfig(c => ({ ...c, image_mode: opt.val }))} style={{ marginTop: 3, accentColor: "var(--pr)", flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.icon} {opt.label}</div>
-                        <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 3 }}>{opt.desc}</div>
-                      </div>
-                    </label>
+                    <div key={opt.val}>
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 14px", borderRadius: createConfig.image_mode === opt.val && opt.val === "generate" ? "var(--rd) var(--rd) 0 0" : "var(--rd)", border: `1px solid ${createConfig.image_mode === opt.val ? "var(--pr)" : "var(--b1)"}`, background: createConfig.image_mode === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer", borderBottom: createConfig.image_mode === opt.val && opt.val === "generate" ? "none" : undefined }}>
+                        <input type="radio" name="image_mode" value={opt.val} checked={createConfig.image_mode === opt.val} onChange={() => setCreateConfig(c => ({ ...c, image_mode: opt.val }))} style={{ marginTop: 3, accentColor: "var(--pr)", flexShrink: 0 }} />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.icon} {opt.label}</div>
+                          <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 3 }}>{opt.desc}</div>
+                        </div>
+                      </label>
+                      {/* Sub-options for generate mode */}
+                      {opt.val === "generate" && createConfig.image_mode === "generate" && (
+                        <div style={{ padding: "10px 14px 12px", background: "rgba(99,102,241,0.04)", border: "1px solid var(--pr)", borderTop: "none", borderRadius: "0 0 var(--rd) var(--rd)", display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 4 }}>Welke afmetingen gebruiken?</div>
+                          {[
+                            { val: "woosyncshop", label: "WooSyncShop standaard", desc: "800×800px vierkant, ideaal voor de meeste shops." },
+                            { val: "target_shop", label: `Detecteer van ${targetShop?.name || "doelshop"}`, desc: "Haal de exacte afmetingen op van een bestaand product in de doelshop en gebruik die als doel." },
+                          ].map(sz => (
+                            <label key={sz.val} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "7px 10px", borderRadius: "var(--rd)", background: createConfig.image_generate_size === sz.val ? "rgba(99,102,241,0.1)" : "transparent", border: `1px solid ${createConfig.image_generate_size === sz.val ? "rgba(99,102,241,0.4)" : "var(--b1)"}` }}>
+                              <input type="radio" name="image_generate_size" value={sz.val} checked={createConfig.image_generate_size === sz.val} onChange={() => setCreateConfig(c => ({ ...c, image_generate_size: sz.val }))} style={{ marginTop: 2, accentColor: "var(--pr)", flexShrink: 0 }} />
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 600 }}>{sz.label}</div>
+                                <div style={{ fontSize: 11, color: "var(--mx)" }}>{sz.desc}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
