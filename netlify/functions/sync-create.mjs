@@ -1,6 +1,8 @@
-// netlify/functions/sync-create.mjs
-// POST { source_shop_id, target_shop_id, products: [...], config: { language, translate_fields, rewrite_seo, tone, sku_mode, lang_code } }
-// Creates products in target shop with AI translation, attribute preflight, EAN assignment, SKU generation
+// netlify/functions/sync-create-background.mjs
+// Background function — runs up to 15 min, no timeout.
+// POST { source_shop_id, target_shop_id, products, config, job_id }
+// Returns 202 immediately, does work async, writes progress to sync_jobs table.
+// Poll /api/sync-job-status?id=<job_id> for progress.
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -267,10 +269,11 @@ export default async (req) => {
   let body = {}
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON' }, 400) }
 
-  const { source_shop_id, target_shop_id, products: sourceProducts, config: cfg } = body
+  const { source_shop_id, target_shop_id, products: sourceProducts, config: cfg, job_id } = body
   if (!source_shop_id || !target_shop_id || !Array.isArray(sourceProducts) || sourceProducts.length === 0) {
     return json({ error: 'source_shop_id, target_shop_id, products[] required' }, 400)
   }
+  if (!job_id) return json({ error: 'job_id required' }, 400)
 
   const {
     language = 'Dutch',
@@ -282,12 +285,19 @@ export default async (req) => {
     translate_meta = true,
   } = cfg || {}
 
+  // ── Return 202 immediately, background work follows ──────────────────────
+  // Netlify background functions must return before doing async work.
+  // We kick off the work in a detached promise and return straight away.
+  const doWork = async () => {
   try {
     const [{ data: sourceShop }, { data: targetShop }] = await Promise.all([
       supabase.from('shops').select('*').eq('id', source_shop_id).eq('user_id', user.id).single(),
       supabase.from('shops').select('*').eq('id', target_shop_id).eq('user_id', user.id).single(),
     ])
-    if (!sourceShop || !targetShop) return json({ error: 'Shop not found' }, 404)
+    if (!sourceShop || !targetShop) {
+      await supabase.from('sync_jobs').update({ status: 'failed', error: 'Shop not found', updated_at: new Date().toISOString() }).eq('id', job_id)
+      return
+    }
 
     const { data: platformSettings } = await supabase.from('platform_settings').select('*').eq('id', 1).single()
 
@@ -502,7 +512,16 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
       }
     }
 
-    for (const prod of sourceProducts) {
+    for (let i = 0; i < sourceProducts.length; i++) {
+      const prod = sourceProducts[i]
+      // Update job progress before each product
+      await supabase.from('sync_jobs').update({
+        status: 'running',
+        done: i,
+        total: sourceProducts.length,
+        current_product: prod.name,
+        updated_at: new Date().toISOString(),
+      }).eq('id', job_id)
       await processOne(prod)
     }
 
@@ -510,18 +529,29 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
       user_id: user.id, source_shop_id, target_shop_id,
     })
 
-    return json({
-      ok: true,
-      created: results.created,
-      failed: results.failed,
-      skipped: results.skipped,
-      seo_plugin: seoPlugin,
-    })
+    // Write final result to sync_jobs
+    await supabase.from('sync_jobs').update({
+      status: 'done',
+      done: sourceProducts.length,
+      total: sourceProducts.length,
+      current_product: null,
+      result: { created: results.created, failed: results.failed, skipped: results.skipped, seo_plugin: seoPlugin },
+      updated_at: new Date().toISOString(),
+    }).eq('id', job_id)
 
   } catch (err) {
     await log(supabase, 'error', `Sync create fatal error: ${err.message}`, { user_id: user.id })
-    return json({ error: err.message }, 500)
+    try {
+      await supabase.from('sync_jobs').update({
+        status: 'failed', error: err.message, updated_at: new Date().toISOString()
+      }).eq('id', job_id)
+    } catch {}
   }
+  } // end doWork
+
+  // Fire work in background, return 202 immediately
+  doWork()
+  return new Response(JSON.stringify({ ok: true, job_id }), { status: 202, headers: CORS })
 }
 
-export const config = { path: '/api/sync-create', timeout: 26 }
+export const config = { path: '/api/sync-create' }

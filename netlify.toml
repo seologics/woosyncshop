@@ -14,9 +14,6 @@
 [functions."stock-sync"]
   timeout = 26
 
-[functions."sync-create"]
-  timeout = 26
-
 [functions."sync-scan"]
   timeout = 26
 

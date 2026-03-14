@@ -6790,7 +6790,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     finally { setSyncing(false); }
   };
 
-  // ── Step 5: Create unmatched — one product at a time to avoid 26s timeout ───
+  // ── Step 5: Create unmatched — background function + polling ────────────────
   const handleCreate = async () => {
     if (selectedToCreate.size === 0) return alert("Selecteer minimaal één product om aan te maken.");
     if (!targetShopId) return alert("Selecteer een doelshop.");
@@ -6801,44 +6801,67 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
       .filter(Boolean);
 
     if (toCreate.length === 0) return alert("Producten niet gevonden in brondata.");
-    if (!confirm(`${toCreate.length} product(en) aanmaken in ${targetShop?.name}?`)) return;
 
     setCreating(true);
     setCreateResult(null);
-    setCreateProgress({ done: 0, total: toCreate.length, current: "" });
-
-    const accumulated = { created: [], failed: [], skipped: [], seo_plugin: null };
+    setCreateProgress({ done: 0, total: toCreate.length, current: "Starten..." });
 
     try {
       const token = await getToken();
-      for (let i = 0; i < toCreate.length; i++) {
-        const product = toCreate[i];
-        setCreateProgress({ done: i, total: toCreate.length, current: product.name });
-        try {
-          const res = await fetch("/api/sync-create", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify({
-              source_shop_id: sourceShopId,
-              target_shop_id: targetShopId,
-              products: [product], // one at a time
-              config: createConfig,
-            }),
-          });
-          let data;
-          try { data = await res.json(); }
-          catch { throw new Error(`Server timeout of onverwachte fout (HTTP ${res.status})`); }
-          if (!res.ok || data.error) throw new Error(data?.error || `HTTP ${res.status}`);
-          if (data.created?.length)  accumulated.created.push(...data.created);
-          if (data.failed?.length)   accumulated.failed.push(...data.failed);
-          if (data.skipped?.length)  accumulated.skipped.push(...data.skipped);
-          if (data.seo_plugin)       accumulated.seo_plugin = data.seo_plugin;
-        } catch (productErr) {
-          accumulated.failed.push({ source_id: product.id, name: product.name, error: productErr.message });
-        }
-        setCreateProgress({ done: i + 1, total: toCreate.length, current: "" });
+
+      // Create a job row in Supabase first
+      const { data: jobRow, error: jobErr } = await supabase
+        .from("sync_jobs")
+        .insert({ user_id: user.id, status: "pending", total: toCreate.length, done: 0, current_product: null, result: null, error: null })
+        .select("id").single();
+      if (jobErr || !jobRow) throw new Error("Kon geen job aanmaken: " + (jobErr?.message || "unknown"));
+      const jobId = jobRow.id;
+
+      // Fire background function (returns 202 immediately)
+      const res = await fetch("/api/sync-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          source_shop_id: sourceShopId,
+          target_shop_id: targetShopId,
+          products: toCreate,
+          config: createConfig,
+          job_id: jobId,
+        }),
+      });
+      if (!res.ok && res.status !== 202) {
+        let err; try { err = (await res.json()).error; } catch { err = `HTTP ${res.status}`; }
+        throw new Error(err);
       }
-      setCreateResult(accumulated);
+
+      // Poll /api/sync-job-status every 2 seconds
+      const poll = async () => {
+        const statusRes = await fetch(`/api/sync-job-status?id=${jobId}`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        return statusRes.ok ? statusRes.json() : null;
+      };
+
+      await new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const job = await poll();
+            if (!job) return;
+            setCreateProgress({ done: job.done || 0, total: job.total || toCreate.length, current: job.current_product || "" });
+            if (job.status === "done") {
+              clearInterval(interval);
+              setCreateResult(job.result || { created: [], failed: [], skipped: [] });
+              resolve();
+            } else if (job.status === "failed") {
+              clearInterval(interval);
+              reject(new Error(job.error || "Aanmaken mislukt"));
+            }
+          } catch (pollErr) { /* keep polling on transient errors */ }
+        }, 2000);
+        // Safety timeout: stop polling after 12 min
+        setTimeout(() => { clearInterval(interval); reject(new Error("Timeout: job duurde te lang")); }, 720000);
+      });
+
     } catch (e) { alert("Aanmaken mislukt: " + e.message); }
     finally { setCreating(false); setCreateProgress({ done: 0, total: 0, current: "" }); }
   };
