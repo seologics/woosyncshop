@@ -100,67 +100,96 @@ async function detectSeoPlugin(shop) {
 }
 
 // ── Attribute preflight: detect/create/translate attributes on target ─────────
-async function attributePreflight(sourceAttrs, targetShop, settings, targetLanguage, tone) {
-  // Get existing attributes on target
+async function attributePreflight(sourceAttrs, targetShop, settings, targetLanguage, tone, supabase, userId, sourceLocale, targetLocale) {
   let targetAttrs = []
   try { targetAttrs = await wooFetch(targetShop, 'products/attributes?per_page=100') } catch {}
-  
-  const targetAttrMap = {} // slug → { id, name }
+
+  const targetAttrMap = {}
   for (const a of (Array.isArray(targetAttrs) ? targetAttrs : [])) {
     targetAttrMap[a.slug] = { id: a.id, name: a.name }
   }
 
-  const attrIdMap = {} // source attr name → target attr id
+  const attrIdMap = {}
+  const toTranslate = [] // attrs not already on target
 
   for (const attr of sourceAttrs) {
     const slug = attr.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-
     if (targetAttrMap[slug]) {
       attrIdMap[attr.name] = targetAttrMap[slug].id
-      continue
+    } else {
+      toTranslate.push({ ...attr, slug })
     }
+  }
 
-    // Translate attribute name
-    let translatedName = attr.name
+  if (toTranslate.length === 0) return attrIdMap
+
+  // ── Check translation cache ───────────────────────────────────────────────
+  const cacheMap = {} // source term → translated term
+  if (supabase && userId) {
+    try {
+      const allTerms = toTranslate.flatMap(a => [a.name, ...(a.options || [])])
+      const { data: cached } = await supabase
+        .from('ai_taxonomy_cache')
+        .select('source_term, target_term')
+        .eq('user_id', userId)
+        .eq('source_locale', sourceLocale || 'nl_NL')
+        .eq('target_locale', targetLocale || 'de_DE')
+        .in('source_term', allTerms)
+      for (const row of (cached || [])) cacheMap[row.source_term] = row.target_term
+    } catch {}
+  }
+
+  // ── ONE batch AI call for everything not in cache ─────────────────────────
+  const batchInput = toTranslate
+    .filter(a => !cacheMap[a.name] || (a.options || []).some(t => !cacheMap[t]))
+    .map(a => ({ attribute: a.name, terms: (a.options || []).filter(t => !cacheMap[t]) }))
+
+  if (batchInput.length > 0) {
     try {
       const raw = await callAI(settings,
-        `You are a WooCommerce product attribute translator. Return ONLY valid JSON, no markdown.`,
-        `Translate this WooCommerce attribute name to ${targetLanguage}. Tone: ${tone}.\nAttribute: "${attr.name}"\nReturn: {"translated": "..."}`
-      )
+        `You are a WooCommerce product taxonomy translator. Return ONLY valid JSON matching the exact structure.`,
+        `Translate each attribute name and its terms to ${targetLanguage} (tone: ${tone}).
+Input: ${JSON.stringify(batchInput)}
+Return this exact JSON structure:
+{"translations":[{"attribute":"translated name","terms":["translated term 1"]}]}`)
       const parsed = safeJSON(raw)
-      if (parsed?.translated) translatedName = parsed.translated
-    } catch {}
+      const cacheInserts = []
+      for (let i = 0; i < batchInput.length; i++) {
+        const src = batchInput[i]
+        const trl = (parsed?.translations || [])[i] || {}
+        if (trl.attribute) {
+          cacheMap[src.attribute] = trl.attribute
+          cacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute', source_term: src.attribute, target_term: trl.attribute, confidence: 0.9, model: 'batch', use_count: 1 })
+        }
+        for (let j = 0; j < src.terms.length; j++) {
+          const translated = (trl.terms || [])[j]
+          if (translated) {
+            cacheMap[src.terms[j]] = translated
+            cacheInserts.push({ user_id: userId, source_locale: sourceLocale || 'nl_NL', target_locale: targetLocale || 'de_DE', field_type: 'attribute_term', source_term: src.terms[j], target_term: translated, confidence: 0.9, model: 'batch', use_count: 1 })
+          }
+        }
+      }
+      if (supabase && cacheInserts.length) {
+        supabase.from('ai_taxonomy_cache').upsert(cacheInserts, { onConflict: 'user_id,source_locale,target_locale,field_type,source_term' }).catch(() => {})
+      }
+    } catch {} // If AI fails, fall through using source names
+  }
 
-    // Create attribute on target
+  // ── Create attributes + terms on target (parallel term writes) ────────────
+  await Promise.all(toTranslate.map(async (attr) => {
+    const translatedName = cacheMap[attr.name] || attr.name
     try {
       const created = await wooFetch(targetShop, 'products/attributes', 'POST', {
-        name: translatedName,
-        slug,
-        type: 'select',
-        order_by: 'menu_order',
-        has_archives: false,
+        name: translatedName, slug: attr.slug, type: 'select', order_by: 'menu_order', has_archives: false,
       })
       if (created?.id) {
         attrIdMap[attr.name] = created.id
-        // Create attribute terms
-        const terms = attr.options || []
-        for (const term of terms) {
-          let translatedTerm = term
-          try {
-            const raw = await callAI(settings,
-              `Translate product attribute values to ${targetLanguage}. Return ONLY valid JSON.`,
-              `Attribute: "${translatedName}". Translate value: "${term}"\nReturn: {"translated": "..."}`
-            )
-            const parsed = safeJSON(raw)
-            if (parsed?.translated) translatedTerm = parsed.translated
-          } catch {}
-          try {
-            await wooFetch(targetShop, `products/attributes/${created.id}/terms`, 'POST', { name: translatedTerm })
-          } catch {}
-        }
+        await Promise.all((attr.options || []).map(term =>
+          wooFetch(targetShop, `products/attributes/${created.id}/terms`, 'POST', { name: cacheMap[term] || term }).catch(() => {})
+        ))
       }
     } catch {}
-  }
+  }))
 
   return attrIdMap
 }
@@ -280,7 +309,7 @@ export default async (req) => {
     }
 
     // Run attribute preflight once for all products
-    const attrIdMap = await attributePreflight(allSourceAttrs, targetShop, platformSettings, language, tone)
+    const attrIdMap = await attributePreflight(allSourceAttrs, targetShop, platformSettings, language, tone, supabase, user.id, sourceShop.locale, targetShop.locale)
 
     // ── Process each product ─────────────────────────────────────────────────
     // Frontend sends one product at a time to avoid 26s timeout.
