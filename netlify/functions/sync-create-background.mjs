@@ -351,7 +351,7 @@ async function processImages(sourceImages, targetShop, productName, language, im
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
-export default async (req) => {
+export default async (req, context) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
@@ -382,12 +382,13 @@ export default async (req) => {
     sku_mode = 'lang_prefix',
     lang_code = 'NL',
     translate_meta = true,
-    image_mode = 'translate', // 'translate' | 'ai_vision'
+    image_mode = 'translate',
   } = cfg || {}
 
-  // ── Background function: runs to completion (up to 15 min), returns 202 ──
-  // Netlify background functions execute the full async body synchronously.
-  // No fire-and-forget needed — just write progress to sync_jobs as we go.
+  // ── RETURN 202 IMMEDIATELY, schedule work via context.waitUntil ────────────
+  // Netlify background functions: return the response first, then work runs
+  // in the background. context.waitUntil() keeps the process alive up to 15 min.
+  const doWork = async () => {
   try {
     const [{ data: sourceShop }, { data: targetShop }] = await Promise.all([
       supabase.from('shops').select('*').eq('id', source_shop_id).eq('user_id', user.id).single(),
@@ -672,9 +673,16 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
       }).eq('id', job_id)
     } catch {}
   }
-  // Background function returns 202 after all work is done
+  } // end doWork
+
+  // Mark job as accepted and return 202 IMMEDIATELY
+  // context.waitUntil keeps the process alive while doWork() runs in background
+  await supabase.from('sync_jobs').update({
+    status: 'running', updated_at: new Date().toISOString()
+  }).eq('id', job_id)
+
+  context.waitUntil(doWork())
   return new Response(JSON.stringify({ ok: true, job_id }), { status: 202, headers: CORS })
 }
 
 export const config = { path: '/api/sync-create' }
-// NOTE: Deploy this file as sync-create-background.mjs for Netlify background function runtime
