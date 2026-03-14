@@ -6625,6 +6625,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   const [selectedToCreate, setSelectedToCreate] = useState(new Set());
   const [creating, setCreating] = useState(false);
   const [createResult, setCreateResult] = useState(null);
+  const [createProgress, setCreateProgress] = useState({ done: 0, total: 0, current: "" });
 
   const sourceShop = shops.find(s => s.id === sourceShopId);
   const targetShop = shops.find(s => s.id === targetShopId);
@@ -6789,7 +6790,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     finally { setSyncing(false); }
   };
 
-  // ── Step 5: Create unmatched ───────────────────────────────────────────────
+  // ── Step 5: Create unmatched — one product at a time to avoid 26s timeout ───
   const handleCreate = async () => {
     if (selectedToCreate.size === 0) return alert("Selecteer minimaal één product om aan te maken.");
     if (!targetShopId) return alert("Selecteer een doelshop.");
@@ -6802,24 +6803,44 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     if (toCreate.length === 0) return alert("Producten niet gevonden in brondata.");
     if (!confirm(`${toCreate.length} product(en) aanmaken in ${targetShop?.name}?`)) return;
 
-    setCreating(true); setCreateResult(null);
+    setCreating(true);
+    setCreateResult(null);
+    setCreateProgress({ done: 0, total: toCreate.length, current: "" });
+
+    const accumulated = { created: [], failed: [], skipped: [], seo_plugin: null };
+
     try {
       const token = await getToken();
-      const res = await fetch("/api/sync-create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({
-          source_shop_id: sourceShopId,
-          target_shop_id: targetShopId,
-          products: toCreate,
-          config: createConfig,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setCreateResult(data);
+      for (let i = 0; i < toCreate.length; i++) {
+        const product = toCreate[i];
+        setCreateProgress({ done: i, total: toCreate.length, current: product.name });
+        try {
+          const res = await fetch("/api/sync-create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({
+              source_shop_id: sourceShopId,
+              target_shop_id: targetShopId,
+              products: [product], // one at a time
+              config: createConfig,
+            }),
+          });
+          let data;
+          try { data = await res.json(); }
+          catch { throw new Error(`Server timeout of onverwachte fout (HTTP ${res.status})`); }
+          if (!res.ok || data.error) throw new Error(data?.error || `HTTP ${res.status}`);
+          if (data.created?.length)  accumulated.created.push(...data.created);
+          if (data.failed?.length)   accumulated.failed.push(...data.failed);
+          if (data.skipped?.length)  accumulated.skipped.push(...data.skipped);
+          if (data.seo_plugin)       accumulated.seo_plugin = data.seo_plugin;
+        } catch (productErr) {
+          accumulated.failed.push({ source_id: product.id, name: product.name, error: productErr.message });
+        }
+        setCreateProgress({ done: i + 1, total: toCreate.length, current: "" });
+      }
+      setCreateResult(accumulated);
     } catch (e) { alert("Aanmaken mislukt: " + e.message); }
-    finally { setCreating(false); }
+    finally { setCreating(false); setCreateProgress({ done: 0, total: 0, current: "" }); }
   };
 
   const toggleField = (key) => setSelectedFields(f => f.includes(key) ? f.filter(x => x !== key) : [...f, key]);
@@ -7670,10 +7691,27 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
             </div>
           )}
 
+          {/* Progress bar shown while creating */}
+          {creating && createProgress.total > 0 && (
+            <div style={{ padding: "12px 16px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "var(--rd)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
+                <span style={{ color: "var(--tx)", fontWeight: 600 }}>
+                  {createProgress.current ? `Bezig: ${createProgress.current}` : "Producten aanmaken..."}
+                </span>
+                <span style={{ color: "var(--mx)" }}>{createProgress.done} / {createProgress.total}</span>
+              </div>
+              <div style={{ height: 6, background: "var(--b2)", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: "var(--pr)", borderRadius: 3, transition: "width 0.3s", width: `${Math.round(createProgress.done / createProgress.total * 100)}%` }} />
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <Btn variant="secondary" onClick={() => setStep(4)}>← Terug naar sync resultaat</Btn>
+            <Btn variant="secondary" onClick={() => setStep(4)} disabled={creating}>← Terug naar sync resultaat</Btn>
             <Btn variant="primary" onClick={handleCreate} disabled={creating || selectedToCreate.size === 0}>
-              {creating ? "Bezig..." : `✨ ${selectedToCreate.size} product${selectedToCreate.size !== 1 ? "en" : ""} aanmaken in ${targetShop?.name}`}
+              {creating
+                ? `⏳ ${createProgress.done}/${createProgress.total} aangemaakt...`
+                : `✨ ${selectedToCreate.size} product${selectedToCreate.size !== 1 ? "en" : ""} aanmaken in ${targetShop?.name}`}
             </Btn>
           </div>
         </div>

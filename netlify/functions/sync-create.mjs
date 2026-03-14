@@ -282,18 +282,9 @@ export default async (req) => {
     // Run attribute preflight once for all products
     const attrIdMap = await attributePreflight(allSourceAttrs, targetShop, platformSettings, language, tone)
 
-    // ── Process each product (concurrency-limited to 3 parallel AI calls) ──────
-    // Cap at 200 products per call to prevent timeout; caller should batch if needed
-    const PRODUCT_CAP = 200
-    const toProcess = sourceProducts.slice(0, PRODUCT_CAP)
-    if (sourceProducts.length > PRODUCT_CAP) {
-      await log(supabase, 'warn', `sync-create: capped at ${PRODUCT_CAP} (received ${sourceProducts.length})`, { user_id: user.id })
-    }
-
-    // Process 3 products concurrently — each needs 1 AI call + 1 WC write
-    const CONCURRENCY = 3
-    const productQueue = [...toProcess]
-
+    // ── Process each product ─────────────────────────────────────────────────
+    // Frontend sends one product at a time to avoid 26s timeout.
+    // Function handles 1-N but is optimised for 1.
     async function processOne(sourceProd) {
       try {
         // ── 1. AI translate + rewrite ───────────────────────────────────────
@@ -485,14 +476,9 @@ Return JSON: {
       }
     }
 
-    // Drain the queue with limited concurrency
-    async function worker() {
-      while (productQueue.length > 0) {
-        const prod = productQueue.shift()
-        if (prod) await processOne(prod)
-      }
+    for (const prod of sourceProducts) {
+      await processOne(prod)
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, toProcess.length) }, worker))
 
     await log(supabase, 'info', `Sync create complete: ${results.created.length} created, ${results.failed.length} failed`, {
       user_id: user.id, source_shop_id, target_shop_id,
