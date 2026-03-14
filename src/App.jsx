@@ -6621,6 +6621,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     rewrite_seo: true,
     tone: "formal",
     sku_mode: "lang_prefix",
+    image_mode: "translate", // 'translate' | 'ai_vision'
   });
   const [selectedToCreate, setSelectedToCreate] = useState(new Set());
   const [creating, setCreating] = useState(false);
@@ -7624,6 +7625,35 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                   <input type="checkbox" checked={createConfig.translate_meta} onChange={e => setCreateConfig(c => ({ ...c, translate_meta: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
                   Meta titel &amp; beschrijving genereren
                 </label>
+              </div>
+
+              {/* Image mode */}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8 }}>Afbeeldingen</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {[
+                    {
+                      val: "translate",
+                      label: "Vertalen — bestandsnaam op basis van productnaam",
+                      desc: "Afbeeldingen worden gekopieerd met een SEO-bestandsnaam afgeleid van de vertaalde productnaam. Snel, geen AI nodig.",
+                      icon: "🔤",
+                    },
+                    {
+                      val: "ai_vision",
+                      label: "AI Vision — bestandsnaam + alt-tekst via beeldanalyse",
+                      desc: "Gemini scant elke afbeelding en genereert een beschrijvende SEO-bestandsnaam, alt-tekst en titel in de doeltaal. Langzamer maar optimaal voor SEO.",
+                      icon: "👁️",
+                    },
+                  ].map(opt => (
+                    <label key={opt.val} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 14px", borderRadius: "var(--rd)", border: `1px solid ${createConfig.image_mode === opt.val ? "var(--pr)" : "var(--b1)"}`, background: createConfig.image_mode === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer" }}>
+                      <input type="radio" name="image_mode" value={opt.val} checked={createConfig.image_mode === opt.val} onChange={() => setCreateConfig(c => ({ ...c, image_mode: opt.val }))} style={{ marginTop: 3, accentColor: "var(--pr)", flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.icon} {opt.label}</div>
+                        <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 3 }}>{opt.desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               {/* SKU mode */}

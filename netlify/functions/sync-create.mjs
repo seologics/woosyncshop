@@ -251,6 +251,105 @@ async function generateSku(mode, product, langCode, supabase, targetShopId) {
   return product.sku || `PROD-${product.id}`
 }
 
+// ── Image processing: download, generate SEO metadata, upload to target ─────
+// mode: 'ai_vision' — Gemini scans image → SEO filename + alt + title in target language
+// mode: 'translate' — uses translated product name, no vision call needed
+async function processImages(sourceImages, targetShop, productName, language, imageMode, geminiKey, geminiModel) {
+  if (!Array.isArray(sourceImages) || sourceImages.length === 0) return []
+
+  const base = targetShop.site_url.replace(/\/$/, '')
+  const wpAuth = `Basic ${Buffer.from(`${targetShop.consumer_key}:${targetShop.consumer_secret}`).toString('base64')}`
+
+  const nameSlug = productName.toLowerCase()
+    .replace(/[äàáâã]/g, 'a').replace(/[ëèéê]/g, 'e').replace(/[ïìíî]/g, 'i')
+    .replace(/[öòóô]/g, 'o').replace(/[üùúû]/g, 'u').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+
+  const results = []
+
+  for (let i = 0; i < sourceImages.length; i++) {
+    const img = sourceImages[i]
+    if (!img?.src) continue
+    try {
+      // 1. Download source image
+      const fetchRes = await fetch(img.src, { signal: AbortSignal.timeout(10000) })
+      if (!fetchRes.ok) throw new Error(`Fetch failed: ${fetchRes.status}`)
+      const contentType = fetchRes.headers.get('content-type') || 'image/jpeg'
+      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+      const imageBuffer = await fetchRes.arrayBuffer()
+
+      let seoFilename, altText, titleText
+
+      // 2a. AI Vision mode: Gemini scans image → SEO metadata in target language
+      if (imageMode === 'ai_vision' && geminiKey) {
+        try {
+          const b64 = Buffer.from(imageBuffer).toString('base64')
+          const vRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel || 'gemini-2.5-flash'}:generateContent?key=${geminiKey}`,
+            {
+              method: 'POST', signal: AbortSignal.timeout(12000),
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [
+                  { text: `SEO expert for a plant nursery webshop. Analyze this product image. Return ONLY valid JSON in ${language}:
+{"filename":"seo-slug-max-60-chars-lowercase-hyphens-describe-species-pot-size-height","alt":"max 12 word descriptive alt text","title":"max 8 word image title"}` },
+                  { inline_data: { mime_type: contentType, data: b64 } }
+                ]}],
+                generationConfig: { temperature: 0.2 }
+              })
+            }
+          )
+          if (vRes.ok) {
+            const vData = await vRes.json()
+            const raw = vData.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+            const parsed = JSON.parse(raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim())
+            if (parsed.filename) seoFilename = parsed.filename.replace(/[^a-z0-9-]/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+            if (parsed.alt)   altText   = parsed.alt
+            if (parsed.title) titleText = parsed.title
+          }
+        } catch {} // Fall through to translate mode
+      }
+
+      // 2b. Translate mode (or fallback)
+      if (!seoFilename) {
+        seoFilename = i === 0 ? nameSlug : `${nameSlug}-${i + 1}`
+        altText     = altText || (i === 0 ? productName : `${productName} ${i + 1}`)
+        titleText   = titleText || productName
+      }
+
+      const uid = Math.random().toString(36).slice(2, 6)
+      const filename = `${seoFilename}-${uid}.${ext}`
+
+      // 3. Upload to WordPress media library
+      const uploadRes = await fetch(`${base}/wp-json/wp/v2/media`, {
+        method: 'POST',
+        headers: {
+          'Authorization': wpAuth,
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Type': contentType,
+        },
+        body: imageBuffer,
+      })
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`)
+      const media = await uploadRes.json()
+
+      // 4. Set alt text + title on the media item
+      fetch(`${base}/wp-json/wp/v2/media/${media.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': wpAuth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alt_text: altText, title: titleText, caption: '' }),
+      }).catch(() => {})
+
+      results.push({ id: media.id, src: media.source_url, alt: altText, name: titleText })
+    } catch (imgErr) {
+      // Fallback: pass src URL for WC to sideload (no SEO metadata)
+      results.push({ src: img.src, alt: img.alt || productName, name: productName, fallback: true })
+    }
+  }
+
+  return results
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
@@ -283,6 +382,7 @@ export default async (req) => {
     sku_mode = 'lang_prefix',
     lang_code = 'NL',
     translate_meta = true,
+    image_mode = 'translate', // 'translate' | 'ai_vision'
   } = cfg || {}
 
   // ── Return 202 immediately, background work follows ──────────────────────
@@ -302,6 +402,8 @@ export default async (req) => {
     const { data: platformSettings } = await supabase.from('platform_settings').select('*').eq('id', 1).single()
 
     const seoPlugin = await detectSeoPlugin(targetShop)
+    const geminiKey   = platformSettings?.gemini_api_key || null
+    const geminiModel = platformSettings?.ai_model_image || 'gemini-2.5-flash'
     await log(supabase, 'info', `Sync create started: ${sourceProducts.length} products → ${targetShop.name} (${language})`, { user_id: user.id, source_shop_id, target_shop_id })
 
     const results = { created: [], failed: [], skipped: [] }
@@ -354,10 +456,22 @@ Return JSON with same keys and translated values. For description/short_descript
           translated = { name: sourceProd.name }
         }
 
-        // ── 2. SKU generation ───────────────────────────────────────────────
+        // ── 2. Image processing: download + SEO metadata + upload to target ───────
+        const translatedProductName = translated.name || sourceProd.name
+        const processedImages = await processImages(
+          sourceProd.images || [],
+          targetShop,
+          translatedProductName,
+          language,
+          image_mode,
+          geminiKey,
+          geminiModel
+        )
+
+        // ── 3. SKU generation ───────────────────────────────────────────────
         const newSku = await generateSku(sku_mode, sourceProd, lang_code, supabase, target_shop_id)
 
-        // ── 3. Build attributes for target ──────────────────────────────────
+        // ── 4. Build attributes for target ──────────────────────────────────
         const targetAttributes = []
         for (const attr of (sourceProd.attributes || [])) {
           const targetAttrId = attrIdMap[attr.name]
@@ -384,7 +498,7 @@ Return JSON with same keys and translated values. For description/short_descript
           })
         }
 
-        // ── 4. Build product payload ─────────────────────────────────────────
+        // ── 5. Build product payload ─────────────────────────────────────────
         const meta_data = []
 
         // SEO meta written async after product creation (see step 6 above)
@@ -415,12 +529,18 @@ Return JSON with same keys and translated values. For description/short_descript
           manage_stock: sourceProd.manage_stock || false,
           stock_quantity: sourceProd.stock_quantity ?? null,
           stock_status: sourceProd.stock_status || 'instock',
+          images: processedImages.length > 0 ? processedImages.map(img => ({
+            src: img.src,
+            ...(img.id ? { id: img.id } : {}),
+            alt: img.alt || '',
+            name: img.name || '',
+          })) : undefined,
           attributes: targetAttributes,
           categories,
           meta_data,
         }
 
-        // ── 5. Create product on target shop ────────────────────────────────
+        // ── 6. Create product on target shop ────────────────────────────────
         const created = await wooFetch(targetShop, 'products', 'POST', productPayload)
 
         if (!created?.id) {
@@ -428,7 +548,7 @@ Return JSON with same keys and translated values. For description/short_descript
           return
         }
 
-        // ── 6. SEO meta (fire-and-forget — doesn't block product creation) ──────
+        // ── 7. SEO meta (fire-and-forget — doesn't block product creation) ──────
         if (translate_meta && rewrite_seo) {
           ;(async () => {
             try {
@@ -459,7 +579,7 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
           })()
         }
 
-        // ── 7. EAN assignment ───────────────────────────────────────────────
+        // ── 8. EAN assignment ───────────────────────────────────────────────
         let assignedEan = null
         try {
           // Call ean-assign internal (reuse the RPC directly)
@@ -478,7 +598,7 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
           await log(supabase, 'warn', `EAN assign failed for SKU ${newSku}: ${eanErr.message}`, { user_id: user.id })
         }
 
-        // ── 8. Store mapping in shop_product_mappings ───────────────────────
+        // ── 9. Store mapping in shop_product_mappings ───────────────────────
         try {
           await supabase.from('shop_product_mappings').insert({
             user_id: user.id,
