@@ -6623,6 +6623,12 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     sku_mode: "lang_prefix",
     image_mode: "translate", // 'translate' | 'ai_vision' | 'generate'
     image_generate_size: "woosyncshop", // 'woosyncshop' | 'target_shop'
+    // Text generation
+    text_mode: "translate_rewrite", // 'literal' | 'translate_rewrite' | 'seo_write'
+    seo_use_headers: true,
+    seo_word_count: 600,
+    seo_add_lists: true,
+    seo_custom_params: [], // up to 5 strings
   });
   const [selectedToCreate, setSelectedToCreate] = useState(new Set());
   const [creating, setCreating] = useState(false);
@@ -7592,36 +7598,73 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                 </div>
               </div>
 
-              {/* Translate fields */}
+              {/* Text generation mode */}
               <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8 }}>Te vertalen velden</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 8 }}>Tekstgeneratie</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {[
-                    { key: "name", label: "Naam" },
-                    { key: "description", label: "Beschrijving" },
-                    { key: "short_description", label: "Korte beschrijving" },
-                    { key: "attributes", label: "Attributen" },
-                  ].map(f => {
-                    const on = createConfig.translate_fields.includes(f.key);
-                    return (
-                      <button key={f.key} onClick={() => setCreateConfig(c => ({
-                        ...c,
-                        translate_fields: on ? c.translate_fields.filter(x => x !== f.key) : [...c.translate_fields, f.key]
-                      }))}
-                        style={{ padding: "6px 14px", borderRadius: "var(--rd)", border: `1px solid ${on ? "var(--pr)" : "var(--b2)"}`, background: on ? "rgba(99,102,241,0.1)" : "var(--s3)", color: on ? "var(--pr)" : "var(--mx)", fontSize: 12, fontWeight: on ? 700 : 400, cursor: "pointer" }}>
-                        {f.label}
-                      </button>
-                    );
-                  })}
+                    { val: "literal",           icon: "🔤", label: "Letterlijk vertalen",         desc: "Exacte vertaling van naam, beschrijving en korte beschrijving. Geen herschrijving." },
+                    { val: "translate_rewrite",  icon: "✏️", label: "Vertalen & herschrijven",     desc: "Vertaalt de inhoud en past de tekst natuurlijk aan voor de doelmarkt." },
+                    { val: "seo_write",          icon: "🚀", label: "SEO-geoptimaliseerde tekst schrijven", desc: "AI schrijft een volledige, unieke productbeschrijving op basis van productnaam en attributen." },
+                  ].map(opt => (
+                    <div key={opt.val}>
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 14px", borderRadius: createConfig.text_mode === opt.val && opt.val === "seo_write" ? "var(--rd) var(--rd) 0 0" : "var(--rd)", border: `1px solid ${createConfig.text_mode === opt.val ? "var(--pr)" : "var(--b1)"}`, background: createConfig.text_mode === opt.val ? "rgba(99,102,241,0.06)" : "var(--s3)", cursor: "pointer", borderBottom: createConfig.text_mode === opt.val && opt.val === "seo_write" ? "none" : undefined }}>
+                        <input type="radio" name="text_mode" value={opt.val} checked={createConfig.text_mode === opt.val} onChange={() => setCreateConfig(c => ({ ...c, text_mode: opt.val }))} style={{ marginTop: 3, accentColor: "var(--pr)", flexShrink: 0 }} />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.icon} {opt.label}</div>
+                          <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 2 }}>{opt.desc}</div>
+                        </div>
+                      </label>
+                      {/* SEO write sub-options */}
+                      {opt.val === "seo_write" && createConfig.text_mode === "seo_write" && (
+                        <div style={{ padding: "12px 14px 14px", background: "rgba(99,102,241,0.04)", border: "1px solid var(--pr)", borderTop: "none", borderRadius: "0 0 var(--rd) var(--rd)", display: "flex", flexDirection: "column", gap: 10 }}>
+                          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
+                              <input type="checkbox" checked={createConfig.seo_use_headers} onChange={e => setCreateConfig(c => ({ ...c, seo_use_headers: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
+                              Gebruik headers (H2, H3, H4)
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
+                              <input type="checkbox" checked={createConfig.seo_add_lists} onChange={e => setCreateConfig(c => ({ ...c, seo_add_lists: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
+                              Voeg lijsten toe
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                              <span style={{ color: "var(--mx)" }}>Aantal woorden:</span>
+                              <input type="number" min={100} max={4500} step={100} value={createConfig.seo_word_count}
+                                onChange={e => setCreateConfig(c => ({ ...c, seo_word_count: Math.min(4500, Math.max(100, parseInt(e.target.value) || 600)) }))}
+                                style={{ width: 80, padding: "3px 6px", borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s2)", color: "var(--tx)", fontSize: 12 }} />
+                              <span style={{ fontSize: 11, color: "var(--dm)" }}>/ 4500</span>
+                            </label>
+                          </div>
+                          {/* Custom parameters */}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 6 }}>Aangepaste instructies (max. 5):</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                              {(createConfig.seo_custom_params || []).map((param, i) => (
+                                <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                  <input value={param} onChange={e => setCreateConfig(c => { const p = [...c.seo_custom_params]; p[i] = e.target.value; return { ...c, seo_custom_params: p }; })}
+                                    placeholder={`Instructie ${i + 1}...`}
+                                    style={{ flex: 1, padding: "5px 8px", borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s2)", color: "var(--tx)", fontSize: 12 }} />
+                                  <button onClick={() => setCreateConfig(c => ({ ...c, seo_custom_params: c.seo_custom_params.filter((_, j) => j !== i) }))}
+                                    style={{ padding: "4px 8px", borderRadius: "var(--rd)", border: "1px solid var(--b2)", background: "none", cursor: "pointer", color: "var(--dm)", fontSize: 12 }}>✕</button>
+                                </div>
+                              ))}
+                              {(createConfig.seo_custom_params || []).length < 5 && (
+                                <button onClick={() => setCreateConfig(c => ({ ...c, seo_custom_params: [...(c.seo_custom_params || []), ""] }))}
+                                  style={{ alignSelf: "flex-start", padding: "5px 12px", borderRadius: "var(--rd)", border: "1px dashed var(--pr)", background: "none", color: "var(--pr)", fontSize: 12, cursor: "pointer" }}>
+                                  + Instructie toevoegen
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* SEO options */}
+              {/* Meta + SEO options */}
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
-                  <input type="checkbox" checked={createConfig.rewrite_seo} onChange={e => setCreateConfig(c => ({ ...c, rewrite_seo: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
-                  SEO herschrijven (niet letterlijk vertalen)
-                </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
                   <input type="checkbox" checked={createConfig.translate_meta} onChange={e => setCreateConfig(c => ({ ...c, translate_meta: e.target.checked }))} style={{ accentColor: "var(--pr)" }} />
                   Meta titel &amp; beschrijving genereren

@@ -626,6 +626,11 @@ export default async (req) => {
     translate_meta = true,
     image_mode = 'translate', // 'translate' | 'ai_vision' | 'generate'
     image_generate_size = 'woosyncshop', // 'woosyncshop' | 'target_shop'
+    text_mode = 'translate_rewrite', // 'literal' | 'translate_rewrite' | 'seo_write'
+    seo_use_headers = true,
+    seo_word_count = 600,
+    seo_add_lists = true,
+    seo_custom_params = [],
   } = cfg || {}
 
   // ── Background function: runs to completion (up to 15 min), returns 202 ──
@@ -676,26 +681,71 @@ export default async (req) => {
           supabase, user.id, sourceShop.locale, targetShop.locale
         )
 
-        // ── 1. AI translate (name + descriptions only — attrs handled by smartMapping) ──
-        const fieldsToTranslate = {}
-        if (translate_fields.includes('name')) fieldsToTranslate.name = sourceProd.name
-        if (translate_fields.includes('description') && sourceProd.description)
-          fieldsToTranslate.description = sourceProd.description.replace(/<[^>]+>/g, '').slice(0, 400)
-        if (translate_fields.includes('short_description') && sourceProd.short_description)
-          fieldsToTranslate.short_description = sourceProd.short_description.replace(/<[^>]+>/g, '').slice(0, 200)
-        // Note: attribute translation is handled by smartMapping above
+        // ── 1. Generate content based on text_mode ────────────────────────────────
+        // Build attribute context for SEO write (needed even for literal translate)
+        const attrContext = (sourceProd.attributes || [])
+          .map(a => `${a.name}: ${(a.options || []).join(', ')}`)
+          .join(' | ')
 
-        const systemPrompt = `Translate WooCommerce product content to ${language}. Tone: ${tone}. Return ONLY valid JSON, no markdown, no explanation.`
-        const userPrompt = `Translate: ${JSON.stringify(fieldsToTranslate)}
-Return JSON with same keys and translated values. For description/short_description you may expand the translated text naturally.`
+        // Source texts (strip HTML, keep reasonable length)
+        const srcDesc      = (sourceProd.description || '').replace(/<[^>]+>/g, '').trim()
+        const srcShortDesc = (sourceProd.short_description || '').replace(/<[^>]+>/g, '').trim()
+
+        let systemPrompt, userPrompt, aiTimeout = 20000
+
+        if (text_mode === 'literal') {
+          systemPrompt = `You are a product content translator. Translate EXACTLY to ${language} without any rewrites or additions. Return ONLY valid JSON, no markdown.`
+          userPrompt = `Translate these product fields to ${language}:
+${translate_fields.includes('name') ? `name: "${sourceProd.name}"` : ''}
+${translate_fields.includes('description') && srcDesc ? `description: "${srcDesc.slice(0, 800)}"` : ''}
+${translate_fields.includes('short_description') && srcShortDesc ? `short_description: "${srcShortDesc.slice(0, 400)}"` : ''}
+Return JSON: {"name":"...","description":"...","short_description":"..."}`
+
+        } else if (text_mode === 'seo_write') {
+          aiTimeout = 25000
+          const headerInstruction = seo_use_headers ? 'Use H2, H3 and H4 headers to structure the text.' : 'Do not use headers.'
+          const listInstruction   = seo_add_lists   ? 'Use bullet point lists (<ul><li>) for features and benefits.' : 'Do not use lists.'
+          const customInstructions = (seo_custom_params || []).filter(Boolean).map((p, i) => `${i + 1}. ${p}`).join('\n')
+          systemPrompt = `You are an expert SEO copywriter specializing in plant and garden products. Write in ${language} with a ${tone} tone. Return ONLY valid JSON, no markdown.`
+          userPrompt = `Write an SEO-optimized WooCommerce product listing in ${language} for:
+
+Product name: "${sourceProd.name}"
+Attributes: ${attrContext || 'none'}
+Source description (for reference only, do NOT copy): "${srcDesc.slice(0, 500)}"
+
+REQUIREMENTS:
+- description: approximately ${seo_word_count} words, HTML formatted, rich and informative
+- ${headerInstruction}
+- ${listInstruction}
+- short_description: 2-3 sentences, compelling summary, max 60 words
+- name: translated product name
+${customInstructions ? `\nCUSTOM INSTRUCTIONS:\n${customInstructions}` : ''}
+
+Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}`
+
+        } else {
+          // translate_rewrite (default)
+          systemPrompt = `You are a product content writer. Translate to ${language} and adapt naturally for the ${language}-speaking market. Tone: ${tone}. Return ONLY valid JSON, no markdown.`
+          userPrompt = `Translate and rewrite for ${language} market:
+name: "${sourceProd.name}"
+${srcDesc ? `description: "${srcDesc.slice(0, 600)}"` : ''}
+${srcShortDesc ? `short_description: "${srcShortDesc.slice(0, 300)}"` : ''}
+
+Rules:
+- Expand description to at least 100 words if possible
+- short_description: 1-2 compelling sentences
+- Adapt naturally, not word-for-word
+Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}`
+        }
 
         let translated = {}
         try {
-          const raw = await callAI(platformSettings, systemPrompt, userPrompt, 18000)
+          const raw = await callAI(platformSettings, systemPrompt, userPrompt, aiTimeout)
           translated = safeJSON(raw) || {}
+          await log(supabase, 'info', `Text generated (${text_mode}) for ${sourceProd.name}: name=${!!translated.name}, desc=${!!translated.description}`, { user_id: user.id })
         } catch (aiErr) {
-          await log(supabase, 'warn', `AI translate failed for ${sourceProd.name}: ${aiErr.message}`, { user_id: user.id })
-          translated = { name: sourceProd.name }
+          await log(supabase, 'warn', `AI text generation failed for ${sourceProd.name}: ${aiErr.message}`, { user_id: user.id })
+          translated = { name: sourceProd.name, description: srcDesc, short_description: srcShortDesc }
         }
 
         // ── 2. Image handling ─────────────────────────────────────────────────────
@@ -716,18 +766,25 @@ Return JSON with same keys and translated values. For description/short_descript
         const newSku = await generateSku(sku_mode, sourceProd, lang_code, supabase, target_shop_id)
 
         // ── 4. Build attributes for target (from smartMapping results) ─────────
+        // IMPORTANT: WooCommerce creates a "local" (non-global) attribute when you send
+        // name without id. Always send id for global attributes. If we have no id,
+        // skip the attribute — it means smartMapping failed to create/find it.
         const targetAttributes = []
         for (const result of attrResults) {
-          if (!result.options.length && !result.target_id) continue
+          if (!result.options.length) continue
           const srcAttr = (sourceProd.attributes || []).find(a => a.name === result.source_name) || {}
-          const attrPayload = {
-            name: result.target_name,
+          if (!result.target_id) {
+            // No global attribute ID — skip to avoid creating local custom attributes
+            await log(supabase, 'warn', `Skipping attr "${result.source_name}" — no target_id (smartMapping did not resolve)`, { user_id: user.id })
+            continue
+          }
+          targetAttributes.push({
+            id: result.target_id,        // REQUIRED: links to global attribute in Products > Attributen
+            name: result.target_name,    // Display name (WC may ignore if id is set, but good to include)
             visible: srcAttr.visible !== false,
             variation: srcAttr.variation || false,
             options: result.options,
-          }
-          if (result.target_id) attrPayload.id = result.target_id
-          targetAttributes.push(attrPayload)
+          })
         }
 
         // If sku_mode is 'identifier', add hidden _wss_identifier attribute
@@ -793,10 +850,9 @@ Return JSON with same keys and translated values. For description/short_descript
           return
         }
 
-        // ── 7. SEO meta (fire-and-forget — doesn't block product creation) ──────
-        if (translate_meta && rewrite_seo) {
-          ;(async () => {
-            try {
+        // ── 7. SEO meta (awaited inline — background fn has 15min, no race condition) ─
+        if (translate_meta) {
+          try {
               const seoRaw = await callAI(platformSettings,
                 `Generate SEO meta for a WooCommerce product. Return ONLY valid JSON.`,
                 `Product name: "${translated.name || sourceProd.name}"
@@ -820,8 +876,9 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
                 }
                 await wooFetch(targetShop, `products/${created.id}`, 'PUT', { meta_data: seoMeta })
               }
-            } catch {} // Non-critical — product already created
-          })()
+            } catch (seoErr) {
+              await log(supabase, 'warn', `SEO meta failed for ${sourceProd.name}: ${seoErr.message}`, { user_id: user.id })
+            }
         }
 
         // ── 8. EAN assignment ───────────────────────────────────────────────
