@@ -7196,11 +7196,20 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
         (syncResult?.unmatched|| []).forEach(u => { unmatchedSet.add(u.id); });
         const hasSyncResult = !!syncResult;
 
-        // Products with a known null match (not undefined = "unknown") that aren't yet synced
-        // These can skip the sync step and go straight to creation
-        const unmatchedPreview = !hasSyncResult && (matchStrategy === "sku" || matchStrategy === "mapping" || matchStrategy === "ai_name")
-          ? sourceProducts.filter(p => previewMatch(p) === null)
+        // toCreatePreview = products that will go to step 5:
+        //   a) products with a confirmed null match (no counterpart in target)
+        //   b) products the user manually deselected from the sync run
+        // Both scenarios mean: "create this product fresh in the target shop"
+        const knownStrategies = matchStrategy === "sku" || matchStrategy === "mapping" || matchStrategy === "ai_name";
+        const toCreatePreview = !hasSyncResult && knownStrategies
+          ? sourceProducts.filter(p => {
+              const match = previewMatch(p);
+              const isDeselected = !selectedProducts.has(p.id);
+              return match === null || isDeselected;
+            })
           : [];
+        // Keep backward-compat alias
+        const unmatchedPreview = toCreatePreview;
 
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -7310,6 +7319,9 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                   if (syncedItem)  rowStatus = { icon: "✅", color: "var(--gr)",             label: "Gesync" };
                   else if (failedItem) rowStatus = { icon: "❌", color: "rgba(239,68,68,1)", label: "Fout" };
                   else if (isUnmatched) rowStatus = { icon: "—",  color: "var(--ac)",         label: "Geen match" };
+                } else if (!isSelected && preview !== undefined) {
+                  // Deselected by user → will be created in step 5
+                  rowStatus = { icon: "✨", color: "var(--pr)", label: "Aanmaken" };
                 } else if (preview === null) {
                   rowStatus = { icon: "?", color: "var(--ac)", label: "Geen match" };
                 }
@@ -7453,32 +7465,37 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
               </div>
             )}
 
-            {/* Unmatched preview banner — shown before sync when we already know products have no match */}
-            {unmatchedPreview.length > 0 && !hasSyncResult && (
-              <div style={{ padding: "12px 16px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ac)" }}>
-                    {unmatchedPreview.length} product{unmatchedPreview.length !== 1 ? "en" : ""} zonder match in {targetShop?.name}
-                  </span>
-                  <span style={{ fontSize: 12, color: "var(--mx)", marginLeft: 8 }}>
-                    — nog niet aanwezig in de doelshop. Maak ze aan met AI-vertaling.
-                  </span>
+            {/* Create-preview banner: no-match products + manually deselected products */}
+            {toCreatePreview.length > 0 && !hasSyncResult && (() => {
+              const knownNullCount  = sourceProducts.filter(p => !selectedProducts.has(p.id) ? false : previewMatch(p) === null).length;
+              const deselectedCount = sourceProducts.filter(p => !selectedProducts.has(p.id)).length;
+              const noMatchCount    = toCreatePreview.filter(p => previewMatch(p) === null && selectedProducts.has(p.id)).length;
+              return (
+                <div style={{ padding: "12px 16px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ac)" }}>
+                      {toCreatePreview.length} product{toCreatePreview.length !== 1 ? "en" : ""} aanmaken in {targetShop?.name}
+                    </span>
+                    <div style={{ fontSize: 11, color: "var(--mx)", marginTop: 3, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {noMatchCount > 0 && <span>• {noMatchCount} zonder match in doelshop</span>}
+                      {deselectedCount > 0 && <span>• {deselectedCount} handmatig uitgevinkt</span>}
+                    </div>
+                  </div>
+                  <Btn variant="primary" onClick={() => {
+                    setSyncResult(sr => ({
+                      ...(sr || {}),
+                      synced: sr?.synced || [],
+                      failed: sr?.failed || [],
+                      unmatched: toCreatePreview.map(p => ({ id: p.id, name: p.name, sku: p.sku || "" })),
+                    }));
+                    setSelectedToCreate(new Set(toCreatePreview.map(p => p.id)));
+                    setStep(5);
+                  }}>
+                    ✨ Aanmaken in {targetShop?.name} →
+                  </Btn>
                 </div>
-                <Btn variant="primary" onClick={() => {
-                  // Pre-fill syncResult.unmatched so step 5 knows what to create
-                  setSyncResult(sr => ({
-                    ...(sr || {}),
-                    synced: sr?.synced || [],
-                    failed: sr?.failed || [],
-                    unmatched: unmatchedPreview.map(p => ({ id: p.id, name: p.name, sku: p.sku || "" })),
-                  }));
-                  setSelectedToCreate(new Set(unmatchedPreview.map(p => p.id)));
-                  setStep(5);
-                }}>
-                  ✨ Aanmaken in {targetShop?.name} →
-                </Btn>
-              </div>
-            )}
+              );
+            })()}
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Btn variant="secondary" onClick={() => setStep(3)}>← Terug naar strategie</Btn>
