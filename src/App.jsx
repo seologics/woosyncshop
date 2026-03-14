@@ -7322,7 +7322,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                 const aiMeta = getAiMeta(p);
                 const confidencePct = aiMeta ? Math.round(aiMeta.confidence * 100) : null;
                 const confidenceColor = confidencePct >= 90 ? "var(--gr)" : confidencePct >= 70 ? "var(--ac)" : "rgba(239,68,68,1)";
-                const showOverrideDropdown = matchStrategy === "ai_name" && !hasSyncResult && (!targetToShow || (aiMeta && aiMeta.confidence < 0.85 && !aiMeta.overridden));
+                const showOverrideDropdown = matchStrategy === "ai_name" && !hasSyncResult && !aiMatchLoading && (aiMatchResult !== null) && (!targetToShow || (aiMeta && aiMeta.confidence < 0.85 && !aiMeta.overridden));
 
                 return (
                   <div key={p.id} style={{ borderBottom: i < filteredProducts.length - 1 ? "1px solid var(--b1)" : "none", background: rowBg }}>
@@ -7351,7 +7351,11 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                         {targetToShow ? (
                           <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.3, color: syncedItem ? "var(--gr)" : "var(--tx)" }}>{targetToShow.name}</div>
                         ) : targetToShow === undefined ? (
-                          <div style={{ fontSize: 11, color: "var(--mx)", fontStyle: "italic" }}>Identifier — bepaald tijdens sync</div>
+                          <div style={{ fontSize: 11, color: "var(--mx)", fontStyle: "italic" }}>
+                            {matchStrategy === "ai_name" && aiMatchLoading ? "⏳ AI analyseert..." :
+                             matchStrategy === "ai_name" ? "Geen match gevonden" :
+                             "Identifier — bepaald tijdens sync"}
+                          </div>
                         ) : (
                           <div style={{ fontSize: 11, color: "var(--ac)", fontStyle: "italic" }}>Geen match gevonden</div>
                         )}
