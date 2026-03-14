@@ -202,6 +202,19 @@ export default async (req) => {
     const targetPlugins = targetShop ? detectPlugins(targetPluginPaths, []) : []
     const compatGroups  = buildCompatGroups(sourcePlugins, targetPlugins)
 
+    // Persist detected plugin IDs back to shops.active_plugins so stock-sync
+    // can use them as a fallback even if the frontend doesn't pass plugin IDs.
+    const srcPluginIds = sourcePlugins.map(p => p.id)
+    const tgtPluginIds = targetPlugins.map(p => p.id)
+    try {
+      if (srcPluginIds.length > 0) {
+        await supabase.from('shops').update({ active_plugins: srcPluginIds }).eq('id', sourceShopId)
+      }
+      if (targetShop && tgtPluginIds.length > 0) {
+        await supabase.from('shops').update({ active_plugins: tgtPluginIds }).eq('id', targetShop.id)
+      }
+    } catch {}
+
     // Standard field detection based on product data
     const FIELD_DEFS = [
       { key: 'stock_quantity',    label: 'Voorraad (stock_quantity)',    check: p => p.manage_stock && p.stock_quantity != null },

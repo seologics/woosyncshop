@@ -6506,6 +6506,7 @@ function AnalyticsView({ shops, user, analyticsCache, onAnalyticsCacheUpdate }) 
 // ─── Plugin Wizard Modal ──────────────────────────────────────────────────────
 const KNOWN_PLUGINS = [
   { id: "wqm", name: "WooCommerce Quantity Manager", desc: "Minimum/maximum bestelhoeveelheden, stapsgrootte en hoeveelheidsopties per product.", icon: "🔢" },
+  { id: "wpc_pbq", name: "WPC Price by Quantity", desc: "Kortingsprijzen per hoeveelheid. Toont automatisch een prijzentabel op productpagina.", icon: "💶" },
   { id: "tiered-pricing-table", name: "Tiered Pricing Table", desc: "Kortingstabel op basis van besteld aantal. Toont automatisch prijzentabel op productpagina.", icon: "📊" },
   { id: "wholesale-prices", name: "Wholesale Prices for WooCommerce", desc: "Groothandelsprijzen per gebruikersrol. Aparte prijzen voor B2B-klanten.", icon: "🏭" },
   { id: "wpml", name: "WPML", desc: "Meertalige WooCommerce-winkel. Inhoud vertaling per taal via admin.", icon: "🌍" },
@@ -6785,6 +6786,8 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
             match_strategy: matchStrategy === "ai_name" ? "confirmed_mapping" : matchStrategy,
             confirmed_mappings: confirmedMappings,
             price_markup_pct: priceMarkup,
+            source_plugin_id: (scanResult?.source_plugins || []).find(p => p.id === "wqm" || p.id === "wpc_pbq")?.id || null,
+            target_plugin_id: (scanResult?.target_plugins || []).find(p => p.id === "wqm" || p.id === "wpc_pbq")?.id || null,
           }),
         });
         const data = await res.json();

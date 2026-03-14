@@ -42,8 +42,117 @@ async function wooGetAll(shop, endpoint, perPage = 100, maxPages = 50) {
   return all
 }
 
+// ── Tier plugin conversion helpers ───────────────────────────────────────────
+
+/**
+ * Detect which tier-pricing plugin a shop is running from its stored active_plugins IDs.
+ * IDs match what sync-scan.mjs persists: 'wqm' | 'wpc_pbq'
+ */
+function detectTierPlugin(activePlugins = []) {
+  const ids = Array.isArray(activePlugins) ? activePlugins : []
+  if (ids.includes('wqm')) return 'wqm'
+  if (ids.includes('wpc_pbq')) return 'wpcpq'
+  return null
+}
+
+/**
+ * Detect tier plugin directly from a product's meta_data keys.
+ * Used as a reliable fallback when active_plugins isn't populated.
+ */
+function detectTierPluginFromMeta(metaData = []) {
+  const keys = metaData.map(m => m.key)
+  if (keys.includes('_wqm_tiers')) return 'wqm'
+  if (keys.includes('wpcpq_prices')) return 'wpcpq'
+  return null
+}
+
+/**
+ * Safely parse a meta value that may be a JSON string or already an object/array.
+ */
+function parseMeta(value) {
+  if (!value) return null
+  if (typeof value !== 'string') return value
+  try { return JSON.parse(value) } catch { return value }
+}
+
+/**
+ * Convert WQM _wqm_tiers → WPC PBQ wpcpq_prices format.
+ *
+ * WQM format:  { type: 'fixed'|'percent', tiers: { '0': { qty, amt }, ... } }
+ * WPC PBQ:     [ { qty: number, price: '9.99'|'', discount: '10'|'' }, ... ]
+ *
+ * type 'fixed'   → price = amt (with markup), discount = ''
+ * type 'percent' → price = '',  discount = amt (markup ignored — it's already a %)
+ */
+function wqmToWpcpq(wqmMeta, markupPct = 0) {
+  if (!wqmMeta) return null
+  const raw = wqmMeta.tiers
+    ? (Array.isArray(wqmMeta.tiers) ? wqmMeta.tiers : Object.values(wqmMeta.tiers))
+    : []
+  if (!raw.length) return null
+
+  const tierType = wqmMeta.type || 'fixed'
+  const factor   = 1 + markupPct / 100
+
+  const wpcpqPrices = raw.map(t => {
+    const qty = Number(t.qty) || 1
+    if (tierType === 'percent') {
+      return { qty, price: '', discount: String(t.amt ?? '') }
+    }
+    const n     = parseFloat(String(t.amt ?? '0').replace(',', '.')) || 0
+    const final = markupPct !== 0 ? Math.round(n * factor * 100) / 100 : n
+    return { qty, price: String(final), discount: '' }
+  })
+
+  return [
+    { key: 'wpcpq_prices',  value: wpcpqPrices },
+    { key: '_wqm_tiers',    value: null },    // clear source-format keys on target
+    { key: '_wqm_settings', value: null },
+  ]
+}
+
+/**
+ * Convert WPC PBQ wpcpq_prices → WQM _wqm_tiers format.
+ *
+ * WPC PBQ: [ { qty, price: '9.99'|'', discount: '10'|'' }, ... ]
+ * WQM:     { type: 'fixed'|'percent', tiers: { '0': { qty, amt }, ... } }
+ *
+ * Determines type from first non-empty tier (price → fixed, discount → percent).
+ * Markup only applied to fixed-price tiers.
+ */
+function wpcpqToWqm(wpcpqMeta, markupPct = 0) {
+  if (!Array.isArray(wpcpqMeta) || !wpcpqMeta.length) return null
+
+  const factor = 1 + markupPct / 100
+  const firstWithPrice = wpcpqMeta.find(t => t.price && String(t.price).trim() !== '')
+  const tierType       = firstWithPrice ? 'fixed' : 'percent'
+
+  const tiersObj = {}
+  wpcpqMeta.forEach((t, i) => {
+    const qty = Number(t.qty) || 1
+    if (tierType === 'fixed' && t.price && String(t.price).trim() !== '') {
+      const n     = parseFloat(String(t.price).replace(',', '.')) || 0
+      const final = markupPct !== 0 ? Math.round(n * factor * 100) / 100 : n
+      tiersObj[String(i)] = { qty, amt: String(final) }
+    } else if (tierType === 'percent' && t.discount && String(t.discount).trim() !== '') {
+      tiersObj[String(i)] = { qty, amt: String(t.discount) }  // no markup on %
+    } else {
+      tiersObj[String(i)] = { qty, amt: String(t.price || t.discount || '0') }
+    }
+  })
+
+  if (!Object.keys(tiersObj).length) return null
+
+  return [
+    { key: '_wqm_tiers',    value: { type: tierType, tiers: tiersObj } },
+    { key: '_wqm_settings', value: { tiered_pricing_type: tierType, step_interval: '1', qty_design: 'select' } },
+    { key: 'wpcpq_prices',  value: null },   // clear source-format key on target
+  ]
+}
+
 // Build the payload of fields to sync based on field selection
-function buildSyncPayload(sourceProduct, fields, markupPct = 0) {
+// srcPlugin / tgtPlugin: 'wqm' | 'wpcpq' | null  (passed from request body, derived from scan)
+function buildSyncPayload(sourceProduct, fields, markupPct = 0, srcPlugin = null, tgtPlugin = null) {
   const payload = {}
 
   // Apply price markup: multiply by (1 + pct/100), round to 2 decimals
@@ -81,54 +190,101 @@ function buildSyncPayload(sourceProduct, fields, markupPct = 0) {
     payload.attributes = sourceProduct.attributes || []
   }
 
-  // WQM fields
-  const wqmMeta = []
+  // ── Tier pricing ────────────────────────────────────────────────────────────
+  const wantsTiers = fields.includes('wqm_tiers')
   const sourceMeta = sourceProduct.meta_data || []
 
-  if (fields.includes('wqm_tiers')) {
-    const t = sourceMeta.find(m => m.key === '_wqm_tiers')
-    const s = sourceMeta.find(m => m.key === '_wqm_settings')
-    if (t) {
-      // Apply markup to each tier's price (amt field)
-      if (markupPct !== 0 && t.value && typeof t.value === 'object') {
-        const tiersData = JSON.parse(JSON.stringify(t.value)) // deep clone
-        const tierList = tiersData.tiers
-        if (tierList && typeof tierList === 'object') {
-          for (const key of Object.keys(tierList)) {
-            if (tierList[key].amt != null) {
-              const n = parseFloat(tierList[key].amt)
-              if (!isNaN(n)) tierList[key].amt = String(Math.round(n * (1 + markupPct / 100) * 100) / 100)
-            }
-          }
-        }
-        wqmMeta.push({ key: '_wqm_tiers', value: tiersData })
-      } else {
-        wqmMeta.push({ key: '_wqm_tiers', value: t.value })
-      }
+  if (wantsTiers) {
+    // Resolve source plugin — prefer explicit param, fall back to meta fingerprint
+    const resolvedSrcPlugin = srcPlugin || detectTierPluginFromMeta(sourceMeta)
+
+    const getRawMeta = (key) => {
+      const entry = sourceMeta.find(m => m.key === key)
+      return entry ? parseMeta(entry.value) : null
     }
-    if (s) wqmMeta.push({ key: '_wqm_settings', value: s.value })
-  }
-  if (fields.includes('wqm_min_qty')) {
-    const m = sourceMeta.find(m => m.key === '_wqm_min_quantity')
-    if (m) wqmMeta.push({ key: '_wqm_min_quantity', value: m.value })
-  }
-  if (fields.includes('wqm_max_qty')) {
-    const m = sourceMeta.find(m => m.key === '_wqm_max_quantity')
-    if (m) wqmMeta.push({ key: '_wqm_max_quantity', value: m.value })
-  }
-  if (fields.includes('wqm_step')) {
-    const m = sourceMeta.find(m => m.key === '_wqm_step')
-    if (m) wqmMeta.push({ key: '_wqm_step', value: m.value })
-  }
-  if (fields.includes('wqm_group_of')) {
-    const m = sourceMeta.find(m => m.key === '_wqm_group_of')
-    if (m) wqmMeta.push({ key: '_wqm_group_of', value: m.value })
-  }
-  if (fields.includes('overwrite_wqm')) {
-    wqmMeta.push({ key: '_wqm_overwrite', value: '1' })
+
+    const wqmTiersRaw    = getRawMeta('_wqm_tiers')
+    const wpcpqPricesRaw = getRawMeta('wpcpq_prices')
+
+    let extraMeta = []
+
+    if (resolvedSrcPlugin === 'wqm' && tgtPlugin === 'wpcpq' && wqmTiersRaw) {
+      // ── WQM → WPC PBQ ──────────────────────────────────────────────────────
+      const converted = wqmToWpcpq(wqmTiersRaw, markupPct)
+      if (converted) extraMeta = converted
+
+    } else if (resolvedSrcPlugin === 'wpcpq' && tgtPlugin === 'wqm' && wpcpqPricesRaw) {
+      // ── WPC PBQ → WQM ──────────────────────────────────────────────────────
+      const converted = wpcpqToWqm(wpcpqPricesRaw, markupPct)
+      if (converted) extraMeta = converted
+
+    } else if (resolvedSrcPlugin === 'wqm' && (tgtPlugin === 'wqm' || tgtPlugin === null) && wqmTiersRaw) {
+      // ── WQM → WQM (same plugin, apply markup) ──────────────────────────────
+      const tiersData  = JSON.parse(JSON.stringify(wqmTiersRaw))  // deep clone
+      const tierType   = tiersData.type || 'fixed'
+      const tierList   = tiersData.tiers
+      if (tierList && typeof tierList === 'object' && markupPct !== 0 && tierType === 'fixed') {
+        for (const key of Object.keys(tierList)) {
+          const n = parseFloat(String(tierList[key].amt ?? '0').replace(',', '.'))
+          if (!isNaN(n)) tierList[key].amt = String(Math.round(n * (1 + markupPct / 100) * 100) / 100)
+        }
+      }
+      extraMeta = [{ key: '_wqm_tiers', value: tiersData }]
+      const wqmSettingsRaw = getRawMeta('_wqm_settings')
+      if (wqmSettingsRaw) extraMeta.push({ key: '_wqm_settings', value: wqmSettingsRaw })
+
+    } else if (resolvedSrcPlugin === 'wpcpq' && (tgtPlugin === 'wpcpq' || tgtPlugin === null) && wpcpqPricesRaw) {
+      // ── WPC PBQ → WPC PBQ (apply markup to fixed tiers) ───────────────────
+      const factor  = 1 + markupPct / 100
+      const marked  = wpcpqPricesRaw.map(t => {
+        if (markupPct !== 0 && t.price && String(t.price).trim() !== '') {
+          const n = parseFloat(String(t.price).replace(',', '.')) || 0
+          return { ...t, price: String(Math.round(n * factor * 100) / 100) }
+        }
+        return { ...t }
+      })
+      extraMeta = [{ key: 'wpcpq_prices', value: marked }]
+
+    } else {
+      // ── Fallback: copy whatever meta exists as-is ──────────────────────────
+      if (wqmTiersRaw)    extraMeta.push({ key: '_wqm_tiers',   value: wqmTiersRaw })
+      if (wpcpqPricesRaw) extraMeta.push({ key: 'wpcpq_prices', value: wpcpqPricesRaw })
+      const wqmSettingsRaw = getRawMeta('_wqm_settings')
+      if (wqmSettingsRaw) extraMeta.push({ key: '_wqm_settings', value: wqmSettingsRaw })
+    }
+
+    if (extraMeta.length > 0) {
+      payload.meta_data = [...(payload.meta_data || []), ...extraMeta]
+    }
   }
 
-  if (wqmMeta.length > 0) payload.meta_data = wqmMeta
+  // ── Non-tier WQM meta fields ────────────────────────────────────────────────
+  const wqmSimpleMeta = []
+  const sourceMeta2 = sourceProduct.meta_data || []
+
+  if (fields.includes('wqm_min_qty')) {
+    const m = sourceMeta2.find(m => m.key === '_wqm_min_quantity')
+    if (m) wqmSimpleMeta.push({ key: '_wqm_min_quantity', value: m.value })
+  }
+  if (fields.includes('wqm_max_qty')) {
+    const m = sourceMeta2.find(m => m.key === '_wqm_max_quantity')
+    if (m) wqmSimpleMeta.push({ key: '_wqm_max_quantity', value: m.value })
+  }
+  if (fields.includes('wqm_step')) {
+    const m = sourceMeta2.find(m => m.key === '_wqm_step')
+    if (m) wqmSimpleMeta.push({ key: '_wqm_step', value: m.value })
+  }
+  if (fields.includes('wqm_group_of')) {
+    const m = sourceMeta2.find(m => m.key === '_wqm_group_of')
+    if (m) wqmSimpleMeta.push({ key: '_wqm_group_of', value: m.value })
+  }
+  if (fields.includes('overwrite_wqm')) {
+    wqmSimpleMeta.push({ key: '_wqm_overwrite', value: '1' })
+  }
+
+  if (wqmSimpleMeta.length > 0) {
+    payload.meta_data = [...(payload.meta_data || []), ...wqmSimpleMeta]
+  }
 
   return payload
 }
@@ -158,6 +314,8 @@ export default async (req) => {
     match_strategy = 'sku',        // 'sku' | 'identifier' | 'mapping' | 'confirmed_mapping'
     confirmed_mappings = [],        // [{ source_id, target_id }] — used with confirmed_mapping strategy
     price_markup_pct = 0,           // percentage markup applied to all prices (e.g. 10 = +10%)
+    source_plugin_id = null,        // 'wqm' | 'wpcpq' | null — tier plugin on source (from scan result)
+    target_plugin_id = null,        // 'wqm' | 'wpcpq' | null — tier plugin on target (from scan result)
   } = body
 
   if (!source_shop_id || !target_shop_id || !Array.isArray(sourceProducts) || sourceProducts.length === 0) {
@@ -171,7 +329,13 @@ export default async (req) => {
     ])
     if (!sourceShop || !targetShop) return json({ error: 'Shop not found' }, 404)
 
-    await log(supabase, 'info', `Stock sync started: ${sourceShop.name} → ${targetShop.name} (${match_strategy}, ${fields.join(',')})`, { user_id: user.id })
+    // Resolve tier plugin for each shop.
+    // Primary: plugin IDs passed from the frontend (set during scan step).
+    // Fallback: detect from shops.active_plugins (set by PluginWizardModal or sync-scan).
+    const resolvedSrcPlugin = source_plugin_id || detectTierPlugin(sourceShop.active_plugins)
+    const resolvedTgtPlugin = target_plugin_id || detectTierPlugin(targetShop.active_plugins)
+
+    await log(supabase, 'info', `Stock sync started: ${sourceShop.name} → ${targetShop.name} (${match_strategy}, ${fields.join(',')}, src:${resolvedSrcPlugin||'?'}, tgt:${resolvedTgtPlugin||'?'})`, { user_id: user.id })
 
     // Load target products (paginated, up to 1000)
     const targetProducts = await wooGetAll(targetShop, 'products?status=any', 100, 10)
@@ -259,7 +423,7 @@ export default async (req) => {
           continue
         }
 
-        const payload = buildSyncPayload(src, fields, price_markup_pct)
+        const payload = buildSyncPayload(src, fields, price_markup_pct, resolvedSrcPlugin, resolvedTgtPlugin)
         if (Object.keys(payload).length === 0) continue
 
         const { product: tp, variation, variation_id } = match
