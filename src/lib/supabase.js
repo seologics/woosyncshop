@@ -20,19 +20,25 @@ let _cachedToken = null
 
 export const setCachedToken = (token) => { _cachedToken = token }
 
+// Single in-flight getSession() promise — prevents concurrent calls fighting over IndexedDB lock
+let _sessionPromise = null
+
 export const getToken = () => {
   if (_cachedToken) return Promise.resolve(_cachedToken)
-  // Fallback: ask Supabase, but never wait more than 3 seconds
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), 3000)
+  // Reuse an in-flight getSession() if one is already running
+  if (_sessionPromise) return _sessionPromise
+  _sessionPromise = new Promise((resolve) => {
+    const timer = setTimeout(() => { _sessionPromise = null; resolve(null) }, 3000)
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
         clearTimeout(timer)
+        _sessionPromise = null
         _cachedToken = session?.access_token || null
         resolve(_cachedToken)
       })
-      .catch(() => { clearTimeout(timer); resolve(null) })
+      .catch(() => { clearTimeout(timer); _sessionPromise = null; resolve(null) })
   })
+  return _sessionPromise
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────

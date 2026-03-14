@@ -1684,34 +1684,27 @@ const AiScanModal = ({ sourceShop, targetShop, onClose, onConfirmMatches, getTok
                 const dec = decisions[i] || "review";
                 const pct = Math.round(m.confidence * 100);
                 return (
-                  <div key={i} style={{ border: `1px solid ${dec === "accept" ? "rgba(34,197,94,0.4)" : dec === "reject" ? "rgba(239,68,68,0.2)" : "var(--b1)"}`, borderRadius: "var(--rd)", overflow: "hidden", background: dec === "accept" ? "rgba(34,197,94,0.04)" : dec === "reject" ? "rgba(239,68,68,0.03)" : "var(--s2)", opacity: dec === "reject" ? 0.6 : 1 }}>
-                    {/* Main row */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
+                  <div key={i} style={{ border: `1px solid ${dec === "accept" ? "rgba(34,197,94,0.4)" : dec === "reject" ? "rgba(239,68,68,0.2)" : "var(--b1)"}`, borderRadius: "var(--rd)", background: dec === "accept" ? "rgba(34,197,94,0.04)" : dec === "reject" ? "rgba(239,68,68,0.03)" : "var(--s2)", opacity: dec === "reject" ? 0.6 : 1 }}>
+                    {/* Main row — grid layout so names never get squashed */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 1fr 68px", alignItems: "center", gap: 8, padding: "9px 12px" }}>
                       {/* Source product */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-                        {m.source_product.image && <img src={m.source_product.image} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: "cover", flexShrink: 0 }} />}
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.source_product.name}</div>
-                          <div style={{ fontSize: 10, color: "var(--dm)" }}>SKU: {m.source_product.sku || "—"} · €{m.source_product.price || "—"}</div>
-                        </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{m.source_product.name}</div>
+                        <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 1 }}>SKU: {m.source_product.sku || "—"} · €{m.source_product.price || "—"}</div>
                       </div>
-
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                        <span style={{ fontSize: 14, color: "var(--mx)" }}>→</span>
+                      {/* Confidence + arrow */}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                        <span style={{ fontSize: 11, color: "var(--mx)" }}>→</span>
                         <ConfidenceBar value={m.confidence} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: Math.round(m.confidence*100) >= 85 ? "var(--gr)" : Math.round(m.confidence*100) >= 70 ? "var(--ac)" : "rgba(239,68,68,1)" }}>{Math.round(m.confidence * 100)}%</span>
                       </div>
-
                       {/* Target product */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-                        {m.target_product.image && <img src={m.target_product.image} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: "cover", flexShrink: 0 }} />}
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.target_product.name}</div>
-                          <div style={{ fontSize: 10, color: "var(--dm)" }}>SKU: {m.target_product.sku || "—"} · €{m.target_product.price || "—"}</div>
-                        </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{m.target_product.name}</div>
+                        <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 1 }}>SKU: {m.target_product.sku || "—"} · €{m.target_product.price || "—"}</div>
                       </div>
-
-                      {/* Actions */}
-                      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      {/* Accept/Reject buttons */}
+                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                         <button onClick={() => setDecisions(d => ({ ...d, [i]: "accept" }))}
                           style={{ width: 30, height: 30, borderRadius: "var(--rd)", border: "1px solid", borderColor: dec === "accept" ? "#22c55e" : "var(--b2)", background: dec === "accept" ? "rgba(34,197,94,0.15)" : "transparent", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: dec === "accept" ? "#22c55e" : "var(--mx)" }}>✓</button>
                         <button onClick={() => setDecisions(d => ({ ...d, [i]: "reject" }))}
@@ -7233,8 +7226,16 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
               </div>
 
               {/* Column headers — two-sided */}
-              <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 110px 18px 1fr 110px 72px", padding: "7px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontSize: 10, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em", gap: 6 }}>
-                <div />
+              <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 110px 18px 1fr 110px 72px", padding: "7px 14px", background: "var(--s2)", borderBottom: "1px solid var(--b1)", fontSize: 10, fontWeight: 700, color: "var(--mx)", textTransform: "uppercase", letterSpacing: "0.04em", gap: 6, alignItems: "center" }}>
+                <div onClick={() => {
+                  const allIds = new Set(filteredProducts.map(p => p.id));
+                  const allSelected = filteredProducts.every(p => selectedProducts.has(p.id));
+                  setSelectedProducts(allSelected ? new Set() : allIds);
+                }} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 14, height: 14, border: `2px solid ${filteredProducts.length > 0 && filteredProducts.every(p => selectedProducts.has(p.id)) ? "var(--pr)" : "var(--b2)"}`, borderRadius: 3, background: filteredProducts.length > 0 && filteredProducts.every(p => selectedProducts.has(p.id)) ? "var(--pr)" : filteredProducts.some(p => selectedProducts.has(p.id)) ? "rgba(99,102,241,0.3)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {filteredProducts.length > 0 && filteredProducts.every(p => selectedProducts.has(p.id)) && <span style={{ color: "#fff", fontSize: 8, fontWeight: 700 }}>✓</span>}
+                  </div>
+                </div>
                 <div>Bron — {sourceShop?.name}</div>
                 <div style={{ fontSize: 9 }}>SKU / PRIJS</div>
                 <div />
@@ -7409,11 +7410,18 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <Btn variant="secondary" onClick={() => setStep(3)}>← Terug</Btn>
-              {syncResult?.unmatched?.length > 0 && (
-                <Btn variant="secondary" onClick={() => setStep(5)}>Ontbrekende producten aanmaken →</Btn>
-              )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Btn variant="secondary" onClick={() => setStep(3)}>← Terug naar strategie</Btn>
+              <div style={{ display: "flex", gap: 8 }}>
+                {syncResult && (
+                  <Btn variant="secondary" onClick={() => { setSyncResult(null); loadSourceProducts(); }}>↻ Opnieuw synchen</Btn>
+                )}
+                {syncResult?.unmatched?.length > 0 ? (
+                  <Btn variant="primary" onClick={() => setStep(5)}>✨ Aanmaken in {targetShop?.name} →</Btn>
+                ) : syncResult && (
+                  <Btn variant="primary" onClick={() => setStep(1)}>✓ Klaar — nieuwe sync starten</Btn>
+                )}
+              </div>
             </div>
           </div>
         );
