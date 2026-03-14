@@ -5,13 +5,8 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# Heavy AI + sync functions need extended timeouts (Netlify Pro max = 26s, Enterprise = 26s)
-# Use background functions for truly long operations via the frontend polling pattern.
 [functions]
-  included_files = ["netlify/functions/**"]
-
-[[functions]]
-  path = "/api/ai-match-products"
+  node_bundler = "esbuild"
 
 [functions."ai-match-products"]
   timeout = 26
