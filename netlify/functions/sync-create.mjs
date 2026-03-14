@@ -429,7 +429,7 @@ Return JSON: {
 
         if (!created?.id) {
           results.failed.push({ source_id: sourceProd.id, name: sourceProd.name, error: created?.message || 'Unknown WC error' })
-          continue
+          return
         }
 
         // ── 6. EAN assignment ───────────────────────────────────────────────
