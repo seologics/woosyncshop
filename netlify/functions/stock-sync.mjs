@@ -43,8 +43,16 @@ async function wooGetAll(shop, endpoint, perPage = 100, maxPages = 50) {
 }
 
 // Build the payload of fields to sync based on field selection
-function buildSyncPayload(sourceProduct, fields) {
+function buildSyncPayload(sourceProduct, fields, markupPct = 0) {
   const payload = {}
+
+  // Apply price markup: multiply by (1 + pct/100), round to 2 decimals
+  const applyMarkup = (priceStr) => {
+    if (!priceStr) return priceStr
+    const n = parseFloat(priceStr)
+    if (isNaN(n) || markupPct === 0) return priceStr
+    return String(Math.round(n * (1 + markupPct / 100) * 100) / 100)
+  }
 
   if (fields.includes('stock_quantity')) {
     payload.stock_quantity = sourceProduct.stock_quantity ?? null
@@ -52,10 +60,10 @@ function buildSyncPayload(sourceProduct, fields) {
     payload.stock_status = sourceProduct.stock_status || 'instock'
   }
   if (fields.includes('price')) {
-    if (sourceProduct.regular_price != null) payload.regular_price = String(sourceProduct.regular_price)
+    if (sourceProduct.regular_price != null) payload.regular_price = applyMarkup(String(sourceProduct.regular_price))
   }
   if (fields.includes('sale_price')) {
-    if (sourceProduct.sale_price != null) payload.sale_price = String(sourceProduct.sale_price)
+    if (sourceProduct.sale_price != null) payload.sale_price = applyMarkup(String(sourceProduct.sale_price))
   }
   if (fields.includes('description')) {
     payload.description = sourceProduct.description || ''
@@ -80,7 +88,24 @@ function buildSyncPayload(sourceProduct, fields) {
   if (fields.includes('wqm_tiers')) {
     const t = sourceMeta.find(m => m.key === '_wqm_tiers')
     const s = sourceMeta.find(m => m.key === '_wqm_settings')
-    if (t) wqmMeta.push({ key: '_wqm_tiers', value: t.value })
+    if (t) {
+      // Apply markup to each tier's price (amt field)
+      if (markupPct !== 0 && t.value && typeof t.value === 'object') {
+        const tiersData = JSON.parse(JSON.stringify(t.value)) // deep clone
+        const tierList = tiersData.tiers
+        if (tierList && typeof tierList === 'object') {
+          for (const key of Object.keys(tierList)) {
+            if (tierList[key].amt != null) {
+              const n = parseFloat(tierList[key].amt)
+              if (!isNaN(n)) tierList[key].amt = String(Math.round(n * (1 + markupPct / 100) * 100) / 100)
+            }
+          }
+        }
+        wqmMeta.push({ key: '_wqm_tiers', value: tiersData })
+      } else {
+        wqmMeta.push({ key: '_wqm_tiers', value: t.value })
+      }
+    }
     if (s) wqmMeta.push({ key: '_wqm_settings', value: s.value })
   }
   if (fields.includes('wqm_min_qty')) {
@@ -132,6 +157,7 @@ export default async (req) => {
     fields = ['stock_quantity'],   // Which fields to sync
     match_strategy = 'sku',        // 'sku' | 'identifier' | 'mapping' | 'confirmed_mapping'
     confirmed_mappings = [],        // [{ source_id, target_id }] — used with confirmed_mapping strategy
+    price_markup_pct = 0,           // percentage markup applied to all prices (e.g. 10 = +10%)
   } = body
 
   if (!source_shop_id || !target_shop_id || !Array.isArray(sourceProducts) || sourceProducts.length === 0) {
@@ -233,7 +259,7 @@ export default async (req) => {
           continue
         }
 
-        const payload = buildSyncPayload(src, fields)
+        const payload = buildSyncPayload(src, fields, price_markup_pct)
         if (Object.keys(payload).length === 0) continue
 
         const { product: tp, variation, variation_id } = match

@@ -6605,6 +6605,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null); // { synced, failed, unmatched }
+  const [priceMarkup, setPriceMarkup] = useState(0); // percentage markup applied to all prices, e.g. 10 = +10%
   // AI pre-match state
   const [aiMatchLoading, setAiMatchLoading] = useState(false);
   const [aiMatchResult, setAiMatchResult] = useState(null); // { matches: [...] } from ai-match-products
@@ -6629,6 +6630,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     seo_word_count: 600,
     seo_add_lists: true,
     seo_custom_params: [], // up to 5 strings
+    price_markup_pct: 0, // percentage markup on price, e.g. 10 = +10%
   });
   const [selectedToCreate, setSelectedToCreate] = useState(new Set());
   const [creating, setCreating] = useState(false);
@@ -6782,6 +6784,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
             fields: selectedFields,
             match_strategy: matchStrategy === "ai_name" ? "confirmed_mapping" : matchStrategy,
             confirmed_mappings: confirmedMappings,
+            price_markup_pct: priceMarkup,
           }),
         });
         const data = await res.json();
@@ -7270,7 +7273,17 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
               <span>📤 <strong>{sourceShop?.name}</strong> → <strong>{targetShop?.name}</strong></span>
               <span>🔑 {matchStrategy === "sku" ? "SKU exact" : matchStrategy === "identifier" ? "Identifier attribuut" : "Opgeslagen koppeling"}</span>
               <span>📋 {selectedFields.length} veld(en)</span>
-              <button onClick={() => setStep(1)} style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--pr)", fontSize: 12, cursor: "pointer" }}>✏ Wijzigen</button>
+              {/* Price markup control */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                <span style={{ fontSize: 11, color: "var(--mx)", whiteSpace: "nowrap" }}>💶 Prijsopslag:</span>
+                <button onClick={() => setPriceMarkup(m => Math.max(-50, m - 5))} style={{ width: 24, height: 24, borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s3)", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mx)", flexShrink: 0 }}>−</button>
+                <div style={{ minWidth: 52, textAlign: "center", fontWeight: 700, color: priceMarkup > 0 ? "var(--gr)" : priceMarkup < 0 ? "rgba(239,68,68,1)" : "var(--mx)", fontSize: 13 }}>
+                  {priceMarkup > 0 ? "+" : ""}{priceMarkup}%
+                </div>
+                <button onClick={() => setPriceMarkup(m => Math.min(200, m + 5))} style={{ width: 24, height: 24, borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s3)", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mx)", flexShrink: 0 }}>+</button>
+                {priceMarkup !== 0 && <button onClick={() => setPriceMarkup(0)} style={{ fontSize: 10, background: "none", border: "none", color: "var(--dm)", cursor: "pointer", padding: "0 2px" }}>reset</button>}
+              </div>
+              <button onClick={() => setStep(1)} style={{ background: "none", border: "none", color: "var(--pr)", fontSize: 12, cursor: "pointer" }}>✏ Wijzigen</button>
             </div>
 
             {/* Product table */}
@@ -7595,6 +7608,20 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                     <option value="formal">Formeel</option>
                     <option value="casual">Informeel</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Price markup */}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mx)", marginBottom: 6 }}>Prijsopslag</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => setCreateConfig(c => ({ ...c, price_markup_pct: Math.max(-50, (c.price_markup_pct || 0) - 5) }))} style={{ width: 28, height: 28, borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s3)", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                  <div style={{ minWidth: 56, textAlign: "center", fontWeight: 700, fontSize: 15, color: (createConfig.price_markup_pct || 0) > 0 ? "var(--gr)" : (createConfig.price_markup_pct || 0) < 0 ? "rgba(239,68,68,1)" : "var(--mx)" }}>
+                    {(createConfig.price_markup_pct || 0) > 0 ? "+" : ""}{createConfig.price_markup_pct || 0}%
+                  </div>
+                  <button onClick={() => setCreateConfig(c => ({ ...c, price_markup_pct: Math.min(200, (c.price_markup_pct || 0) + 5) }))} style={{ width: 28, height: 28, borderRadius: "var(--rd)", border: "1px solid var(--b1)", background: "var(--s3)", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                  {(createConfig.price_markup_pct || 0) !== 0 && <button onClick={() => setCreateConfig(c => ({ ...c, price_markup_pct: 0 }))} style={{ fontSize: 11, background: "none", border: "none", color: "var(--dm)", cursor: "pointer" }}>reset</button>}
+                  <span style={{ fontSize: 11, color: "var(--mx)", marginLeft: 4 }}>wordt toegepast op reguliere prijs, actieprijs en alle WQM-prijstrappen</span>
                 </div>
               </div>
 

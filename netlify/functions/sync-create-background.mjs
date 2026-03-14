@@ -627,6 +627,7 @@ export default async (req) => {
     image_mode = 'translate', // 'translate' | 'ai_vision' | 'generate'
     image_generate_size = 'woosyncshop', // 'woosyncshop' | 'target_shop'
     text_mode = 'translate_rewrite', // 'literal' | 'translate_rewrite' | 'seo_write'
+    price_markup_pct = 0, // percentage markup on all prices
     seo_use_headers = true,
     seo_word_count = 600,
     seo_add_lists = true,
@@ -808,11 +809,26 @@ Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}
           meta_data.push({ key: '_wss_identifier', value: sourceProd.sku || String(sourceProd.id) })
         }
 
-        // Copy WQM meta if present in source
+        // Copy WQM meta if present in source (apply price markup to tiers)
         const wqmKeys = ['_wqm_tiers', '_wqm_settings', '_wqm_min_quantity', '_wqm_max_quantity', '_wqm_step', '_wqm_group_of']
         for (const wqmKey of wqmKeys) {
           const wqmMeta = sourceProd.meta_data?.find(m => m.key === wqmKey)
-          if (wqmMeta) meta_data.push({ key: wqmKey, value: wqmMeta.value })
+          if (!wqmMeta) continue
+          if (wqmKey === '_wqm_tiers' && price_markup_pct !== 0 && wqmMeta.value && typeof wqmMeta.value === 'object') {
+            const tiersData = JSON.parse(JSON.stringify(wqmMeta.value))
+            const tierList = tiersData.tiers
+            if (tierList && typeof tierList === 'object') {
+              for (const key of Object.keys(tierList)) {
+                if (tierList[key].amt != null) {
+                  const n = parseFloat(tierList[key].amt)
+                  if (!isNaN(n)) tierList[key].amt = String(Math.round(n * (1 + price_markup_pct / 100) * 100) / 100)
+                }
+              }
+            }
+            meta_data.push({ key: wqmKey, value: tiersData })
+          } else {
+            meta_data.push({ key: wqmKey, value: wqmMeta.value })
+          }
         }
 
         // Categories: use AI-determined target category IDs, fallback to source slugs
@@ -825,7 +841,10 @@ Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}
           status: 'draft', // created as draft — user can publish from dashboard
           type: sourceProd.type || 'simple',
           sku: newSku,
-          regular_price: String(sourceProd.regular_price || sourceProd.price || ''),
+          regular_price: (() => {
+            const p = parseFloat(sourceProd.regular_price || sourceProd.price || 0)
+            return price_markup_pct !== 0 && p > 0 ? String(Math.round(p * (1 + price_markup_pct / 100) * 100) / 100) : String(sourceProd.regular_price || sourceProd.price || '')
+          })(),
           description: translate_fields.includes('description') ? (translated.description || sourceProd.description || '') : (sourceProd.description || ''),
           short_description: translate_fields.includes('short_description') ? (translated.short_description || sourceProd.short_description || '') : (sourceProd.short_description || ''),
           manage_stock: sourceProd.manage_stock || false,
