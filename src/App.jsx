@@ -7163,6 +7163,12 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
         (syncResult?.unmatched|| []).forEach(u => { unmatchedSet.add(u.id); });
         const hasSyncResult = !!syncResult;
 
+        // Products with a known null match (not undefined = "unknown") that aren't yet synced
+        // These can skip the sync step and go straight to creation
+        const unmatchedPreview = !hasSyncResult && (matchStrategy === "sku" || matchStrategy === "mapping" || matchStrategy === "ai_name")
+          ? sourceProducts.filter(p => previewMatch(p) === null)
+          : [];
+
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {/* Config summary bar */}
@@ -7410,6 +7416,33 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
               </div>
             )}
 
+            {/* Unmatched preview banner — shown before sync when we already know products have no match */}
+            {unmatchedPreview.length > 0 && !hasSyncResult && (
+              <div style={{ padding: "12px 16px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: "var(--rd)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ac)" }}>
+                    {unmatchedPreview.length} product{unmatchedPreview.length !== 1 ? "en" : ""} zonder match in {targetShop?.name}
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--mx)", marginLeft: 8 }}>
+                    — nog niet aanwezig in de doelshop. Maak ze aan met AI-vertaling.
+                  </span>
+                </div>
+                <Btn variant="primary" onClick={() => {
+                  // Pre-fill syncResult.unmatched so step 5 knows what to create
+                  setSyncResult(sr => ({
+                    ...(sr || {}),
+                    synced: sr?.synced || [],
+                    failed: sr?.failed || [],
+                    unmatched: unmatchedPreview.map(p => ({ id: p.id, name: p.name, sku: p.sku || "" })),
+                  }));
+                  setSelectedToCreate(new Set(unmatchedPreview.map(p => p.id)));
+                  setStep(5);
+                }}>
+                  ✨ Aanmaken in {targetShop?.name} →
+                </Btn>
+              </div>
+            )}
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Btn variant="secondary" onClick={() => setStep(3)}>← Terug naar strategie</Btn>
               <div style={{ display: "flex", gap: 8 }}>
@@ -7418,9 +7451,9 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
                 )}
                 {syncResult?.unmatched?.length > 0 ? (
                   <Btn variant="primary" onClick={() => setStep(5)}>✨ Aanmaken in {targetShop?.name} →</Btn>
-                ) : syncResult && (
+                ) : syncResult ? (
                   <Btn variant="primary" onClick={() => setStep(1)}>✓ Klaar — nieuwe sync starten</Btn>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
