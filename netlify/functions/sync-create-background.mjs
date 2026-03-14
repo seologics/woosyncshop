@@ -254,9 +254,22 @@ async function generateSku(mode, product, langCode, supabase, targetShopId) {
 // ── Image processing: download, generate SEO metadata, upload to target ─────
 // mode: 'ai_vision' — Gemini scans image → SEO filename + alt + title in target language
 // mode: 'translate' — uses translated product name, no vision call needed
-async function processImages(sourceImages, targetShop, productName, language, imageMode, geminiKey, geminiModel) {
+// ── Image processing ─────────────────────────────────────────────────────────
+// Pass source URLs for WooCommerce to sideload (instant — no download/upload in critical path).
+// SEO rename + alt text runs AFTER product creation as a background task.
+function buildImagePayload(sourceImages, productName) {
   if (!Array.isArray(sourceImages) || sourceImages.length === 0) return []
+  return sourceImages.map((img, i) => ({
+    src: img.src,
+    alt: img.alt || productName,
+    name: i === 0 ? productName : `${productName} ${i + 1}`,
+  }))
+}
 
+// Async post-create: rename images in WP media library + set SEO alt/title
+// Runs as fire-and-forget after product is created. Won't block creation.
+async function updateImageSeo(createdProduct, targetShop, productName, language, imageMode, geminiKey, geminiModel) {
+  if (!createdProduct?.images?.length) return
   const base = targetShop.site_url.replace(/\/$/, '')
   const wpAuth = `Basic ${Buffer.from(`${targetShop.consumer_key}:${targetShop.consumer_secret}`).toString('base64')}`
 
@@ -265,25 +278,20 @@ async function processImages(sourceImages, targetShop, productName, language, im
     .replace(/[öòóô]/g, 'o').replace(/[üùúû]/g, 'u').replace(/ß/g, 'ss')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
 
-  const results = []
+  for (let i = 0; i < createdProduct.images.length; i++) {
+    const img = createdProduct.images[i]
+    if (!img?.id) continue
 
-  for (let i = 0; i < sourceImages.length; i++) {
-    const img = sourceImages[i]
-    if (!img?.src) continue
-    try {
-      // 1. Download source image
-      const fetchRes = await fetch(img.src, { signal: AbortSignal.timeout(10000) })
-      if (!fetchRes.ok) throw new Error(`Fetch failed: ${fetchRes.status}`)
-      const contentType = fetchRes.headers.get('content-type') || 'image/jpeg'
-      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
-      const imageBuffer = await fetchRes.arrayBuffer()
+    let altText = i === 0 ? productName : `${productName} ${i + 1}`
+    let titleText = productName
+    let seoFilename = i === 0 ? nameSlug : `${nameSlug}-${i + 1}`
 
-      let seoFilename, altText, titleText
-
-      // 2a. AI Vision mode: Gemini scans image → SEO metadata in target language
-      if (imageMode === 'ai_vision' && geminiKey) {
-        try {
-          const b64 = Buffer.from(imageBuffer).toString('base64')
+    if (imageMode === 'ai_vision' && geminiKey && img.src) {
+      try {
+        const imgRes = await fetch(img.src, { signal: AbortSignal.timeout(8000) })
+        if (imgRes.ok) {
+          const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
+          const b64 = Buffer.from(await imgRes.arrayBuffer()).toString('base64')
           const vRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel || 'gemini-2.5-flash'}:generateContent?key=${geminiKey}`,
             {
@@ -291,8 +299,7 @@ async function processImages(sourceImages, targetShop, productName, language, im
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 contents: [{ parts: [
-                  { text: `SEO expert for a plant nursery webshop. Analyze this product image. Return ONLY valid JSON in ${language}:
-{"filename":"seo-slug-max-60-chars-lowercase-hyphens-describe-species-pot-size-height","alt":"max 12 word descriptive alt text","title":"max 8 word image title"}` },
+                  { text: `SEO expert for a plant nursery. Analyze image. Return ONLY valid JSON in ${language}:\n{"filename":"slug-max-50-chars","alt":"max 12 word alt text","title":"max 8 word title"}` },
                   { inline_data: { mime_type: contentType, data: b64 } }
                 ]}],
                 generationConfig: { temperature: 0.2 }
@@ -300,58 +307,26 @@ async function processImages(sourceImages, targetShop, productName, language, im
             }
           )
           if (vRes.ok) {
-            const vData = await vRes.json()
-            const raw = vData.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
-            const parsed = JSON.parse(raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim())
-            if (parsed.filename) seoFilename = parsed.filename.replace(/[^a-z0-9-]/g, '-').replace(/^-|-$/g, '').slice(0, 60)
-            if (parsed.alt)   altText   = parsed.alt
-            if (parsed.title) titleText = parsed.title
+            const parsed = JSON.parse(((await vRes.json()).candidates?.[0]?.content?.parts?.[0]?.text || '{}').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim())
+            if (parsed.alt)      altText     = parsed.alt
+            if (parsed.title)    titleText   = parsed.title
+            if (parsed.filename) seoFilename = parsed.filename.replace(/[^a-z0-9-]/g, '-').replace(/^-|-$/g, '').slice(0, 50)
           }
-        } catch {} // Fall through to translate mode
-      }
-
-      // 2b. Translate mode (or fallback)
-      if (!seoFilename) {
-        seoFilename = i === 0 ? nameSlug : `${nameSlug}-${i + 1}`
-        altText     = altText || (i === 0 ? productName : `${productName} ${i + 1}`)
-        titleText   = titleText || productName
-      }
-
-      const uid = Math.random().toString(36).slice(2, 6)
-      const filename = `${seoFilename}-${uid}.${ext}`
-
-      // 3. Upload to WordPress media library
-      const uploadRes = await fetch(`${base}/wp-json/wp/v2/media`, {
-        method: 'POST',
-        headers: {
-          'Authorization': wpAuth,
-          'Content-Disposition': `attachment; filename="${filename}"`,
-          'Content-Type': contentType,
-        },
-        body: imageBuffer,
-      })
-      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`)
-      const media = await uploadRes.json()
-
-      // 4. Set alt text + title on the media item
-      fetch(`${base}/wp-json/wp/v2/media/${media.id}`, {
-        method: 'POST',
-        headers: { 'Authorization': wpAuth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alt_text: altText, title: titleText, caption: '' }),
-      }).catch(() => {})
-
-      results.push({ id: media.id, src: media.source_url, alt: altText, name: titleText })
-    } catch (imgErr) {
-      // Fallback: pass src URL for WC to sideload (no SEO metadata)
-      results.push({ src: img.src, alt: img.alt || productName, name: productName, fallback: true })
+        }
+      } catch {} // Non-critical
     }
-  }
 
-  return results
+    // Update WP media item with SEO alt + title + slug
+    await fetch(`${base}/wp-json/wp/v2/media/${img.id}`, {
+      method: 'POST', signal: AbortSignal.timeout(8000),
+      headers: { 'Authorization': wpAuth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alt_text: altText, title: titleText, slug: seoFilename }),
+    }).catch(() => {})
+  }
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
-export default async (req, context) => {
+export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
@@ -382,13 +357,12 @@ export default async (req, context) => {
     sku_mode = 'lang_prefix',
     lang_code = 'NL',
     translate_meta = true,
-    image_mode = 'translate',
+    image_mode = 'translate', // 'translate' | 'ai_vision'
   } = cfg || {}
 
-  // ── RETURN 202 IMMEDIATELY, schedule work via context.waitUntil ────────────
-  // Netlify background functions: return the response first, then work runs
-  // in the background. context.waitUntil() keeps the process alive up to 15 min.
-  const doWork = async () => {
+  // ── Background function: runs to completion (up to 15 min), returns 202 ──
+  // Netlify background functions execute the full async body synchronously.
+  // No fire-and-forget needed — just write progress to sync_jobs as we go.
   try {
     const [{ data: sourceShop }, { data: targetShop }] = await Promise.all([
       supabase.from('shops').select('*').eq('id', source_shop_id).eq('user_id', user.id).single(),
@@ -456,17 +430,11 @@ Return JSON with same keys and translated values. For description/short_descript
           translated = { name: sourceProd.name }
         }
 
-        // ── 2. Image processing: download + SEO metadata + upload to target ───────
+        // ── 2. Image payload: pass source URLs for WooCommerce sideloading ────────
+        // WC downloads images itself — no blocking download/upload in critical path.
+        // SEO alt/title/filename updated async after product creation.
         const translatedProductName = translated.name || sourceProd.name
-        const processedImages = await processImages(
-          sourceProd.images || [],
-          targetShop,
-          translatedProductName,
-          language,
-          image_mode,
-          geminiKey,
-          geminiModel
-        )
+        const processedImages = buildImagePayload(sourceProd.images || [], translatedProductName)
 
         // ── 3. SKU generation ───────────────────────────────────────────────
         const newSku = await generateSku(sku_mode, sourceProd, lang_code, supabase, target_shop_id)
@@ -548,16 +516,14 @@ Return JSON with same keys and translated values. For description/short_descript
           return
         }
 
-        // ── 7. SEO meta (fire-and-forget — doesn't block product creation) ──────
-        if (translate_meta && rewrite_seo) {
-          ;(async () => {
-            try {
+        // ── 7. Post-create async tasks (fire-and-forget) ───────────────────────
+        ;(async () => {
+          try {
+            // 7a. SEO meta title + description
+            if (translate_meta && rewrite_seo) {
               const seoRaw = await callAI(platformSettings,
                 `Generate SEO meta for a WooCommerce product. Return ONLY valid JSON.`,
-                `Product name: "${translated.name || sourceProd.name}"
-Short description: "${(translated.short_description || sourceProd.short_description || '').slice(0, 120)}"
-Language: ${language}. Tone: ${tone}.
-Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
+                `Name: "${translated.name || sourceProd.name}"\nDesc: "${(translated.short_description || sourceProd.short_description || '').slice(0, 120)}"\nLang: ${language}. Tone: ${tone}.\nReturn: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
                 10000
               )
               const seoData = safeJSON(seoRaw)
@@ -566,18 +532,20 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
                   { key: '_wss_meta_title', value: seoData.meta_title },
                   { key: '_wss_meta_description', value: seoData.meta_description || '' },
                 ]
-                if (seoPlugin === 'rankmath') {
-                  seoMeta.push({ key: 'rank_math_title', value: seoData.meta_title })
-                  seoMeta.push({ key: 'rank_math_description', value: seoData.meta_description || '' })
-                } else if (seoPlugin === 'yoast') {
-                  seoMeta.push({ key: '_yoast_wpseo_title', value: seoData.meta_title })
-                  seoMeta.push({ key: '_yoast_wpseo_metadesc', value: seoData.meta_description || '' })
-                }
+                if (seoPlugin === 'rankmath') { seoMeta.push({ key: 'rank_math_title', value: seoData.meta_title }); seoMeta.push({ key: 'rank_math_description', value: seoData.meta_description || '' }) }
+                else if (seoPlugin === 'yoast') { seoMeta.push({ key: '_yoast_wpseo_title', value: seoData.meta_title }); seoMeta.push({ key: '_yoast_wpseo_metadesc', value: seoData.meta_description || '' }) }
                 await wooFetch(targetShop, `products/${created.id}`, 'PUT', { meta_data: seoMeta })
               }
-            } catch {} // Non-critical — product already created
-          })()
-        }
+            }
+            // 7b. Image SEO: rename + alt text on WP media items (after WC sideloaded them)
+            // Wait 5s for WC to finish sideloading before we update media items
+            const createdFull = await wooFetch(targetShop, `products/${created.id}?_fields=id,images`)
+            if (createdFull?.images?.length) {
+              await new Promise(r => setTimeout(r, 5000))
+              await updateImageSeo(createdFull, targetShop, translatedProductName, language, image_mode, geminiKey, geminiModel)
+            }
+          } catch {} // Non-critical
+        })()
 
         // ── 8. EAN assignment ───────────────────────────────────────────────
         let assignedEan = null
@@ -673,16 +641,9 @@ Return: {"meta_title":"max 60 chars","meta_description":"max 160 chars"}`,
       }).eq('id', job_id)
     } catch {}
   }
-  } // end doWork
-
-  // Mark job as accepted and return 202 IMMEDIATELY
-  // context.waitUntil keeps the process alive while doWork() runs in background
-  await supabase.from('sync_jobs').update({
-    status: 'running', updated_at: new Date().toISOString()
-  }).eq('id', job_id)
-
-  context.waitUntil(doWork())
+  // Background function returns 202 after all work is done
   return new Response(JSON.stringify({ ok: true, job_id }), { status: 202, headers: CORS })
 }
 
 export const config = { path: '/api/sync-create' }
+// NOTE: Deploy this file as sync-create-background.mjs for Netlify background function runtime
