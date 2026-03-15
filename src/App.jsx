@@ -380,6 +380,19 @@ const LOCALE_FLAG_MAP = {
   ja:"🇯🇵", ko_KR:"🇰🇷", ru_RU:"🇷🇺", uk:"🇺🇦",
 };
 
+// Maps WooCommerce locale prefix → { lang, code } for auto-detecting createConfig language
+const LOCALE_TO_LANG = {
+  nl: { lang: "Dutch",      code: "NL" },
+  de: { lang: "German",     code: "DE" },
+  fr: { lang: "French",     code: "FR" },
+  en: { lang: "English",    code: "EN" },
+  es: { lang: "Spanish",    code: "ES" },
+  it: { lang: "Italian",    code: "IT" },
+  pl: { lang: "Polish",     code: "PL" },
+  pt: { lang: "Portuguese", code: "PT" },
+  sv: { lang: "Swedish",    code: "SE" },
+};
+
 const FLAG_SHAPES = ["emoji", "rect", "circle"];
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
@@ -6823,7 +6836,16 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   const sourceShop = shops.find(s => s.id === sourceShopId);
   const targetShop = shops.find(s => s.id === targetShopId);
 
-  // ── Step 2: Scan fields ────────────────────────────────────────────────────
+  // Auto-detect createConfig language from the target shop's locale
+  // e.g. de_DE → German/DE, fr_FR → French/FR — saves the user from having to set it manually
+  useEffect(() => {
+    if (!targetShop?.locale) return;
+    const prefix = targetShop.locale.split("_")[0].toLowerCase();
+    const detected = LOCALE_TO_LANG[prefix];
+    if (detected) {
+      setCreateConfig(c => ({ ...c, language: detected.lang, lang_code: detected.code }));
+    }
+  }, [targetShopId]);
   const runScan = async () => {
     if (!sourceShopId) return;
     setScanning(true); setScanResult(null);
@@ -10589,16 +10611,14 @@ const GEMINI_MODELS = [
   { value: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite (snel/goedkoop)" },
 ];
 const OPENAI_MODELS = [
-  { value: "gpt-5.4",              label: "gpt-5.4 (flagship)",          group: "GPT-5.4" },
-  { value: "gpt-5.4-pro",          label: "gpt-5.4-pro (pro reasoning)", group: "GPT-5.4" },
-  { value: "gpt-5.3-chat-latest",  label: "gpt-5.3 Instant (snel)",      group: "GPT-5.3" },
-  { value: "gpt-5.2",              label: "gpt-5.2 Thinking",            group: "GPT-5.2" },
-  { value: "gpt-5.2-chat-latest",  label: "gpt-5.2 Instant (snel)",      group: "GPT-5.2" },
-  { value: "gpt-5.2-pro",          label: "gpt-5.2 Pro",                 group: "GPT-5.2" },
-  { value: "gpt-5-mini",           label: "gpt-5-mini (budget)",         group: "GPT-5" },
-  { value: "gpt-5",                label: "gpt-5",                       group: "GPT-5" },
-  { value: "gpt-4o-mini",          label: "gpt-4o-mini",                 group: "Legacy" },
-  { value: "gpt-4o",               label: "gpt-4o",                      group: "Legacy" },
+  { value: "gpt-5.4",         label: "gpt-5.4 (nieuwste flagship)",      group: "GPT-5.4" },
+  { value: "gpt-5.4-pro",     label: "gpt-5.4-pro (dieper redeneren)",   group: "GPT-5.4" },
+  { value: "gpt-5.2",         label: "gpt-5.2",                          group: "GPT-5.2" },
+  { value: "gpt-5.2-pro",     label: "gpt-5.2-pro",                      group: "GPT-5.2" },
+  { value: "gpt-5-mini",      label: "gpt-5-mini (snel, goedkoop)",       group: "GPT-5" },
+  { value: "gpt-5-nano",      label: "gpt-5-nano (ultrasnelle taken)",    group: "GPT-5" },
+  { value: "gpt-4o",          label: "gpt-4o",                           group: "GPT-4o" },
+  { value: "gpt-4o-mini",     label: "gpt-4o mini",                      group: "GPT-4o" },
 ];
 
 const ProviderToggle = ({ value, onChange, geminiOnly = false, providers = null }) => {
@@ -10621,7 +10641,7 @@ const ProviderToggle = ({ value, onChange, geminiOnly = false, providers = null 
 
 const ModelSelect = ({ provider, value, onChange, compact = false }) => {
   const models = provider === "openai" ? OPENAI_MODELS : GEMINI_MODELS;
-  const defaultLabel = provider === "openai" ? "gpt-5.3 Instant (standaard)" : "gemini-2.5-flash (standaard)";
+  const defaultLabel = provider === "openai" ? "gpt-5.4 (standaard)" : "gemini-2.5-flash (standaard)";
   // Group openai models
   const groups = provider === "openai"
     ? [...new Set(models.map(m => m.group))]
@@ -10921,7 +10941,7 @@ const PlatformSettings = () => {
                              : contentProv === "openai"  ? OPENAI_MODELS
                              : GEMINI_MODELS;
           const defaultLabel = contentProv === "claude"  ? "claude-sonnet-4-6 (standaard)"
-                             : contentProv === "openai"  ? "gpt-4o-mini (standaard)"
+                             : contentProv === "openai"  ? "gpt-5.4 (standaard)"
                              : "gemini-2.5-flash (standaard)";
           return (
             <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--s1)", borderRadius: "var(--rd)", border: "1px solid var(--b1)" }}>
