@@ -32,7 +32,7 @@ export default async (req) => {
     if (anthropicKey) {
       try {
         const { data: settings } = await supabase.from('platform_settings').select('claude_model_content').eq('id', 1).single()
-        const model = settings?.claude_model_content || 'claude-sonnet-4-6'
+        const model = settings?.claude_model_content || 'claude-sonnet-4-6-20260217'
         const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },

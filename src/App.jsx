@@ -10600,9 +10600,10 @@ const AI_USE_CASES = [
 // Note: Content generatie uses content_provider (claude/gemini/openai) separately below
 
 const CLAUDE_MODELS = [
-  { value: "claude-sonnet-4-6",         label: "claude-sonnet-4-6 (aanbevolen)" },
-  { value: "claude-sonnet-4-5",         label: "claude-sonnet-4-5" },
-  { value: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5 (snel/goedkoop)" },
+  { value: "claude-opus-4-6-20260205",    label: "claude-opus-4.6 (krachtigst)"         },
+  { value: "claude-sonnet-4-6-20260217",  label: "claude-sonnet-4.6 (aanbevolen)"       },
+  { value: "claude-sonnet-4-5-20250929",  label: "claude-sonnet-4.5"                    },
+  { value: "claude-haiku-4-5-20251015",   label: "claude-haiku-4.5 (snel/goedkoop)"     },
 ];
 
 const GEMINI_MODELS = [
@@ -10940,7 +10941,7 @@ const PlatformSettings = () => {
           const modelOptions = contentProv === "claude"  ? CLAUDE_MODELS
                              : contentProv === "openai"  ? OPENAI_MODELS
                              : GEMINI_MODELS;
-          const defaultLabel = contentProv === "claude"  ? "claude-sonnet-4-6 (standaard)"
+          const defaultLabel = contentProv === "claude"  ? "claude-sonnet-4.6 (standaard)"
                              : contentProv === "openai"  ? "gpt-5.4 (standaard)"
                              : "gemini-2.5-flash (standaard)";
           return (

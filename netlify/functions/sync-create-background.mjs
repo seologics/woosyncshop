@@ -46,7 +46,7 @@ async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000, max
         // ANTHROPIC_API_KEY not configured — fall through to Gemini automatically
         // so product creation doesn't silently fail due to a missing env var
       } else {
-        const model = settings?.claude_model_content || 'claude-haiku-4-5-20251001'
+        const model = settings?.claude_model_content || 'claude-sonnet-4-6-20260217'
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },

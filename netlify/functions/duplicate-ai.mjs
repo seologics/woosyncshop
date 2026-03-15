@@ -50,7 +50,7 @@ export default async (req) => {
     const anthropicKey = Netlify.env.get('ANTHROPIC_API_KEY')
     if (!anthropicKey) return new Response(JSON.stringify({ error: 'Geen Anthropic API key geconfigureerd' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
 
-    const model = settings?.claude_model_content || 'claude-sonnet-4-6'
+    const model = settings?.claude_model_content || 'claude-sonnet-4-6-20260217'
 
     // First call
     const resp1 = await fetch('https://api.anthropic.com/v1/messages', {
