@@ -32,7 +32,7 @@ async function wooFetch(shop, endpoint, method = 'GET', body = null) {
 }
 
 // ── AI helper (Gemini + OpenAI support) ──────────────────────────────────────
-async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000) {
+async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000, maxTokens = 800) {
   const controller = new AbortController()
   const _timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -49,7 +49,7 @@ async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000) {
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model, max_tokens: 2000, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
+          body: JSON.stringify({ model, max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
         })
         if (!res.ok) { const e = await res.text(); throw new Error(`Claude error ${res.status}: ${e.slice(0, 200)}`) }
         return (await res.json()).content?.[0]?.text || '{}'
@@ -66,7 +66,7 @@ async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000) {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-          body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0.4, response_format: { type: 'json_object' } }),
+          body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0.4, response_format: { type: 'json_object' } }),
         })
         if (!res.ok) { const e = await res.text(); throw new Error(`OpenAI error ${res.status}: ${e.slice(0, 200)}`) }
         return (await res.json()).choices[0].message.content
@@ -80,7 +80,10 @@ async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000) {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
       method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }], generationConfig: { temperature: 0.4 } }),
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens },
+      }),
     })
     if (!res.ok) { const e = await res.text(); throw new Error(`Gemini error ${res.status}: ${e.slice(0, 200)}`) }
     return (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || '{}'
@@ -729,57 +732,41 @@ export default async (req) => {
         const srcShortDesc = (sourceProd.short_description || '').replace(/<[^>]+>/g, '').trim()
 
         let systemPrompt, userPrompt, aiTimeout = 20000
+        // Token budget: seo_write needs headroom for ~1 token per word of HTML + JSON wrapper
+        // translate/literal modes are much smaller — 800 tokens is fine
+        let maxTokens = 800
 
         if (text_mode === 'literal') {
           systemPrompt = `You are a product content translator. Translate EXACTLY to ${language} without any rewrites or additions. Return ONLY valid JSON, no markdown.`
-          userPrompt = `Translate these product fields to ${language}:
-${translate_fields.includes('name') ? `name: "${sourceProd.name}"` : ''}
-${translate_fields.includes('description') && srcDesc ? `description: "${srcDesc.slice(0, 800)}"` : ''}
-${translate_fields.includes('short_description') && srcShortDesc ? `short_description: "${srcShortDesc.slice(0, 400)}"` : ''}
-Return JSON: {"name":"...","description":"...","short_description":"..."}`
+          userPrompt = `Translate these product fields to ${language}:\n${translate_fields.includes('name') ? `name: "${sourceProd.name}"` : ''}\n${translate_fields.includes('description') && srcDesc ? `description: "${srcDesc.slice(0, 800)}"` : ''}\n${translate_fields.includes('short_description') && srcShortDesc ? `short_description: "${srcShortDesc.slice(0, 400)}"` : ''}\nReturn JSON: {"name":"...","description":"...","short_description":"..."}`
 
         } else if (text_mode === 'seo_write') {
-          aiTimeout = 25000
+          aiTimeout = 45000
+          // seo_word_count words of HTML needs ~1.5 tokens/word + JSON overhead + headers/lists markup
+          maxTokens = Math.min(Math.max(seo_word_count * 2 + 800, 2500), 8000)
           const headerInstruction = seo_use_headers ? 'Use H2, H3 and H4 headers to structure the text.' : 'Do not use headers.'
           const listInstruction   = seo_add_lists   ? 'Use bullet point lists (<ul><li>) for features and benefits.' : 'Do not use lists.'
           const customInstructions = (seo_custom_params || []).filter(Boolean).map((p, i) => `${i + 1}. ${p}`).join('\n')
-          systemPrompt = `You are an expert SEO copywriter specializing in plant and garden products. Write in ${language} with a ${tone} tone. Return ONLY valid JSON, no markdown.`
-          userPrompt = `Write an SEO-optimized WooCommerce product listing in ${language} for:
-
-Product name: "${sourceProd.name}"
-Attributes: ${attrContext || 'none'}
-Source description (for reference only, do NOT copy): "${srcDesc.slice(0, 500)}"
-
-REQUIREMENTS:
-- description: approximately ${seo_word_count} words, HTML formatted, rich and informative
-- ${headerInstruction}
-- ${listInstruction}
-- short_description: 2-3 sentences, compelling summary, max 60 words
-- name: translated product name
-${customInstructions ? `\nCUSTOM INSTRUCTIONS:\n${customInstructions}` : ''}
-
-Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}`
+          systemPrompt = `You are an expert SEO copywriter specializing in plant and garden products. Write in ${language} with a ${tone} tone. Return ONLY valid JSON, no markdown, no code fences.`
+          userPrompt = `Write an SEO-optimized WooCommerce product listing in ${language} for:\n\nProduct name: "${sourceProd.name}"\nAttributes: ${attrContext || 'none'}\nSource description (for reference only, do NOT copy): "${srcDesc.slice(0, 500)}"\n\nREQUIREMENTS:\n- description: approximately ${seo_word_count} words, HTML formatted, rich and informative\n- ${headerInstruction}\n- ${listInstruction}\n- short_description: 2-3 sentences, compelling summary, max 60 words, plain text (no HTML)\n- name: translated product name in ${language}\n${customInstructions ? `\nCUSTOM INSTRUCTIONS:\n${customInstructions}` : ''}\n\nReturn this exact JSON structure:\n{"name":"...","description":"<p>...</p>","short_description":"..."}`
 
         } else {
           // translate_rewrite (default)
+          maxTokens = 1200
           systemPrompt = `You are a product content writer. Translate to ${language} and adapt naturally for the ${language}-speaking market. Tone: ${tone}. Return ONLY valid JSON, no markdown.`
-          userPrompt = `Translate and rewrite for ${language} market:
-name: "${sourceProd.name}"
-${srcDesc ? `description: "${srcDesc.slice(0, 600)}"` : ''}
-${srcShortDesc ? `short_description: "${srcShortDesc.slice(0, 300)}"` : ''}
-
-Rules:
-- Expand description to at least 100 words if possible
-- short_description: 1-2 compelling sentences
-- Adapt naturally, not word-for-word
-Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}`
+          userPrompt = `Translate and rewrite for ${language} market:\nname: "${sourceProd.name}"\n${srcDesc ? `description: "${srcDesc.slice(0, 600)}"` : ''}\n${srcShortDesc ? `short_description: "${srcShortDesc.slice(0, 300)}"` : ''}\n\nRules:\n- Expand description to at least 100 words if possible\n- short_description: 1-2 compelling sentences, plain text (no HTML)\n- Adapt naturally, not word-for-word\nReturn JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}`
         }
 
         let translated = {}
         try {
-          const raw = await callAI(platformSettings, systemPrompt, userPrompt, aiTimeout)
+          const raw = await callAI(platformSettings, systemPrompt, userPrompt, aiTimeout, maxTokens)
           translated = safeJSON(raw) || {}
-          await log(supabase, 'info', `Text generated (${text_mode}) for ${sourceProd.name}: name=${!!translated.name}, desc=${!!translated.description}`, { user_id: user.id })
+          if (!translated.name && !translated.description) {
+            // safeJSON succeeded but returned empty object — log the raw AI output for debugging
+            await log(supabase, 'warn', `AI returned unparseable content for ${sourceProd.name}. Raw (first 300 chars): ${(raw || '').slice(0, 300)}`, { user_id: user.id })
+          } else {
+            await log(supabase, 'info', `Text generated (${text_mode}) for ${sourceProd.name}: name=${!!translated.name}, desc=${!!translated.description}, short=${!!translated.short_description}`, { user_id: user.id })
+          }
         } catch (aiErr) {
           await log(supabase, 'warn', `AI text generation failed for ${sourceProd.name}: ${aiErr.message}`, { user_id: user.id })
           translated = { name: sourceProd.name, description: srcDesc, short_description: srcShortDesc }
@@ -883,8 +870,12 @@ Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}
             const p = parseFloat(sourceProd.regular_price || sourceProd.price || 0)
             return price_markup_pct !== 0 && p > 0 ? String(Math.round(p * (1 + price_markup_pct / 100) * 100) / 100) : String(sourceProd.regular_price || sourceProd.price || '')
           })(),
-          description: translate_fields.includes('description') ? (translated.description || sourceProd.description || '') : (sourceProd.description || ''),
-          short_description: translate_fields.includes('short_description') ? (translated.short_description || sourceProd.short_description || '') : (sourceProd.short_description || ''),
+          description: translate_fields.includes('description')
+            ? (translated.description || srcDesc || '')
+            : (sourceProd.description || ''),
+          short_description: translate_fields.includes('short_description')
+            ? (translated.short_description || srcShortDesc || '')
+            : (sourceProd.short_description || ''),
           manage_stock: sourceProd.manage_stock || false,
           stock_quantity: sourceProd.stock_quantity ?? null,
           stock_status: sourceProd.stock_status || 'instock',
