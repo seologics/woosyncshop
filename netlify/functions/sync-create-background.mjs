@@ -18,12 +18,13 @@ async function log(supabase, level, message, meta = {}) {
 }
 
 // ── WooCommerce helpers ───────────────────────────────────────────────────────
-async function wooFetch(shop, endpoint, method = 'GET', body = null) {
+async function wooFetch(shop, endpoint, method = 'GET', body = null, timeoutMs = 15000) {
   const base = shop.site_url.replace(/\/$/, '')
   const creds = btoa(`${shop.consumer_key}:${shop.consumer_secret}`)
   const opts = {
     method,
     headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
   }
   if (body && method !== 'GET') opts.body = JSON.stringify(body)
   const res = await fetch(`${base}/wp-json/wc/v3/${endpoint}`, opts)
@@ -696,6 +697,24 @@ async function processImages(sourceImages, targetShop, productName, language, im
   return results
 }
 
+// ── Build image payload for WC sideloading (translate / ai_vision modes) ─────
+// Passes source URLs directly — WooCommerce fetches and imports them server-side.
+// No download/upload here; SEO filename and alt text are set from the translated name.
+function buildImagePayload(sourceImages, productName) {
+  if (!Array.isArray(sourceImages) || !sourceImages.length) return []
+  const nameSlug = productName.toLowerCase()
+    .replace(/[äàáâã]/g, 'a').replace(/[ëèéê]/g, 'e').replace(/[ïìíî]/g, 'i')
+    .replace(/[öòóô]/g, 'o').replace(/[üùúû]/g, 'u').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+  return sourceImages
+    .filter(img => img?.src)
+    .map((img, i) => ({
+      src:  img.src,
+      alt:  i === 0 ? productName : `${productName} ${i + 1}`,
+      name: i === 0 ? nameSlug   : `${nameSlug}-${i + 1}`,
+    }))
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
@@ -759,18 +778,28 @@ export default async (req) => {
     const geminiKey   = platformSettings?.gemini_api_key || null
     const geminiModel = platformSettings?.ai_model_image || 'gemini-2.5-flash'
 
-    // Detect target shop image dimensions once for all products (if generate mode)
+    await log(supabase, 'info', `Sync create started: ${sourceProducts.length} products → ${targetShop.name} (${language})`, { user_id: user.id, source_shop_id, target_shop_id })
+
+    // Mark job as running immediately — before any per-product work —
+    // so the frontend exits "Voorbereiden" state right away
+    await supabase.from('sync_jobs').update({
+      status: 'running',
+      done: 0,
+      total: sourceProducts.length,
+      current_product: 'Attributen en categorieën ophalen...',
+      updated_at: new Date().toISOString(),
+    }).eq('id', job_id)
+
+    // Detect target image dimensions once (only in generate mode + target_shop size)
+    // Moved here (after the running update) so it doesn't block the 0/N display
     let targetDimensions = null
     if (image_mode === 'generate') {
       if (image_generate_size === 'target_shop') {
         targetDimensions = await detectTargetImageSize(targetShop)
         await log(supabase, 'info', `Target image dimensions: ${targetDimensions ? `${targetDimensions.width}×${targetDimensions.height}` : 'not detected, using 800×800'}`, { user_id: user.id })
       }
-      // WooSyncShop default or fallback when target detection fails
       if (!targetDimensions) targetDimensions = { width: 800, height: 800 }
     }
-
-    await log(supabase, 'info', `Sync create started: ${sourceProducts.length} products → ${targetShop.name} (${language})`, { user_id: user.id, source_shop_id, target_shop_id })
 
     const results = { created: [], failed: [], skipped: [] }
 
