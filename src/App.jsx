@@ -5905,6 +5905,12 @@ function AnalyticsView({ shops, user, analyticsCache, onAnalyticsCacheUpdate }) 
   const [insights, setInsights]               = useState(null);
   const [selectedSourceGroup, setSelectedSourceGroup] = useState(null);
 
+  // ── Search Console state ─────────────────────────────────────────────────
+  const [scData,    setScData]    = useState(null);
+  const [scLoading, setScLoading] = useState(false);
+  const [scError,   setScError]   = useState(null);
+  const [scShopId,  setScShopId]  = useState(null); // which shop's SC data is loaded
+
   const fmt = (n) => "€" + (n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtShort = (n) => n >= 1000 ? "€" + (n / 1000).toFixed(1) + "k" : fmt(n);
 
@@ -5980,6 +5986,42 @@ function AnalyticsView({ shops, user, analyticsCache, onAnalyticsCacheUpdate }) 
   }, [data, range, cacheKey]);
 
   useEffect(() => { if (data && !insights && !insightsUnavailable) fetchInsights(); }, [data]);
+
+  // ── Search Console fetch ─────────────────────────────────────────────────
+  const fetchScData = useCallback(async (shopId, forceRange) => {
+    const effectiveRange = forceRange || range;
+    // Find first SC-connected shop if "all" is selected
+    const targetShopId = shopId && shopId !== "all"
+      ? shopId
+      : (shops || []).find(s => s.sc_connected)?.id;
+    if (!targetShopId) return;
+
+    setScLoading(true);
+    setScError(null);
+    try {
+      const token = await getToken();
+      const params = new URLSearchParams({ shop_id: targetShopId, range: effectiveRange });
+      const res = await fetch(`/api/search-console-fetch?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let json;
+      try { json = await res.json(); } catch { throw new Error("Server timeout bij SC ophalen."); }
+      if (!res.ok) throw new Error(json?.error || `SC fout (HTTP ${res.status})`);
+      setScData(json);
+      setScShopId(targetShopId);
+    } catch (e) {
+      setScError(e.message);
+    } finally {
+      setScLoading(false);
+    }
+  }, [shops, range]);
+
+  // Auto-load SC data when a SC-connected shop is in view
+  useEffect(() => {
+    if (!googleConnections.sc) return;
+    if (scData && scShopId === (selectedShop !== "all" ? selectedShop : (shops || []).find(s => s.sc_connected)?.id) && scData.range === range) return;
+    fetchScData(selectedShop, range);
+  }, [googleConnections.sc, selectedShop, range]);
 
   const displayData = useMemo(() => {
     if (!data) return null;
@@ -6386,13 +6428,153 @@ function AnalyticsView({ shops, user, analyticsCache, onAnalyticsCacheUpdate }) 
           <div style={S.cardTitle}>
             🔍 Organische zoekwoorden
             {googleConnections.sc && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 99, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontWeight: 600 }}>● Live</span>}
+            {googleConnections.sc && scData && !scLoading && (
+              <button onClick={() => fetchScData(selectedShop, range)} style={{ marginLeft: "auto", fontSize: 11, padding: "3px 8px", borderRadius: 99, border: "1px solid var(--b1)", background: "var(--s2)", color: "var(--mx)", cursor: "pointer" }}>🔄</button>
+            )}
           </div>
           {!googleConnections.sc ? (
             <ConnectCTA service="sc" icon="🔍" title="Koppel Search Console" description="Bekijk welke zoekwoorden organische bestellingen genereren, inclusief impressies, CTR en positie." />
-          ) : (
-            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--mx)" }}>
-              Search Console data wordt geladen in Phase 3.
+          ) : scLoading ? (
+            <div style={{ padding: "32px 0", textAlign: "center" }}>
+              <div style={{ width: 22, height: 22, border: "3px solid var(--b1)", borderTopColor: "#22c55e", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 8px" }} />
+              <div style={{ fontSize: 12, color: "var(--mx)" }}>Search Console data ophalen…</div>
             </div>
+          ) : scError ? (
+            <div style={{ padding: "18px 0" }}>
+              <div style={{ fontSize: 12, color: "var(--er)", marginBottom: 10 }}>⚠️ {scError}</div>
+              <button onClick={() => fetchScData(selectedShop, range)} style={{ fontSize: 12, padding: "6px 14px", borderRadius: 99, border: "1px solid var(--er)", background: "transparent", color: "var(--er)", cursor: "pointer" }}>Opnieuw proberen</button>
+            </div>
+          ) : scData ? (() => {
+            const { summary, queries, pages, trend, opportunities } = scData;
+            return (
+              <>
+                {/* SC KPI row */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 14 }}>
+                  {[
+                    ["Klikken", summary.total_clicks.toLocaleString("nl-NL"), "#22c55e"],
+                    ["Impressies", summary.total_impressions.toLocaleString("nl-NL"), "#60A5FA"],
+                    ["Gem. CTR", summary.avg_ctr + "%", "#F59E0B"],
+                    ["Gem. positie", summary.avg_position, "#A78BFA"],
+                  ].map(([label, val, color]) => (
+                    <div key={label} style={{ padding: "10px 12px", borderRadius: "var(--rd)", background: "var(--bg)", border: "1px solid var(--b1)", textAlign: "center" }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-h)", color, letterSpacing: -0.5 }}>{val}</div>
+                      <div style={{ fontSize: 10, color: "var(--mx)", marginTop: 2 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Click trend mini-chart */}
+                {trend.length > 1 && (() => {
+                  const maxClicks = Math.max(...trend.map(t => t.clicks), 1);
+                  return (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 11, color: "var(--mx)", marginBottom: 6, fontWeight: 600 }}>Klikken over tijd</div>
+                      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 48 }}>
+                        {trend.map((t, i) => (
+                          <div key={i} title={`${t.date}: ${t.clicks} klikken`}
+                            style={{ flex: 1, minWidth: 2, height: `${Math.max((t.clicks / maxClicks) * 100, 4)}%`, background: "#22c55e", borderRadius: "2px 2px 0 0", opacity: 0.8 }} />
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--mx)", marginTop: 3 }}>
+                        <span>{trend[0]?.date?.slice(5)}</span>
+                        <span>{trend[trend.length - 1]?.date?.slice(5)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Opportunity highlights */}
+                {opportunities.length > 0 && (
+                  <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: "var(--rd)", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#F59E0B", marginBottom: 8 }}>🎯 Kansen — hoge impressies, lage CTR (positie 4–20)</div>
+                    {opportunities.map((opp, i) => (
+                      <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", padding: "5px 0", borderBottom: i < opportunities.length - 1 ? "1px solid rgba(245,158,11,0.15)" : "none" }}>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)" }}>{opp.query}</div>
+                          <div style={{ fontSize: 10, color: "var(--mx)" }}>pos. {opp.position} · {opp.impressions.toLocaleString("nl-NL")} impressies · {opp.ctr}% CTR</div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          {opp.estimated_extra_clicks > 0 && (
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e" }}>+{opp.estimated_extra_clicks} klikken/mnd</div>
+                          )}
+                          <div style={{ fontSize: 10, color: "var(--mx)" }}>bij top-3</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Top queries table */}
+                {queries.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--tx)", marginBottom: 8 }}>Top zoekwoorden</div>
+                    <div style={{ borderRadius: "var(--rd)", overflow: "hidden", border: "1px solid var(--b1)" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: "var(--s2)" }}>
+                            {["Zoekwoord", "Klikken", "Impressies", "CTR", "Positie"].map(h => (
+                              <th key={h} style={{ padding: "6px 10px", textAlign: h === "Zoekwoord" ? "left" : "right", fontWeight: 600, color: "var(--mx)", fontSize: 10, whiteSpace: "nowrap" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {queries.map((q, i) => {
+                            const posColor = q.position <= 3 ? "#22c55e" : q.position <= 10 ? "#F59E0B" : "var(--mx)";
+                            return (
+                              <tr key={i} style={{ borderTop: "1px solid var(--b1)", background: i % 2 === 0 ? "transparent" : "var(--s2)" }}>
+                                <td style={{ padding: "6px 10px", color: "var(--tx)", fontWeight: 500, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.query}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700, color: "#22c55e" }}>{q.clicks.toLocaleString("nl-NL")}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", color: "#60A5FA" }}>{q.impressions.toLocaleString("nl-NL")}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", color: "#F59E0B" }}>{q.ctr}%</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700, color: posColor }}>#{q.position}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Top landing pages */}
+                {pages.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--tx)", marginBottom: 8 }}>Top landingspagina's</div>
+                    <div style={{ borderRadius: "var(--rd)", overflow: "hidden", border: "1px solid var(--b1)" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: "var(--s2)" }}>
+                            {["Pagina", "Klikken", "Positie"].map(h => (
+                              <th key={h} style={{ padding: "6px 10px", textAlign: h === "Pagina" ? "left" : "right", fontWeight: 600, color: "var(--mx)", fontSize: 10 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pages.map((p, i) => (
+                            <tr key={i} style={{ borderTop: "1px solid var(--b1)", background: i % 2 === 0 ? "transparent" : "var(--s2)" }}>
+                              <td style={{ padding: "6px 10px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                <a href={p.full_url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--pr-h)", textDecoration: "none", fontSize: 12, fontWeight: 500 }}>{p.page}</a>
+                              </td>
+                              <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700, color: "#22c55e" }}>{p.clicks.toLocaleString("nl-NL")}</td>
+                              <td style={{ padding: "6px 10px", textAlign: "right", color: q => q.position <= 3 ? "#22c55e" : "var(--mx)" }}>
+                                <span style={{ color: p.position <= 3 ? "#22c55e" : p.position <= 10 ? "#F59E0B" : "var(--mx)", fontWeight: 600 }}>#{p.position}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* SC site label */}
+                <div style={{ fontSize: 10, color: "var(--mx)", marginTop: 10 }}>
+                  Bron: {scData.sc_site} · {scData.date_range?.start} – {scData.date_range?.end}
+                </div>
+              </>
+            );
+          })() : (
+            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--mx)" }}>Geen Search Console data beschikbaar voor dit bereik.</div>
           )}
         </div>
 

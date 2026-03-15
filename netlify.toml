@@ -23,6 +23,9 @@
 [functions."analytics-insights"]
   timeout = 26
 
+[functions."search-console-fetch"]
+  timeout = 26
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
