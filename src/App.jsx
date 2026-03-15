@@ -7027,13 +7027,9 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
     try {
       const token = await getToken();
 
-      // Create a job row in Supabase first
-      const { data: jobRow, error: jobErr } = await supabase
-        .from("sync_jobs")
-        .insert({ user_id: user.id, status: "pending", total: toCreate.length, done: 0, current_product: null, result: null, error: null })
-        .select("id").single();
-      if (jobErr || !jobRow) throw new Error("Kon geen job aanmaken: " + (jobErr?.message || "unknown"));
-      const jobId = jobRow.id;
+      // Generate job UUID client-side — background function creates the sync_jobs row
+      // using the service role key (browser anon-key insert was unreliable)
+      const jobId = crypto.randomUUID();
 
       // Fire background function (returns 202 immediately)
       const res = await fetch("/api/sync-create", {

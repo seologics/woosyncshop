@@ -739,6 +739,21 @@ export default async (req) => {
   }
   if (!job_id) return json({ error: 'job_id required' }, 400)
 
+  // Create/upsert the sync_jobs row using the service role key.
+  // Browser anon-key insert is unreliable; frontend generates a UUID and passes it here.
+  await supabase.from('sync_jobs').upsert({
+    id: job_id,
+    user_id: user.id,
+    status: 'pending',
+    total: sourceProducts.length,
+    done: 0,
+    current_product: null,
+    result: null,
+    error: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' })
+
   const {
     language = 'Dutch',
     translate_fields = ['name', 'description', 'short_description', 'attributes'],
