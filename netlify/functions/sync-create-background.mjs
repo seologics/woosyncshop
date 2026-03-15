@@ -111,6 +111,71 @@ async function detectSeoPlugin(shop) {
   return null
 }
 
+// ── Tier plugin detection + WQM ↔ WPC PBQ conversion ─────────────────────────
+function detectTierPlugin(activePlugins = []) {
+  const ids = Array.isArray(activePlugins) ? activePlugins : []
+  if (ids.includes('wqm') || ids.includes('woocommerce-quantity-manager')) return 'wqm'
+  if (ids.includes('wpc_pbq') || ids.includes('wpc-price-by-quantity-for-woocommerce')) return 'wpcpq'
+  return null
+}
+
+function detectTierPluginFromMeta(metaData = []) {
+  const keys = (metaData || []).map(m => m.key)
+  if (keys.includes('_wqm_tiers')) return 'wqm'
+  if (keys.includes('wpcpq_prices')) return 'wpcpq'
+  return null
+}
+
+function parseMeta(value) {
+  if (!value) return null
+  if (typeof value !== 'string') return value
+  try { return JSON.parse(value) } catch { return value }
+}
+
+// WQM _wqm_tiers → WPC PBQ wpcpq_prices
+// WQM:    { type: 'fixed'|'percent', tiers: { '0': { qty, amt }, ... } }
+// WPC PBQ: [ { qty, price: '9.99'|'', discount: '10'|'' }, ... ]
+function wqmToWpcpq(wqmMeta, markupPct = 0) {
+  if (!wqmMeta) return null
+  const raw = wqmMeta.tiers
+    ? (Array.isArray(wqmMeta.tiers) ? wqmMeta.tiers : Object.values(wqmMeta.tiers))
+    : []
+  if (!raw.length) return null
+  const tierType = wqmMeta.type || 'fixed'
+  const factor   = 1 + markupPct / 100
+  const prices = raw.map(t => {
+    const qty = Number(t.qty) || 1
+    if (tierType === 'percent') return { qty, price: '', discount: String(t.amt ?? '') }
+    const n     = parseFloat(String(t.amt ?? '0').replace(',', '.')) || 0
+    const final = markupPct !== 0 ? Math.round(n * factor * 100) / 100 : n
+    return { qty, price: String(final), discount: '' }
+  })
+  return prices
+}
+
+// WPC PBQ wpcpq_prices → WQM _wqm_tiers
+function wpcpqToWqm(wpcpqMeta, markupPct = 0) {
+  if (!Array.isArray(wpcpqMeta) || !wpcpqMeta.length) return null
+  const factor = 1 + markupPct / 100
+  const firstWithPrice = wpcpqMeta.find(t => t.price && String(t.price).trim() !== '')
+  const tierType = firstWithPrice ? 'fixed' : 'percent'
+  const tiersObj = {}
+  wpcpqMeta.forEach((t, i) => {
+    const qty = Number(t.qty) || 1
+    if (tierType === 'fixed' && t.price && String(t.price).trim() !== '') {
+      const n     = parseFloat(String(t.price).replace(',', '.')) || 0
+      const final = markupPct !== 0 ? Math.round(n * factor * 100) / 100 : n
+      tiersObj[String(i)] = { qty, amt: String(final) }
+    } else if (tierType === 'percent' && t.discount && String(t.discount).trim() !== '') {
+      tiersObj[String(i)] = { qty, amt: String(t.discount) }
+    } else {
+      tiersObj[String(i)] = { qty, amt: String(t.price || t.discount || '0') }
+    }
+  })
+  if (!Object.keys(tiersObj).length) return null
+  return { type: tierType, tiers: tiersObj }
+}
+
 // ── Smart attribute + category mapping ────────────────────────────────────────
 // Replaces simple slug-match with full AI reasoning:
 //   1. Fetch all target attributes WITH their existing terms
@@ -689,6 +754,8 @@ export default async (req) => {
     const { data: platformSettings } = await supabase.from('platform_settings').select('*').eq('id', 1).single()
 
     const seoPlugin = await detectSeoPlugin(targetShop)
+    const srcTierPlugin = detectTierPlugin(sourceShop.active_plugins)
+    const tgtTierPlugin = detectTierPlugin(targetShop.active_plugins)
     const geminiKey   = platformSettings?.gemini_api_key || null
     const geminiModel = platformSettings?.ai_model_image || 'gemini-2.5-flash'
 
@@ -832,26 +899,64 @@ export default async (req) => {
           meta_data.push({ key: '_wss_identifier', value: sourceProd.sku || String(sourceProd.id) })
         }
 
-        // Copy WQM meta if present in source (apply price markup to tiers)
-        const wqmKeys = ['_wqm_tiers', '_wqm_settings', '_wqm_min_quantity', '_wqm_max_quantity', '_wqm_step', '_wqm_group_of']
-        for (const wqmKey of wqmKeys) {
-          const wqmMeta = sourceProd.meta_data?.find(m => m.key === wqmKey)
-          if (!wqmMeta) continue
-          if (wqmKey === '_wqm_tiers' && price_markup_pct !== 0 && wqmMeta.value && typeof wqmMeta.value === 'object') {
-            const tiersData = JSON.parse(JSON.stringify(wqmMeta.value))
+        // ── Tier pricing: convert between WQM and WPC PBQ if needed ────────────
+        // Detect source plugin from meta if active_plugins isn't populated yet
+        const resolvedSrcPlugin = srcTierPlugin || detectTierPluginFromMeta(sourceProd.meta_data || [])
+        const resolvedTgtPlugin = tgtTierPlugin
+
+        const wqmRaw    = parseMeta((sourceProd.meta_data || []).find(m => m.key === '_wqm_tiers')?.value)
+        const wpcpqRaw  = parseMeta((sourceProd.meta_data || []).find(m => m.key === 'wpcpq_prices')?.value)
+        const wqmSettings = parseMeta((sourceProd.meta_data || []).find(m => m.key === '_wqm_settings')?.value)
+
+        if (resolvedSrcPlugin === 'wqm' && resolvedTgtPlugin === 'wpcpq' && wqmRaw) {
+          // WQM → WPC PBQ
+          const converted = wqmToWpcpq(wqmRaw, price_markup_pct)
+          if (converted) {
+            meta_data.push({ key: 'wpcpq_prices', value: converted })
+            meta_data.push({ key: 'wpcpq_enable', value: 'yes' })  // ensure plugin activates for this product
+            await log(supabase, 'info', `Tier conversion: WQM→WPC PBQ for ${sourceProd.name} (${converted.length} tiers)`, { user_id: user.id })
+          }
+        } else if (resolvedSrcPlugin === 'wpcpq' && resolvedTgtPlugin === 'wqm' && wpcpqRaw) {
+          // WPC PBQ → WQM
+          const converted = wpcpqToWqm(wpcpqRaw, price_markup_pct)
+          if (converted) {
+            meta_data.push({ key: '_wqm_tiers', value: converted })
+            if (wqmSettings) meta_data.push({ key: '_wqm_settings', value: wqmSettings })
+            await log(supabase, 'info', `Tier conversion: WPC PBQ→WQM for ${sourceProd.name} (${Object.keys(converted.tiers || {}).length} tiers)`, { user_id: user.id })
+          }
+        } else if ((resolvedSrcPlugin === 'wqm' || resolvedTgtPlugin === 'wqm' || !resolvedTgtPlugin) && wqmRaw) {
+          // WQM → WQM (same plugin or unknown target — copy with markup)
+          const tiersData = JSON.parse(JSON.stringify(wqmRaw))
+          if (price_markup_pct !== 0 && (tiersData.type || 'fixed') === 'fixed') {
             const tierList = tiersData.tiers
             if (tierList && typeof tierList === 'object') {
               for (const key of Object.keys(tierList)) {
-                if (tierList[key].amt != null) {
-                  const n = parseFloat(tierList[key].amt)
-                  if (!isNaN(n)) tierList[key].amt = String(Math.round(n * (1 + price_markup_pct / 100) * 100) / 100)
-                }
+                const n = parseFloat(String(tierList[key].amt ?? '0').replace(',', '.'))
+                if (!isNaN(n)) tierList[key].amt = String(Math.round(n * (1 + price_markup_pct / 100) * 100) / 100)
               }
             }
-            meta_data.push({ key: wqmKey, value: tiersData })
-          } else {
-            meta_data.push({ key: wqmKey, value: wqmMeta.value })
           }
+          meta_data.push({ key: '_wqm_tiers', value: tiersData })
+          if (wqmSettings) meta_data.push({ key: '_wqm_settings', value: wqmSettings })
+        } else if ((resolvedSrcPlugin === 'wpcpq' || resolvedTgtPlugin === 'wpcpq' || !resolvedTgtPlugin) && wpcpqRaw) {
+          // WPC PBQ → WPC PBQ (apply markup)
+          const factor = 1 + price_markup_pct / 100
+          const marked = wpcpqRaw.map(t => {
+            if (price_markup_pct !== 0 && t.price && String(t.price).trim() !== '') {
+              const n = parseFloat(String(t.price).replace(',', '.')) || 0
+              return { ...t, price: String(Math.round(n * factor * 100) / 100) }
+            }
+            return { ...t }
+          })
+          meta_data.push({ key: 'wpcpq_prices', value: marked })
+          meta_data.push({ key: 'wpcpq_enable', value: 'yes' })
+        }
+
+        // Copy remaining non-tier WQM meta (min/max qty, step, group_of)
+        const nonTierWqmKeys = ['_wqm_min_quantity', '_wqm_max_quantity', '_wqm_step', '_wqm_group_of']
+        for (const k of nonTierWqmKeys) {
+          const entry = (sourceProd.meta_data || []).find(m => m.key === k)
+          if (entry) meta_data.push({ key: k, value: entry.value })
         }
 
         // Categories: use AI-determined target category IDs.
