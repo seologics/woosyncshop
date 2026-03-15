@@ -6846,7 +6846,7 @@ const StockSyncView = ({ shops, user, activeSite, wooCall }) => {
   // ── Step 4: Load source products ───────────────────────────────────────────
   // Paginate all products from a shop via woo-proxy (100/page)
   const fetchAllProducts = async (shopId, token) => {
-    const FIELD_LIST = "id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,categories,images,attributes,meta_data";
+    const FIELD_LIST = "id,name,sku,type,regular_price,sale_price,price,stock_quantity,manage_stock,stock_status,description,short_description,categories,images,attributes,meta_data";
     let page = 1, all = [];
     while (true) {
       const res = await fetch("/api/woo", {

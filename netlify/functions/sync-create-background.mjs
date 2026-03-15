@@ -36,39 +36,46 @@ async function callAI(settings, systemPrompt, userPrompt, timeoutMs = 25000) {
   const controller = new AbortController()
   const _timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const provider = settings?.content_provider || 'claude'
+    const provider = settings?.content_provider || 'gemini'
 
-    // Claude (Anthropic)
+    // ── Claude (Anthropic) ────────────────────────────────────────────────────
     if (provider === 'claude') {
       const apiKey = Netlify.env.get('ANTHROPIC_API_KEY')
-      if (!apiKey) throw new Error('No Anthropic API key configured')
-      const model = settings?.claude_model_content || 'claude-haiku-4-5-20251001'
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model, max_tokens: 2000, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
-      })
-      if (!res.ok) { const e = await res.text(); throw new Error(`Claude error ${res.status}: ${e.slice(0, 200)}`) }
-      return (await res.json()).content?.[0]?.text || '{}'
+      if (!apiKey) {
+        // ANTHROPIC_API_KEY not configured — fall through to Gemini automatically
+        // so product creation doesn't silently fail due to a missing env var
+      } else {
+        const model = settings?.claude_model_content || 'claude-haiku-4-5-20251001'
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST', signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({ model, max_tokens: 2000, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
+        })
+        if (!res.ok) { const e = await res.text(); throw new Error(`Claude error ${res.status}: ${e.slice(0, 200)}`) }
+        return (await res.json()).content?.[0]?.text || '{}'
+      }
     }
 
-    // OpenAI
+    // ── OpenAI ────────────────────────────────────────────────────────────────
     if (provider === 'openai') {
       const apiKey = settings?.openai_api_key || Netlify.env.get('OPENAI_API_KEY')
-      if (!apiKey) throw new Error('No OpenAI API key configured')
-      const model = settings?.openai_model_content || 'gpt-4o-mini'
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST', signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0.4, response_format: { type: 'json_object' } }),
-      })
-      if (!res.ok) { const e = await res.text(); throw new Error(`OpenAI error ${res.status}: ${e.slice(0, 200)}`) }
-      return (await res.json()).choices[0].message.content
+      if (!apiKey) {
+        // Fall through to Gemini
+      } else {
+        const model = settings?.openai_model_content || 'gpt-4o-mini'
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST', signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0.4, response_format: { type: 'json_object' } }),
+        })
+        if (!res.ok) { const e = await res.text(); throw new Error(`OpenAI error ${res.status}: ${e.slice(0, 200)}`) }
+        return (await res.json()).choices[0].message.content
+      }
     }
 
-    // Gemini
+    // ── Gemini (default / fallback for all providers without a configured key) ─
     const geminiKey = settings?.gemini_api_key
-    if (!geminiKey) throw new Error('No Gemini API key configured')
+    if (!geminiKey) throw new Error('Geen AI API key geconfigureerd. Voer een Gemini API key in bij Platform instellingen.')
     const model = settings?.ai_model_translation || 'gemini-2.5-flash'
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
       method: 'POST', signal: controller.signal,
@@ -341,12 +348,41 @@ Return: {"translations":[{"attribute":"translated name","terms":["translated val
     }
 
     for (const attr of uncoveredAttrs) {
-      const slug = attr.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-      const existingBySlug = targetAttrsWithTerms.find(a => a.slug === slug)
+      const translatedAttrName = cacheMap[attr.name] || attr.name
+      const slug = translatedAttrName.toLowerCase()
+        .replace(/[äàáâã]/g, 'a').replace(/[ëèéê]/g, 'e').replace(/[ïìíî]/g, 'i')
+        .replace(/[öòóô]/g, 'o').replace(/[üùúû]/g, 'u').replace(/ß/g, 'ss')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
+      // Try slug match first, then normalized name match (catches cross-language near-matches)
+      let existingAttr = targetAttrsWithTerms.find(a => a.slug === slug)
+      if (!existingAttr) {
+        const norm = translatedAttrName.toLowerCase().trim()
+        existingAttr = targetAttrsWithTerms.find(a => a.name.toLowerCase().trim() === norm)
+      }
+
+      let targetAttrId = existingAttr?.id || null
+
+      // If still no match: create a new global attribute in the target shop
+      // Never silently drop an attribute — always try to create it
+      if (!targetAttrId) {
+        try {
+          const created = await wooFetch(targetShop, 'products/attributes', 'POST', {
+            name: translatedAttrName, slug, type: 'select', order_by: 'menu_order', has_archives: false,
+          })
+          if (created?.id) {
+            targetAttrId = created.id
+            targetAttrsWithTerms.push({ id: created.id, name: translatedAttrName, slug, terms: [] })
+          }
+        } catch (createErr) {
+          if (supabase && userId) await log(supabase, 'warn', `Fallback attr create failed "${translatedAttrName}": ${createErr.message}`, { user_id: userId })
+        }
+      }
+
       attrResults.push({
         source_name: attr.name,
-        target_id: existingBySlug?.id || null,
-        target_name: cacheMap[attr.name] || attr.name, // now translated if AI ran
+        target_id: targetAttrId,
+        target_name: translatedAttrName,
         options: (attr.options || []).map(v => cacheMap[v] || v),
       })
     }
@@ -831,10 +867,12 @@ Return JSON: {"name":"...","description":"<p>...</p>","short_description":"..."}
           }
         }
 
-        // Categories: use AI-determined target category IDs, fallback to source slugs
+        // Categories: use AI-determined target category IDs.
+        // Fallback when AI fails: don't use source slugs (they're in source language and won't
+        // match target shop slugs). Leave categories empty — better than assigning wrong ones.
         const categories = categoryIds.length > 0
           ? categoryIds.map(id => ({ id }))
-          : (sourceProd.categories || []).map(c => ({ slug: c.slug }))
+          : []
 
         const productPayload = {
           name: translate_fields.includes('name') ? (translated.name || sourceProd.name) : sourceProd.name,

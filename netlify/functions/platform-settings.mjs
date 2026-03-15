@@ -21,7 +21,7 @@ export default async (req) => {
       }
       // Public fields (needed by TrackingInjector on frontend without auth)
       const publicFields = 'gtm_id, ga4_id, gads_conversion_id, gads_conversion_label, fb_pixel_id, tt_pixel_id'
-      const adminFields = `${publicFields}, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email, openai_api_key, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization`
+      const adminFields = `${publicFields}, gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email, openai_api_key, content_provider, claude_model_content, openai_model_content, ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization, ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization`
       const { data, error } = await supabase.from('platform_settings').select(isAdmin ? adminFields : publicFields).eq('id', 1).single()
       if (error) return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
       return new Response(JSON.stringify(data || {}), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -38,7 +38,7 @@ export default async (req) => {
         gtm_id, ga4_id, gads_conversion_id, gads_conversion_label,
         fb_pixel_id, tt_pixel_id,
         gemini_api_key, tinypng_api_key, mollie_api_key, contact_notification_email,
-        openai_api_key,
+        openai_api_key, content_provider, claude_model_content, openai_model_content,
         ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
         ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization,
       } = body
@@ -51,6 +51,7 @@ export default async (req) => {
         mollie_api_key: mollie_api_key ? '***' : null,
         openai_api_key: openai_api_key ? '***' : null,
         contact_notification_email,
+        content_provider, claude_model_content, openai_model_content,
         ai_provider_matching, ai_provider_translation, ai_provider_image, ai_provider_normalization,
         ai_model_matching, ai_model_translation, ai_model_image, ai_model_normalization,
       }).filter(([, v]) => v !== undefined).map(([k]) => k)
@@ -63,6 +64,9 @@ export default async (req) => {
         gads_conversion_id: gads_conversion_id || null, gads_conversion_label: gads_conversion_label || null,
         fb_pixel_id: fb_pixel_id || null, tt_pixel_id: tt_pixel_id || null,
         contact_notification_email: contact_notification_email || null,
+        content_provider: content_provider || 'gemini',
+        claude_model_content: claude_model_content || null,
+        openai_model_content: openai_model_content || null,
         ai_provider_matching: ai_provider_matching || 'gemini',
         ai_provider_translation: ai_provider_translation || 'gemini',
         ai_provider_image: ai_provider_image || 'gemini',
